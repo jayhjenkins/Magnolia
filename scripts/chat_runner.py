@@ -378,6 +378,29 @@ def normalize(raw_event):
                     "verb": block.get("name", ""),
                     "target": target,
                 })
+                # Adapt build chat: two interactive tools get a SECOND, richer
+                # event ALONGSIDE the tool_step (chat.js ignores unknown kinds,
+                # so the existing chat panel is unaffected). These are the only
+                # two stream primitives the Adapt design renders as cards. The
+                # extra event is best-effort: when claude -p does NOT surface
+                # these as structured tool_use (it may just write prose), no card
+                # appears and the conversational flow carries the UX.
+                name = block.get("name", "")
+                if name == "AskUserQuestion":
+                    out.append({
+                        "kind": "ask",
+                        "role": "assistant",
+                        # The CLI nests the prompts under `questions`; pass it
+                        # through verbatim so the UI can shape options/labels.
+                        "questions": tool_input.get("questions") or [],
+                    })
+                elif name == "ExitPlanMode":
+                    out.append({
+                        "kind": "plan",
+                        "role": "assistant",
+                        # Plan text lives under `plan` in the block input.
+                        "body": tool_input.get("plan") or "",
+                    })
         return out
 
     if etype == "result":

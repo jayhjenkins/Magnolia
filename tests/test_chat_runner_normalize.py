@@ -57,3 +57,61 @@ def test_result_carries_permission_denials():
 def test_result_without_denials_defaults_to_empty_list():
     out = cr.normalize({"type": "result", "session_id": "s", "usage": {}})
     assert out[0]["permission_denials"] == []
+
+
+def test_ask_user_question_also_emits_ask_event():
+    # The Adapt build chat renders AskUserQuestion as a "Magnolia asks" card.
+    # normalize keeps the normal tool_step AND adds a richer `ask` event carrying
+    # the questions array. chat.js ignores unknown kinds, so the chat panel is
+    # unaffected.
+    raw = {
+        "type": "assistant",
+        "message": {"content": [
+            {"type": "tool_use", "name": "AskUserQuestion", "input": {
+                "questions": [
+                    {"question": "Which store?",
+                     "options": [{"label": "Shopify", "description": "Your main store"},
+                                 {"label": "Etsy", "description": "The craft shop"}]},
+                ],
+            }},
+        ]},
+    }
+    out = cr.normalize(raw)
+    kinds = [e["kind"] for e in out]
+    assert kinds == ["tool_step", "ask"]
+    ask = out[1]
+    assert ask["questions"][0]["question"] == "Which store?"
+    assert len(ask["questions"][0]["options"]) == 2
+
+
+def test_ask_user_question_missing_questions_defaults_empty():
+    raw = {
+        "type": "assistant",
+        "message": {"content": [{"type": "tool_use", "name": "AskUserQuestion", "input": {}}]},
+    }
+    out = cr.normalize(raw)
+    assert out[-1]["kind"] == "ask" and out[-1]["questions"] == []
+
+
+def test_exit_plan_mode_also_emits_plan_event():
+    # ExitPlanMode renders as "The build" card — a prose plan + Approve/Adjust.
+    raw = {
+        "type": "assistant",
+        "message": {"content": [
+            {"type": "tool_use", "name": "ExitPlanMode",
+             "input": {"plan": "1. Add a Shopify adapter\n2. Add a worker\n3. Done"}},
+        ]},
+    }
+    out = cr.normalize(raw)
+    kinds = [e["kind"] for e in out]
+    assert kinds == ["tool_step", "plan"]
+    assert out[1]["body"].startswith("1. Add a Shopify adapter")
+
+
+def test_exit_plan_mode_missing_plan_defaults_empty():
+    raw = {
+        "type": "assistant",
+        "message": {"content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {}}]},
+    }
+    out = cr.normalize(raw)
+    assert out[-1]["kind"] == "plan" and out[-1]["body"] == ""
