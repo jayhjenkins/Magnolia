@@ -48,6 +48,20 @@ def test_contains_scope_gate_phrase():
     assert "run Claude Code natively" in text
 
 
+def test_offers_only_three_toggleable_surfaces():
+    # Adapt builds only the three surfaces that have a live/off toggle seam:
+    # adapters, workers, and card-types. Skills have NO liveness seam and no
+    # write root in the fairway, so the harness must NOT promise skill-building
+    # nor route to meta-create-skill - that stays a native Claude Code activity.
+    text = build_harness_prompt()
+    assert "adapters, workers, and card-types" in text
+    assert "meta-create-skill" not in text
+    # The three kept factories are still routed to.
+    for factory in ("meta-create-adapter", "meta-create-worker",
+                    "meta-create-card-type"):
+        assert factory in text, f"missing kept factory: {factory!r}"
+
+
 def test_omits_dropped_ornamentation():
     # Case-insensitive: the SKILL phrases the merge question with a capital "Merge",
     # so a lowercase-only guard would miss a reintroduction of the exact SKILL text.

@@ -83,7 +83,7 @@ The harness is authored by **surgical subtraction from the actual `workflow-magn
   - **Step 0 preflight** entirely — the harness states *assume the environment is ready; never narrate systems checks* (no "checking superpowers/profile/git author/dev board…" output to burn tokens or clutter the chat).
   - **Step 2 merge-authority question** — replaced by *always auto-commit to main when green; never ask; never narrate git*.
   - **Step 6 PR / finishing-branch ceremony** — replaced by the factory's auto-commit-to-main + Keep/Undo.
-- **Added (Adapt-context deltas):** the scope gate ("only adapters/workers/card-types/skills via the meta-create-* factories; refuse top-nav/core/net-new → tell the user to run Claude Code natively"), the path-confinement reminder, and "speak Keep/Undo, never commits/reverts."
+- **Added (Adapt-context deltas):** the scope gate ("only adapters/workers/card-types via the meta-create-* factories; refuse skills/top-nav/core/net-new → tell the user to run Claude Code natively"), the path-confinement reminder, and "speak Keep/Undo, never commits/reverts." Note: the Adapt RUNTIME offers only the **three toggleable surfaces** (adapters, workers, card-types) - the surfaces with a live/off seam. Skills are dropped from Adapt (no liveness seam, no fairway write root); native magnolia-build still builds skills.
 
 The native `workflow-magnolia-build` SKILL is **left untouched** (correct for native sessions); the harness is its Adapt-shaped sibling. Sync/traceability to the source SKILL is decided in the plan.
 

@@ -32,9 +32,10 @@ in line with precedent. This is a trigger, not a manual - it links to the
 canonical docs rather than restating them; read the relevant doc before acting.
 
 ## Scope gate (read first - this is a hard boundary)
-You may only build adapters, workers, card-types, and skills through the
-meta-create-* factories. If the ask needs the top nav, engine core, the board
-chrome, docs/reference, or anything outside those four surfaces, decline plainly
+You may only build adapters, workers, and card-types through the meta-create-*
+factories. These are the three toggleable surfaces - each can be turned live or
+off by adaptation. If the ask needs a skill, the top nav, engine core, the board
+chrome, docs/reference, or anything outside those three surfaces, decline plainly
 and tell the user to run Claude Code natively in the Magnolia folder. You are
 path-confined; writes outside the factory surfaces will be refused.
 
@@ -64,12 +65,11 @@ decide reuse-vs-extend-vs-build-new per surface against what already exists, and
 emit the build contract. Even a single-factory build is briefed from a contract
 - produce it first either way.
 
-- Known single-surface extension (a new worker, card-type, adapter, or skill):
-  the contract will name exactly one surface - hand off to the matching factory
+- Known single-surface extension (a new worker, card-type, or adapter): the
+  contract will name exactly one surface - hand off to the matching factory
   skill, briefed by that surface's contract row - `meta-create-worker` /
-  `meta-create-card-type` / `meta-create-adapter` / `meta-create-skill` (each
-  reads `meta-factory-core` first). They own scaffold -> capture -> gate ->
-  commit -> Keep/Undo.
+  `meta-create-card-type` / `meta-create-adapter` (each reads `meta-factory-core`
+  first). They own scaffold -> capture -> gate -> commit -> Keep/Undo.
 - Larger / novel / multi-surface feature: run the full loop (Step 5), with the
   build contract driving the per-subagent briefs.
 
@@ -129,8 +129,9 @@ Windows terminals otherwise.
   build -> e2e verify -> ship, with each subagent briefed from the build
   contract, all the gates green, and the engine denylist-clean.
 - The reference layer was read before any code was written.
-- The ask stayed inside the factory surfaces (adapters / workers / card-types /
-  skills); anything outside was declined with a pointer to native Claude Code.
+- The ask stayed inside the factory surfaces (adapters, workers, and
+  card-types); anything outside was declined with a pointer to native Claude
+  Code.
 """
 
 
