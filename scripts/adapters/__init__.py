@@ -12,12 +12,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import profile_lib  # noqa: E402
+import adaptations_lib  # noqa: E402
 
 
 def get(family, root=None):
-    """Return the adapter module for the family's active provider, or None."""
+    """Return the adapter module for the family's active provider, or None.
+
+    Liveness is the OUTER gate: an adapter owned by an OFF adaptation is invisible
+    to routing - exactly like "no provider configured" - so publish() naturally
+    graceful-degrades to None for it, BEFORE the Tier-2 _is_confirmed check runs.
+    """
     provider = profile_lib.provider(family, root)
     if provider == "none":
+        return None
+    if not adaptations_lib.is_live("adapter", f"{family}/{provider}"):
         return None
     try:
         return importlib.import_module(f"adapters.{family}.{provider}")
