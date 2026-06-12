@@ -24,7 +24,7 @@ const adaptState = {
 };
 
 // Suggestions / placeholders.
-const ADAPT_DEFAULT_PLACEHOLDER = 'Describe something you wish Magnolia could do…';
+const ADAPT_DEFAULT_PLACEHOLDER = 'Describe a capability to add - an integration, automation, or workflow change…';
 const ADAPT_ANOTHER_PLACEHOLDER = 'Describe another adaptation…';
 const ADAPT_TWEAK_PLACEHOLDER = 'What should be different?';
 
@@ -44,6 +44,7 @@ let adaptWired = false;
 function renderAdapt() {
   if (!adaptWired) { wireAdapt(); adaptWired = true; }
   refreshTracker();
+  syncNewBtnDisabled();
   loadAdaptations();
 }
 
@@ -95,9 +96,25 @@ function syncSendDisabled() {
   send.disabled = adaptState.busy || !input.value.trim();
 }
 
+// The + New adaptation button only does something when there's a session to
+// clear. On a fresh, empty chat (no session, idle, empty thread) clicking it is
+// a no-op that feels broken, so disable it there; also disable it mid-build.
+function syncNewBtnDisabled() {
+  const btn = document.getElementById('adapt-new-btn');
+  if (!btn) return;
+  const thread = document.getElementById('adapt-thread');
+  const hasThread = !!(thread && thread.children.length);
+  const fresh = adaptState.adaptationId === null && adaptState.phase === 'idle' && !hasThread;
+  btn.disabled = adaptState.busy || fresh;
+  btn.title = btn.disabled
+    ? 'Already a fresh slate - just describe what to build'
+    : 'Start a fresh adaptation';
+}
+
 function adaptSetBusy(busy) {
   adaptState.busy = busy;
   syncSendDisabled();
+  syncNewBtnDisabled();
 }
 
 function startNewAdaptation() {
@@ -114,6 +131,7 @@ function startNewAdaptation() {
   const input = document.getElementById('adapt-input');
   if (input) { input.value = ''; input.style.height = 'auto'; input.focus(); }
   syncSendDisabled();
+  syncNewBtnDisabled();
 }
 
 function setComposerPlaceholder(text) {
@@ -257,7 +275,7 @@ function renderRail() {
   if (!adaptState.ads.length) {
     const empty = document.createElement('div');
     empty.className = 'adapt-rail-empty';
-    empty.textContent = 'Nothing yet. Describe something you wish Magnolia could do and it shows up here.';
+    empty.textContent = 'Nothing here yet - what you build shows up below.';
     list.appendChild(empty);
     return;
   }

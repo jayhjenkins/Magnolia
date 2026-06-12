@@ -1267,13 +1267,14 @@
   .adapt-title { font-family: var(--font-serif); font-size: 22px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
   .adapt-subline { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
   .adapt-new-btn {
-    display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;
-    padding: 6px 12px 6px 10px; border-radius: var(--r-btn); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%;
+    padding: 8px 12px; border-radius: var(--r-btn); cursor: pointer;
     font-family: inherit; font-size: 12.5px; font-weight: 600;
     background: var(--surface-hover); border: 1px solid var(--border-soft); color: var(--text-muted);
-    transition: color var(--ease), border-color var(--ease), background var(--ease);
+    transition: color var(--ease), border-color var(--ease), background var(--ease), opacity var(--ease);
   }
-  .adapt-new-btn:hover { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 32%, transparent); background: var(--accent-soft); }
+  .adapt-new-btn:not(:disabled):hover { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 32%, transparent); background: var(--accent-soft); }
+  .adapt-new-btn:disabled { opacity: 0.4; cursor: default; }
   .adapt-new-btn svg { width: 14px; height: 14px; }
 
   .adapt-lane {
@@ -1559,12 +1560,8 @@
       <div class="adapt-head">
         <div>
           <h3 class="adapt-title">Adapt</h3>
-          <p class="adapt-subline">Teach Magnolia something new.</p>
+          <p class="adapt-subline">Teach Magnolia something new. Add an integration, a data source, a worker, or a new card output or action - it extends what Magnolia can do without changing the app itself.</p>
         </div>
-        <button class="adapt-new-btn" id="adapt-new-btn" type="button" title="Start a fresh adaptation">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.4v9.2M3.4 8h9.2"/></svg>
-          <span>New adaptation</span>
-        </button>
       </div>
 
       <div class="adapt-lane">
@@ -1588,11 +1585,11 @@
         <!-- chat body -->
         <div class="adapt-body" id="adapt-body">
           <div class="adapt-empty" id="adapt-empty">
-            <div class="adapt-empty-line">Describe something you wish Magnolia could do.</div>
+            <div class="adapt-empty-line">Describe a capability to add - a new integration, data source, worker, or card output.</div>
             <div class="adapt-chips" id="adapt-chips">
-              <button class="adapt-chip" type="button">Watch my Shopify store and warn me before bestsellers sell out</button>
-              <button class="adapt-chip" type="button">Pull new Stripe disputes into my morning review</button>
-              <button class="adapt-chip" type="button">Track the school portal and surface permission slips</button>
+              <button class="adapt-chip" type="button">Add a new integration.</button>
+              <button class="adapt-chip" type="button">Build a new use case to automate.</button>
+              <button class="adapt-chip" type="button">Change an existing task workflow.</button>
             </div>
           </div>
           <div class="adapt-thread" id="adapt-thread"></div>
@@ -1601,7 +1598,7 @@
         <!-- composer -->
         <div class="adapt-composer-wrap">
           <div class="adapt-composer">
-            <textarea id="adapt-input" rows="1" placeholder="Describe something you wish Magnolia could do…" aria-label="Describe an adaptation"></textarea>
+            <textarea id="adapt-input" rows="1" placeholder="Describe a capability to add - an integration, automation, or workflow change…" aria-label="Describe an adaptation"></textarea>
             <button class="adapt-send" id="adapt-send" type="button" aria-label="Send" title="Send" disabled>
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2.6 7 9"/><path d="M13.4 2.6 9.4 13.2l-2.4-4.2-4.2-2.4Z"/></svg>
             </button>
@@ -1613,6 +1610,10 @@
     <!-- Adaptations rail -->
     <aside class="adapt-rail" aria-label="Your adaptations">
       <h3 class="adapt-rail-title">Your adaptations</h3>
+      <button class="adapt-new-btn" id="adapt-new-btn" type="button" title="Start a fresh adaptation">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.4v9.2M3.4 8h9.2"/></svg>
+        <span>New adaptation</span>
+      </button>
       <div class="adapt-rail-list" id="adapt-rail-list"></div>
     </aside>
   </div>
