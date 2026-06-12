@@ -331,7 +331,10 @@ def normalize(raw_event):
     """Map one raw `claude --output-format stream-json` event to a list of
     normalized UI events.
 
-    The four UI kinds are: ``think``, ``tool_step``, ``text``, ``result``.
+    The UI kinds are: ``think``, ``tool_step``, ``text``, ``result``, plus
+    ``ask`` (an AskUserQuestion tool_use, carrying ``questions``) and ``plan``
+    (an ExitPlanMode tool_use, carrying ``body``) emitted alongside the
+    ``tool_step`` for those two tools so the Adapt UI can render rich cards.
     An ``assistant`` event with multiple content blocks yields multiple rows,
     in order. Uninteresting or unknown events (``system``, ``user``/tool_result,
     ``rate_limit_event``, anything else) yield ``[]``. Pure: no I/O, never
