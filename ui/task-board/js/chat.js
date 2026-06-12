@@ -79,8 +79,13 @@ function mdFormatProse(seg) {
     }
     return label; // block javascript: and other schemes — render label only
   });
-  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  // Bold runs first and uses a non-greedy ANY-char body so a bold span may
+  // contain a nested *italic* (e.g. "**…*take action*…**"). The old [^*]+ body
+  // stopped at the first inner asterisk and silently dropped the bold, which is
+  // why bold rendered sporadically (fine in a plain paragraph, broken in one
+  // with nested emphasis). The later italic pass then styles the inner *…*.
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/__(.+?)__/g, '<strong>$1</strong>');
   s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
   s = s.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<em>$2</em>');
   s = s.replace(/(^|[^_])_([^_\s][^_]*?)_/g, '$1<em>$2</em>');
@@ -146,8 +151,17 @@ function renderMarkdown(src) {
       i += 1; continue;
     }
 
-    // Plain prose line — accumulate; single newlines become <br> within a <p>.
-    flushList();
+    // Plain prose line. If a list is open, this is a LAZY CONTINUATION of the
+    // last item (the model hard-wrapped a long item onto the next physical
+    // line) — append it to that item rather than flushing the list. Flushing
+    // here was the numbered-list bug: it ended the <ol>, so the next "1." (many
+    // models number every item "1." and rely on the renderer to increment)
+    // began a fresh <ol start=1>, making every item show "1.".
+    if (list && list.items.length) {
+      list.items[list.items.length - 1] += ' ' + mdInline(raw);
+      i += 1; continue;
+    }
+    // Single newlines become <br> within a <p>.
     para.push(mdInline(raw));
     i += 1;
   }

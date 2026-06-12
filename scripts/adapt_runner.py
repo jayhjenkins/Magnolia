@@ -61,6 +61,13 @@ _REGISTRY_REL = "ui/task-board/cardtypes/registry.json"
 # How many chars of the user message become the provisional adaptation name.
 _NAME_CAP = 48
 
+# The Adapt build session pins the STANDARD tier (sonnet) regardless of the
+# global cost posture. It drives the full /magnolia-build loop (brainstorm ->
+# plan -> subagent build) and needs sonnet-level reasoning; a 'low' posture
+# would otherwise resolve to haiku, too weak to run the loop. Passed as a
+# task_override so it wins over posture (see profile_lib.resolve_model).
+ADAPT_MODEL_TIER = "standard"
+
 
 # --- The spawn seam ----------------------------------------------------------
 
@@ -283,7 +290,7 @@ def run_turn(adaptation_id, message):
     """
     harness = adapt_harness.build_harness_prompt()
     tools = ",".join(adapt_tools.ADAPT_ALLOWED_TOOLS)
-    model = profile_lib.resolve_model(None)
+    model = profile_lib.resolve_model(None, task_override=ADAPT_MODEL_TIER)
 
     # Three entry shapes (decision A - uniform server flow):
     #   id None              -> NEW build, row minted internally on first result.
@@ -440,26 +447,17 @@ def run_turn(adaptation_id, message):
             except Exception:
                 pass
 
-    # --- Compaction signal --------------------------------------------------
-    if compaction.should_recommend_compact(result_usage, model=model):
-        notice = {
-            "kind": "notice",
-            "role": "notice",
-            "text": ("This build session is getting long - consider running "
-                     "/compact to keep it lean for the next turn."),
-        }
-        if current_id is not None:
-            try:
-                adapt_transcript.append_event(current_id, dict(notice))
-            except Exception:
-                pass
-        yield notice
-
-    # --- Post-ship housekeeping: one best-effort /compact turn --------------
-    # Keep the session lean after a ship. This is HOUSEKEEPING: its events are
-    # NOT streamed to the UI, and every failure is swallowed (a failed compact
-    # must never fail the build that already succeeded).
-    if shipped and current_id is not None:
+    # --- Auto-compaction: keep the session fresh ----------------------------
+    # Fire ONE best-effort, SILENT /compact turn when the window has passed the
+    # threshold (default 0.6 -> keep >=40% headroom) OR a build just shipped. We
+    # AUTO-compact rather than nag the user with a notice: the operator asked to
+    # "keep it fresh," and auto-compaction in `-p` is the real safety net - this
+    # just nudges it along. HOUSEKEEPING: events are NOT streamed and every
+    # failure is swallowed (a failed compact must never fail the turn that just
+    # ran). Once compacted, the next turn's usage drops below the threshold, so
+    # this self-regulates rather than firing every turn.
+    over_threshold = compaction.should_recommend_compact(result_usage, model=model)
+    if (shipped or over_threshold) and current_id is not None:
         try:
             rec = adaptations_lib.read(current_id)
             compact_sid = rec.get("claude_session_id")

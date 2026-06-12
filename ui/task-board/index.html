@@ -1362,9 +1362,20 @@
   .adapt-steps-list { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; padding: 2px 0 2px 20px; }
   .adapt-steps-list.collapsed { display: none; }
 
-  /* assistant prose */
-  .adapt-text { font-size: 13.5px; line-height: 1.66; color: var(--text); white-space: pre-wrap; }
+  /* assistant prose. NB: no white-space: pre-wrap — renderMarkdown already
+     emits <p>/<br>/<ul>, and pre-wrap preserved stray markup whitespace and
+     made the text look heavy/blurry. Explicit smoothing keeps it crisp. */
+  .adapt-text {
+    font-size: 13.5px; line-height: 1.66; color: var(--text);
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
   .adapt-text p { margin: 0 0 10px; } .adapt-text p:last-child { margin-bottom: 0; }
+  .adapt-text ul, .adapt-text ol { margin: 6px 0 10px; padding-left: 22px; }
+  .adapt-text li { margin: 2px 0; }
+  .adapt-text li:last-child { margin-bottom: 0; }
+  .adapt-text strong { font-weight: 650; }
+  .adapt-text h1.md-h, .adapt-text h2.md-h, .adapt-text h3.md-h { font-size: 13.5px; font-weight: 650; margin: 8px 0 4px; }
   .adapt-text code { font-family: var(--mono, monospace); font-size: 0.92em; background: var(--surface-hover); padding: 1px 5px; border-radius: var(--r-badge); }
   .adapt-text a { color: var(--accent); }
   .adapt-cursor { display: inline-block; }

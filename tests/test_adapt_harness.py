@@ -91,14 +91,19 @@ def test_forbids_native_preamble():
     assert "START with the user's request" in text
 
 
-def test_outcome_first_conversation_discipline():
-    # The session must talk to a non-technical user about OUTCOMES, never make
-    # them pick an internal implementation shape, and never double-ask (prose +
-    # structured card). These anchors pin that guidance so it cannot silently
-    # regress back to the jargon-heavy "worker vs card vs adapter?" questioning.
+def test_discovery_first_conversation_discipline():
+    # The session must run a PM-style DISCOVERY conversation about the JOB the
+    # user wants handled - never a build interview. These anchors pin that so it
+    # cannot regress to the jargon-heavy "worker vs card vs adapter?" or the
+    # tactical "sync hourly or daily?" questioning the operator flagged.
     text = build_harness_prompt()
-    assert "outcome-first" in text.lower()
+    assert "DISCOVERY conversation" in text
+    assert "Discover the job, not the build" in text
     assert "NON-TECHNICAL" in text
+    # The implementation is downstream of the job; never ask tactical details...
+    assert "NEVER ask tactical implementation questions" in text
+    assert "downstream" in text.lower()
+    # ...nor make the user pick the internal shape.
     assert "NEVER ask the user to choose the implementation" in text
     # The user-facing taxonomy must be explicitly kept out of the conversation.
     assert "Keep your own taxonomy out of the conversation" in text

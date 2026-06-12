@@ -503,21 +503,46 @@ def test_new_build_argv_uses_session_id_and_adapt_tools(store, stub_model, monke
 
 # --- Compaction --------------------------------------------------------------
 
-def test_compaction_notice_when_window_full(store, stub_model, monkeypatch):
-    # input_tokens past 0.8 of the 200k default window (> 160000).
-    usage = {"input_tokens": 175000}
-    sim = _GitSim(commits=[])
-    events = _run(monkeypatch, None, "big build",
-                  _canned_stream(usage=usage), sim)
-    notices = [e for e in events if e.get("kind") == "notice"]
-    assert any("compact" in (n.get("text") or "").lower() for n in notices)
+def _run_recording(monkeypatch, adaptation_id, message, stream, sim, head_before="HEAD0"):
+    """Like _run, but records every cmd passed to _spawn so a test can detect
+    the SILENT auto-compact follow-up turn (a second spawn with a /compact
+    message). Returns (events, cmds)."""
+    state = _install_git(monkeypatch, sim, head_before=head_before)
+    cmds = []
+
+    def fake_spawn(cmd, exit_holder=None):
+        cmds.append(cmd)
+        state["phase"] = "after"
+        for ln in stream:
+            yield ln
+        if exit_holder is not None:
+            exit_holder["returncode"] = 0
+
+    monkeypatch.setattr(adapt_runner, "_spawn", fake_spawn)
+    events = list(adapt_runner.run_turn(adaptation_id, message))
+    return events, cmds
 
 
-def test_no_compaction_notice_when_window_small(store, stub_model, monkeypatch):
+def test_auto_compacts_silently_when_window_full(store, stub_model, monkeypatch):
+    # Past 0.6 of the 200k default window (> 120000): the runner AUTO-compacts
+    # by firing a silent /compact follow-up turn - and emits NO user-facing
+    # notice (we keep the session fresh without nagging).
+    usage = {"input_tokens": 150000}
+    sim = _GitSim(commits=[])  # nothing built this turn -> not a ship
+    events, cmds = _run_recording(monkeypatch, None, "big conversation",
+                                  _canned_stream(usage=usage), sim)
+    assert [e for e in events if e.get("kind") == "notice"] == []
+    # The build turn plus the silent /compact follow-up (message at cmd[1]).
+    assert any(cmd[1] == "/compact" for cmd in cmds)
+
+
+def test_no_auto_compact_when_window_small_and_no_ship(store, stub_model, monkeypatch):
     usage = {"input_tokens": 10}
-    sim = _GitSim(commits=[])
-    events = _run(monkeypatch, None, "small build", _canned_stream(usage=usage), sim)
-    assert not [e for e in events if e.get("kind") == "notice"]
+    sim = _GitSim(commits=[])  # no ship + small window -> nothing to do
+    events, cmds = _run_recording(monkeypatch, None, "small chat",
+                                  _canned_stream(usage=usage), sim)
+    assert [e for e in events if e.get("kind") == "notice"] == []
+    assert not any(cmd[1] == "/compact" for cmd in cmds)
 
 
 def test_post_ship_enqueues_one_compact_turn_best_effort(store, stub_model, monkeypatch):

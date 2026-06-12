@@ -554,11 +554,50 @@ function openAssistantTurn() {
     typing: el.querySelector('.adapt-typing'),
     flow: el.querySelector('.adapt-flow'),
     tail: null,                 // 'text' | 'work' — the currently-open block
-    textEl: null, textRaw: '',  // current prose block + its accumulated markdown
+    textEl: null,               // current prose block element
+    textTarget: '', textShown: 0, // full text vs. how much has been revealed
+    pumpRAF: null,              // rAF handle for the typewriter reveal
     group: null,                // current work group {group,toggle,list,tools,thinks}
     sawText: false, anyContent: false, typingCleared: false,
     cardHost: el, cardAdded: false, // ask/plan cards append after the flow
   };
+}
+
+// ── Typewriter reveal ───────────────────────────────────────────────────
+// claude -p delivers prose as whole chunks (often the entire reply at once), so
+// without this a "wall of text" just pops in. We reveal the current block's
+// text progressively. Rate has a floor (so a one-liner still types) and scales
+// with backlog so any amount catches up within ~MAX_SEC — short replies feel
+// hand-typed, long ones (or a reconnect replay) snap in quickly, never janky.
+const ADAPT_STREAM_CPS = 480;     // floor reveal rate (chars/sec)
+const ADAPT_STREAM_MAX_SEC = 1.8; // cap on time to drain the backlog
+
+function renderTextBlock(turn) {
+  if (!turn.textEl) return;
+  const shown = turn.textTarget.slice(0, turn.textShown);
+  turn.textEl.innerHTML = (typeof renderMarkdown === 'function') ? renderMarkdown(shown) : escapeHtml(shown);
+  adaptScroll();
+}
+function pumpText(turn) {
+  if (turn.pumpRAF) return; // already pumping
+  let last = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const step = (now) => {
+    turn.pumpRAF = null;
+    const dt = Math.max(0, (now - last) / 1000); last = now;
+    const backlog = turn.textTarget.length - turn.textShown;
+    const rate = Math.max(ADAPT_STREAM_CPS, backlog / ADAPT_STREAM_MAX_SEC);
+    turn.textShown = Math.min(turn.textTarget.length, turn.textShown + Math.max(1, Math.ceil(rate * dt)));
+    renderTextBlock(turn);
+    if (turn.textShown < turn.textTarget.length) turn.pumpRAF = requestAnimationFrame(step);
+  };
+  turn.pumpRAF = requestAnimationFrame(step);
+}
+// Reveal the rest of the current prose block immediately (when leaving it for a
+// work group, or when the turn ends — no half-typed paragraphs left behind).
+function flushTextBlock(turn) {
+  if (turn.pumpRAF) { cancelAnimationFrame(turn.pumpRAF); turn.pumpRAF = null; }
+  turn.textShown = turn.textTarget.length;
+  renderTextBlock(turn);
 }
 
 // Open (or reuse) the current prose block. A new block starts whenever the tail
@@ -568,13 +607,15 @@ function ensureTextBlock(turn) {
   if (turn.tail === 'text' && turn.textEl) return turn.textEl;
   const t = document.createElement('div'); t.className = 'adapt-text';
   turn.flow.appendChild(t);
-  turn.textEl = t; turn.textRaw = ''; turn.tail = 'text';
+  turn.textEl = t; turn.textTarget = ''; turn.textShown = 0; turn.tail = 'text';
   return t;
 }
 // Open (or reuse) the current work group. A new group starts whenever the tail
-// is not already a work group — i.e. after prose.
+// is not already a work group — i.e. after prose; finish revealing that prose
+// first so a tool step never interrupts a half-typed paragraph.
 function ensureWorkGroup(turn) {
   if (turn.tail === 'work' && turn.group) return turn.group;
+  if (turn.tail === 'text') flushTextBlock(turn);
   const g = makeWorkGroup();
   turn.flow.appendChild(g.group);
   turn.group = g; turn.tail = 'work';
@@ -588,6 +629,7 @@ function clearTyping(turn) {
 }
 function finalizeAssistantTurn(turn) {
   clearTyping(turn);
+  if (turn.tail === 'text') flushTextBlock(turn); // no half-typed paragraph at end
   if (!turn.anyContent && !turn.cardAdded) {
     // Empty assistant turn (e.g. reconnect to a run with no replayable prose):
     // remove the bare shell rather than leaving an empty bubble.
@@ -615,10 +657,9 @@ function renderAdaptEvent(ev, turn) {
     clearTyping(turn);
     if (!(ev.text || '')) return;
     turn.sawText = true; turn.anyContent = true;
-    const t = ensureTextBlock(turn);
-    turn.textRaw += ev.text || '';
-    t.innerHTML = (typeof renderMarkdown === 'function') ? renderMarkdown(turn.textRaw) : escapeHtml(turn.textRaw);
-    adaptScroll();
+    ensureTextBlock(turn);
+    turn.textTarget += ev.text || '';
+    pumpText(turn); // reveal progressively (typewriter), not all at once
   } else if (kind === 'notice') {
     clearTyping(turn);
     postNotice(ev.text || 'Heads up.', false);

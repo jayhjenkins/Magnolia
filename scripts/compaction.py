@@ -7,9 +7,10 @@ NOT the safety net. It supplies two best-effort signals the Adapt runner uses:
      After a successful ship, the runner sends this as its own turn to keep the
      session lean for the next build.
 
-  2. should_recommend_compact(usage, threshold=0.8, model=None) -> bool
-     A best-effort nudge when the context window is getting full. Computed from
-     the `usage` block of the claude stream-json `result` event (surfaced by
+  2. should_recommend_compact(usage, threshold=0.6, model=None) -> bool
+     A best-effort "window is filling" signal. The Adapt runner uses it to
+     AUTO-compact (fire a silent /compact turn), not to nag. Computed from the
+     `usage` block of the claude stream-json `result` event (surfaced by
      scripts/chat_runner.normalize's `result` branch as `event["usage"]`).
 
 Design choices (documented):
@@ -33,15 +34,14 @@ Design choices (documented):
   * "Past threshold" is a STRICT comparison (`>`): used exactly at the threshold
     is not yet past it.
 
-  * Threshold default is 0.8, NOT 0.5. A headless Adapt turn carries a large
-    FIXED prompt baseline before any conversation: the full CLAUDE.md hierarchy
-    in the system prompt, the SessionStart-injected meta-using-skills block, the
-    re-injected build harness (--append-system-prompt), and the tool schema. On
-    a 200k-window model (the Adapt session resolves to haiku-4-5) that baseline
-    alone is a sizable fraction of the window, so a 0.5 threshold tripped the
-    nudge after only ~2 conversational turns - long before the session was
-    actually "getting long." 0.8 makes the nudge mean genuinely-near-the-edge;
-    auto-compaction in `-p` remains the real safety net below that.
+  * Threshold default is 0.6 (keep >=40% headroom). The operator wants the
+    Adapt session kept "fresh," so the runner AUTO-compacts at 60% used rather
+    than letting the window bloat or nagging with a notice. (An earlier 0.5
+    tripped on the large FIXED prompt baseline alone - the CLAUDE.md hierarchy,
+    the SessionStart-injected meta-using-skills block, the re-injected harness,
+    and the tool schema - so this is a deliberate 0.6.) The Adapt session runs
+    on the standard tier (sonnet, 200k window). Auto-compaction in `-p` remains
+    the real safety net.
 
 Pure functions. No I/O. Stdlib only. ASCII-safe.
 """
@@ -92,16 +92,16 @@ def _context_used(usage):
     return total
 
 
-def should_recommend_compact(usage, threshold=0.8, model=None):
-    """Best-effort nudge: is the context window past ``threshold`` full?
+def should_recommend_compact(usage, threshold=0.6, model=None):
+    """Best-effort signal: is the context window past ``threshold`` full?
 
     True when prompt-side tokens (input + cache_read + cache_creation) strictly
     exceed ``threshold`` * the model's window. False below or exactly at it, and
     False (never raises) for missing / None / empty / all-zero / garbage usage.
 
-    Threshold defaults to 0.8 (not 0.5): the large fixed prompt baseline of a
-    headless Adapt turn already occupies a big share of a 200k window, so 0.5
-    tripped after ~2 turns. See the module docstring for the full rationale.
+    Threshold defaults to 0.6 (keep >=40% headroom): the Adapt runner uses this
+    to AUTO-compact at 60% used to keep the session fresh. See the module
+    docstring for the full rationale.
     """
     used = _context_used(usage)
     if used <= 0:
