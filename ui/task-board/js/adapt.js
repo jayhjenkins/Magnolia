@@ -63,14 +63,19 @@ function wireAdapt() {
   }
   if (send) send.addEventListener('click', sendAdapt);
 
-  // suggestion chips fill the composer
+  // suggestion chips drop a real first-person prompt into the composer (a
+  // workable opening the user finishes), not the chip's short label.
   document.querySelectorAll('#adapt-chips .adapt-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       if (input) {
-        input.value = chip.textContent;
+        input.value = chip.dataset.prompt || chip.textContent;
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 140) + 'px';
         input.focus();
+        // Drop the cursor at the end so the user types right where the prompt
+        // leaves off (after the trailing ": ").
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
         syncSendDisabled();
       }
     });
