@@ -76,7 +76,8 @@ CHAT_ALLOWED_TOOLS = [
 ]
 
 
-def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=None):
+def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=None,
+                   append_system_prompt=None, settings=None):
     """Build the `claude` argv for a chat turn.
 
     The prompt MUST stay the first positional arg: --allowedTools is variadic
@@ -86,10 +87,18 @@ def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=
 
     new_session=True  -> start a fresh session with --session-id <id>.
     new_session=False -> resume an existing session with --resume <id>.
+
+    The Adapt build session (scripts/adapt_runner.py) reuses this builder via two
+    optional middle flags (both default None, so existing chat callers are
+    unaffected and the prompt-first / --allowedTools-last invariant holds):
+      - append_system_prompt: re-injects the build harness every turn (the slash
+        steering is not sticky across resumed turns).
+      - settings: an absolute path to a --settings file (the Adapt fairway hook
+        lives there; it is the REAL enforcement, so it must be passed).
     """
     tools = allowed_tools or ",".join(CHAT_ALLOWED_TOOLS)
     session_flag = "--session-id" if new_session else "--resume"
-    return [
+    cmd = [
         "claude",
         message,
         "-p",
@@ -97,8 +106,14 @@ def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=
         "--verbose",
         "--model", model,
         session_flag, session_id,
-        "--allowedTools", tools,
     ]
+    if append_system_prompt is not None:
+        cmd += ["--append-system-prompt", append_system_prompt]
+    if settings is not None:
+        cmd += ["--settings", settings]
+    # --allowedTools stays LAST (variadic; nothing may trail it).
+    cmd += ["--allowedTools", tools]
+    return cmd
 
 
 def _task_context_block(task, *, include_description=True, heading="## Task context"):
