@@ -28,6 +28,7 @@ import platform_lib
 import task_lib
 import packs_lib
 import profile_lib
+import adaptations_lib
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -330,6 +331,17 @@ def load_workers():
     for path in sorted(globmod.glob(os.path.join(WORKERS_DIR, "*.md"))):
         fm, body = _parse_worker_frontmatter(path)
         if fm and fm.get("name"):
+            # Adaptation liveness gate: a worker tagged with an adaptation only
+            # dispatches when that adaptation is live. Untagged workers carry no
+            # `adaptation` field (and never appear in any manifest), so they cost
+            # nothing here and are always included. The manifest stores a
+            # worker's ref as its repo-relative path.
+            if fm.get("adaptation"):
+                ref = os.path.relpath(path, PM_OS_DIR)
+                if not adaptations_lib.is_live("worker", ref):
+                    log(f"DEBUG: skipping worker {fm['name']} - adaptation "
+                        f"{fm['adaptation']} not live")
+                    continue
             workers.append(fm)
         else:
             log(f"WARNING: Could not parse worker file: {os.path.basename(path)}")
