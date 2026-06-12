@@ -440,6 +440,7 @@ async function sendAdapt() {
 
   postUserBubble(text);
   if (adaptState.stage === 'idle') setStage('brainstorm');
+  else if (adaptState.stage === 'plan') setStage('build');
 
   const body = { message: text };
   if (adaptState.adaptationId) body.adaptation_id = adaptState.adaptationId;
@@ -598,10 +599,13 @@ function renderAdaptEvent(ev, turn) {
     setStage('plan');
     adaptState.phase = 'plan';
   } else if (kind === 'adaptation') {
-    // UPSERT the rail + advance the tracker on the building->off flip.
+    // A row becomes visible only when a build lands (state 'off'). Upsert the
+    // rail; do NOT jump the tracker to Build on a 'building' event (that fired
+    // prematurely on keying rows - it should rarely arrive now). The 'off'
+    // event is the real Done->Ready moment.
     upsertRail(ev);
     if (ev.adaptation_id && !adaptState.adaptationId) adaptState.adaptationId = ev.adaptation_id;
-    if (ev.state === 'building') { setStage('build'); adaptState.phase = 'building'; }
+    if (ev.state === 'building') { adaptState.phase = 'building'; }
     else if (ev.state === 'off') { setStage('ready'); adaptState.phase = 'done'; setComposerPlaceholder(ADAPT_ANOTHER_PLACEHOLDER); }
   } else if (kind === 'result') {
     // metadata; turn ends on event: done. Refresh rail to reflect final state.

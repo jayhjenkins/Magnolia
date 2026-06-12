@@ -86,9 +86,12 @@ def srv(store, monkeypatch):
 
 def test_list_adaptations_returns_payload(srv):
     import adaptations_lib
+    # Rows start `pending` (hidden); promote them off pending so they appear in
+    # the rail (a build landing is what promotes a row in production).
     a = adaptations_lib.create("Churn worker", "sid-1")
     adaptations_lib.set_state(a, "on")
     b = adaptations_lib.create("Shopify adapter", "sid-2")
+    adaptations_lib.set_state(b, "off")
 
     h = _FakeHandler()
     srv.handle_list_adaptations(h)
@@ -121,12 +124,12 @@ def test_toggle_rejects_invalid_state(srv):
     srv.handle_toggle_adaptation(h, a)
     assert h.status == 400
     assert "error" in h.json()
-    # unchanged
-    assert adaptations_lib.read(a)["state"] == "building"
+    # unchanged - a freshly-created row is the hidden keying state `pending`
+    assert adaptations_lib.read(a)["state"] == "pending"
 
 
 def test_toggle_rejects_building_via_endpoint(srv):
-    """Only on/off are user-toggleable; building is a runner-internal state."""
+    """Only on/off are user-toggleable; building/pending are runner-internal."""
     import adaptations_lib
     a = adaptations_lib.create("X", "sid")
     h = _FakeHandler({"state": "building"})
@@ -208,6 +211,10 @@ def test_post_adapt_new_build_creates_row_runs_and_streams(srv, monkeypatch):
     assert captured["adaptation_id"] is not None
     rid = captured["adaptation_id"]
     assert adaptations_lib.read(rid)["name"].startswith("Build a churn-risk")
+    # The POST-created row is the hidden `pending` keying state - it is NOT
+    # surfaced in the rail until a build lands and the runner promotes it.
+    assert adaptations_lib.read(rid)["state"] == "pending"
+    assert rid not in {r["id"] for r in adaptations_lib.list_all()}
 
     frames = h.sse_frames()
     adapt_frames = [f for f in frames if f.get("kind") == "adaptation"]

@@ -1559,7 +1559,7 @@ def handle_toggle_adaptation(handler, adaptation_id):
         _error_response(handler, f"Invalid JSON body: {e}", status=400)
         return
     state = (body.get("state") or "").strip()
-    # Only on/off are user-toggleable; "building" is a runner-internal state.
+    # Only on/off are user-toggleable; "pending"/"building" are runner-internal states.
     if state not in ("on", "off"):
         _error_response(handler, "state must be 'on' or 'off'", status=400)
         return
