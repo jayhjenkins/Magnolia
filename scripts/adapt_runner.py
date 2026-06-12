@@ -232,25 +232,51 @@ def _provisional_name(message):
     return text[:_NAME_CAP].strip() or "New adaptation"
 
 
+def _name_from_manifest(manifest):
+    """Readable name derived from a manifest's first artifact ref, or None.
+
+    The row only becomes visible once a build lands, so name it after what it
+    built instead of the slugged long first message:
+      - worker ref  "scripts/workers/stock_sentinel.md" -> "stock_sentinel"
+      - adapter ref "ecommerce/shopify"                  -> "shopify"
+      - card-type ref "stock-alert"                      -> "stock-alert"
+    Returns None when there are no artifacts (caller keeps the provisional name).
+    """
+    for entry in manifest or []:
+        ref = entry.get("ref")
+        if not ref:
+            continue
+        base = os.path.basename(str(ref))         # strips any "<family>/" prefix
+        if base.endswith(".md"):
+            base = base[:-len(".md")]
+        if base:
+            return base
+    return None
+
+
 # --- The turn ----------------------------------------------------------------
 
 def run_turn(adaptation_id, message):
     """Run one Adapt build turn: drive the gated session, capture the manifest.
 
     Generator yielding normalized events (think / tool_step / text / result),
-    plus an `adaptation` event when a NEW build's row is minted, and a `notice`
-    when the context window is getting full. Every user-visible event is also
-    appended to the adaptation's event log for reconnect/replay.
+    plus a single `adaptation` event (state "off") emitted ONLY when a build
+    actually lands a manifest - that is when the row first becomes visible in
+    the rail. A pure conversational/clarifying turn announces nothing and leaves
+    the keying row `pending` (hidden). A `notice` fires when the context window
+    is getting full. Every user-visible event is appended to the adaptation's
+    event log for reconnect/replay.
 
     adaptation_id is None  -> NEW build: mint a session UUID, send `message`
       with the harness + ADAPT_ALLOWED_TOOLS + --settings, new_session=True. On
-      the first result.session_id, create the row (state "building") and yield
-      an `adaptation` event so the UI adds the rail row immediately.
+      the first result.session_id, create the (pending, hidden) keying row and
+      bind the session id - but do NOT announce yet.
     adaptation_id given    -> RESUME/edit: read the record, --resume its stored
       claude_session_id, re-inject the harness (not sticky), new_session=False.
 
     After the stream: diff git HEAD to map new commits to surfaces and write the
-    manifest; if the manifest grew, flip state building -> off. If the context
+    manifest; if the manifest grew, promote pending/building -> off, derive a
+    readable name from the manifest, and announce once. If the context
     window is full, yield a compact `notice`; if the turn shipped, best-effort
     fire ONE follow-up /compact turn (housekeeping; failures swallowed, not
     streamed). Auto-commit-to-main is the FACTORY's job - this only records it.
@@ -310,10 +336,12 @@ def run_turn(adaptation_id, message):
     # On a resume the id is known up front, so nothing buffers.
     pre_id_buffer = []
     current_id = adaptation_id
-    # A NEW session still owes ONE adaptation(building) announcement on the first
-    # result: minted-row builds announce when the row is created; pre-created-row
-    # builds announce after persisting the session id onto the existing row.
-    announced = not new_session
+    # First-result bookkeeping: on the first result of a NEW session we BIND the
+    # session id onto the (pending) keying row - but we DO NOT announce and DO
+    # NOT flip to building. The row stays `pending` and hidden until a build
+    # actually lands a manifest (announced once, as `off`, in the capture block
+    # below). `bound` guards the one-time session-id bind / minted-row create.
+    bound = not new_session
     shipped = False  # set True if this turn produced manifest artifacts
     result_usage = {}
 
@@ -347,12 +375,14 @@ def run_turn(adaptation_id, message):
                 # result lacking session_id would never create the row, silently
                 # dropping the buffered pre-id events and the manifest.
                 result_sid = event.get("session_id") or sid
-                # NEW build, first result: bind the session id and announce the
-                # row so the UI can add the rail entry immediately.
-                if new_session and not announced and result_sid:
+                # NEW build, first result: BIND the session id onto the pending
+                # keying row. No announce, no building flip - the row stays
+                # hidden until a build lands a manifest (see the capture block).
+                if new_session and not bound and result_sid:
                     if current_id is None:
-                        # Minted-row build (id was None): create the row now and
-                        # flush the buffered pre-id events into the real log.
+                        # Minted-row build (id was None): create the (pending)
+                        # row now and flush the buffered pre-id events into the
+                        # real log. The row is hidden until a build promotes it.
                         current_id = adaptations_lib.create(provisional, result_sid)
                         for buffered in pre_id_buffer:
                             adapt_transcript.append_event(current_id, buffered)
@@ -363,15 +393,7 @@ def run_turn(adaptation_id, message):
                         # the freshly-bound session id onto the EXISTING row.
                         adaptations_lib.update(
                             current_id, {"claude_session_id": result_sid})
-                    adapt_evt = {
-                        "kind": "adaptation",
-                        "adaptation_id": current_id,
-                        "name": provisional,
-                        "state": "building",
-                    }
-                    adapt_transcript.append_event(current_id, adapt_evt)
-                    announced = True
-                    yield adapt_evt
+                    bound = True
                 # The result itself is metadata for the UI - yield, don't log.
                 yield event
                 continue
@@ -387,26 +409,34 @@ def run_turn(adaptation_id, message):
         added = _capture_manifest(current_id, prev_head)
         if added > 0:
             shipped = True
-            # Build finished and produced artifacts -> ready to toggle on.
+            # A build LANDED: the row first becomes visible now (mock's
+            # Done->Ready). Promote it to "off" and announce ONCE. This is the
+            # only adaptation event in the common flow - a pure conversational
+            # turn (added == 0) emits nothing and leaves the row pending/hidden.
             try:
                 rec = adaptations_lib.read(current_id)
-                if rec.get("state") == "building":
-                    adaptations_lib.set_state(current_id, "off")
-                    # Announce the flip so a live UI client (which only saw the
-                    # earlier state: "building" event) updates the rail dot /
-                    # toggle without re-reading the record. Persist it too so a
-                    # reconnect/replay shows the final state.
-                    flip_evt = {
+                # Promote from pending (the new keying state) or building (a
+                # legacy/resumed row mid-build) - any non-user state.
+                if rec.get("state") in ("pending", "building"):
+                    # Derive a readable name from what was built, falling back to
+                    # the existing provisional name when no artifact ref maps.
+                    derived = _name_from_manifest(rec.get("manifest"))
+                    name = derived or rec.get("name")
+                    changes = {"state": "off"}
+                    if derived:
+                        changes["name"] = derived
+                    adaptations_lib.update(current_id, changes)
+                    off_evt = {
                         "kind": "adaptation",
                         "adaptation_id": current_id,
-                        "name": rec.get("name"),
+                        "name": name,
                         "state": "off",
                     }
                     try:
-                        adapt_transcript.append_event(current_id, dict(flip_evt))
+                        adapt_transcript.append_event(current_id, dict(off_evt))
                     except Exception:
                         pass
-                    yield flip_evt
+                    yield off_evt
             except Exception:
                 pass
 

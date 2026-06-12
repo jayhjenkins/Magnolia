@@ -31,7 +31,7 @@ PM_OS_DIR = os.path.dirname(SCRIPT_DIR)
 
 STORE_DIR = os.path.join(PM_OS_DIR, "datasets", "adaptations")
 
-STATES = ["building", "off", "on"]
+STATES = ["pending", "building", "off", "on"]
 STATUSES = ["active", "deleted"]
 
 yaml = YAML()
@@ -106,9 +106,13 @@ def _record(fm, body=""):
 # --- Core operations ---------------------------------------------------------
 
 def create(name, session_id):
-    """Create a new adaptation record. Returns its id.
+    """Create a new adaptation record in state `pending`. Returns its id.
 
-    Slugs the id from name (kebab-case); appends -2, -3, ... on collision.
+    A freshly-created row exists only to KEY a live run by id - it has built
+    nothing yet, so it starts `pending` and stays HIDDEN from list_all (and
+    therefore from the rail and is_live) until a build lands a manifest and the
+    runner promotes it (pending -> off). Slugs the id from name (kebab-case);
+    appends -2, -3, ... on collision.
     """
     base = _slug(name)
     adaptation_id = base
@@ -121,7 +125,7 @@ def create(name, session_id):
         "id": adaptation_id,
         "name": name,
         "claude_session_id": session_id,
-        "state": "building",
+        "state": "pending",
         "created": _now_iso(),
         "status": "active",
         "manifest": [],
@@ -140,7 +144,15 @@ def read(adaptation_id):
 
 
 def list_all():
-    """Return all active (non-tombstoned) adaptation records."""
+    """Return all active, non-pending adaptation records.
+
+    Excludes tombstoned rows (status == "deleted") AND pending rows (state ==
+    "pending"). A pending row exists only to key a live run and has not built
+    anything yet, so it must stay hidden from the rail and from is_live (both
+    consume list_all). Pending rows have empty manifests, so excluding them
+    never changes an is_live result. read(id) STILL returns pending rows - the
+    runner reads the pending row by id to promote it.
+    """
     results = []
     if not os.path.isdir(STORE_DIR):
         return results
@@ -153,6 +165,8 @@ def list_all():
             continue  # skip malformed files
         if fm.get("status") == "deleted":
             continue
+        if fm.get("state") == "pending":
+            continue  # hidden keying row - not visible until a build lands
         results.append(_record(fm, body))
     results.sort(key=lambda r: r.get("created") or "")
     return results
@@ -171,7 +185,7 @@ def update(adaptation_id, changes):
 
 
 def set_state(adaptation_id, state):
-    """Set an adaptation's lifecycle state (building | off | on)."""
+    """Set an adaptation's lifecycle state (pending | building | off | on)."""
     if state not in STATES:
         raise ValueError(f"state must be one of: {STATES}")
     return update(adaptation_id, {"state": state})

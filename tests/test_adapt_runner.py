@@ -159,39 +159,42 @@ def test_build_chat_cmd_accepts_append_system_prompt_and_settings():
 
 # --- New build: row creation, provisional name, adaptation event -------------
 
-def test_new_build_creates_row_on_first_result_session_id(store, stub_model, monkeypatch):
-    sim = _GitSim(commits=[])  # no commits this turn
-    events = _run(monkeypatch, None, "Build a churn-risk worker that flags accounts",
+def test_conversational_first_turn_keeps_row_pending_and_emits_no_event(
+        store, stub_model, monkeypatch):
+    """A first turn that builds NOTHING (pure clarifying conversation) must NOT
+    announce an adaptation event and must leave the keying row `pending` (hidden
+    from the rail). Pre-creation/timing is the bug this fix closes: the row
+    exists only to key the run, so it stays invisible until a build lands."""
+    sim = _GitSim(commits=[])  # no commits this turn -> nothing built
+    # Pre-created row (the server makes it at POST), no session id yet.
+    rid = adaptations_lib.create("Build a churn-risk worker that flags accounts", "")
+    events = _run(monkeypatch, rid, "Build a churn-risk worker that flags accounts",
                   _canned_stream(session_id="sess-abc"), sim)
 
-    # The adaptation event was yielded with the new id + provisional name.
-    adapt_evts = [e for e in events if e.get("kind") == "adaptation"]
-    assert len(adapt_evts) == 1
-    new_id = adapt_evts[0]["adaptation_id"]
-    assert adapt_evts[0]["state"] == "building"
-    assert adapt_evts[0]["name"].startswith("Build a churn-risk worker")
+    # NO adaptation event was emitted - nothing built.
+    assert [e for e in events if e.get("kind") == "adaptation"] == []
 
-    rec = adaptations_lib.read(new_id)
-    assert rec["state"] == "building"               # no artifacts -> stays building
-    assert rec["claude_session_id"] == "sess-abc"
-    assert rec["name"].startswith("Build a churn-risk worker")
+    rec = adaptations_lib.read(rid)
+    assert rec["state"] == "pending"                # no artifacts -> stays pending
+    assert rec["claude_session_id"] == "sess-abc"   # session id still persisted
+    # Hidden from the rail.
+    assert rid not in [r["id"] for r in adaptations_lib.list_all()]
 
 
-def test_new_build_creates_row_with_minted_id_when_result_has_no_session_id(
+def test_conversational_turn_persists_minted_sid_when_result_has_no_session_id(
         store, stub_model, monkeypatch):
-    """A `result` with NO session_id must still create the row, falling back to
-    the minted --session-id sid. The buffered pre-id events still flush to the
-    log. Mirrors chat_runner.run_turn's `result_sid or sid` fallback - without
-    it the row is never created and the buffered events + manifest are lost."""
+    """A `result` with NO session_id must still persist the session id (falling
+    back to the minted --session-id sid) onto the pending keying row, even when
+    nothing is built. No adaptation event fires for a no-build turn."""
+    rid = adaptations_lib.create("Build the foo worker", "")
     captured = {}
 
     def fake_spawn(cmd, exit_holder=None):
         captured["cmd"] = cmd
-        # A result event with NO session_id key at all.
+        # A result event with NO session_id key at all; no commits this turn.
         for ln in [
-            _assistant_thinking("planning the worker"),
-            _assistant_tool("Write", {"file_path": "scripts/workers/foo.md"}),
-            _assistant_text("Done - built the worker."),
+            _assistant_thinking("thinking it through"),
+            _assistant_text("Tell me more about the worker."),
             _line({"type": "result", "usage": {}, "total_cost_usd": 0.01}),
         ]:
             yield ln
@@ -206,64 +209,70 @@ def test_new_build_creates_row_with_minted_id_when_result_has_no_session_id(
         yield from fake_spawn(cmd, exit_holder)
 
     monkeypatch.setattr(adapt_runner, "_spawn", wrapped)
-    events = list(adapt_runner.run_turn(None, "Build the foo worker"))
+    events = list(adapt_runner.run_turn(rid, "Build the foo worker"))
 
     # The minted session id (from --session-id) is what the row should use.
     cmd = captured["cmd"]
     minted_sid = cmd[cmd.index("--session-id") + 1]
 
-    adapt_evts = [e for e in events if e.get("kind") == "adaptation"]
-    assert len(adapt_evts) == 1
-    new_id = adapt_evts[0]["adaptation_id"]
-
-    rec = adaptations_lib.read(new_id)
+    # No adaptation event for a no-build turn; row stays pending and hidden.
+    assert [e for e in events if e.get("kind") == "adaptation"] == []
+    rec = adaptations_lib.read(rid)
     assert rec["claude_session_id"] == minted_sid
+    assert rec["state"] == "pending"
 
-    # The buffered pre-id events still flushed to the durable log.
-    logged = adapt_transcript.read_events(new_id)
+    # The user-visible events still flushed to the durable log.
+    logged = adapt_transcript.read_events(rid)
     kinds = [e.get("kind") for e in logged]
     assert "think" in kinds
-    assert "tool_step" in kinds
     assert "text" in kinds
-    assert "adaptation" in kinds
 
 
-def test_state_flip_building_to_off_yields_second_adaptation_event(
+def test_build_turn_promotes_pending_to_off_and_emits_one_event(
         store, stub_model, monkeypatch):
-    """When the manifest grows and state flips building -> off, a SECOND
-    adaptation event (state: "off") must be yielded so a live UI client can
-    update the rail dot/toggle without re-reading the record. The flip event is
-    persisted to the log too (for reconnect/replay)."""
-    sim = _GitSim(commits=[("sha-worker", ["scripts/workers/foo.md"])])
-    events = _run(monkeypatch, None, "Build the foo worker",
+    """When the manifest GROWS (a real build landed), the keying row is promoted
+    pending -> off and EXACTLY ONE adaptation event (state: "off") is emitted -
+    this is when the row first becomes visible in the rail (mock's Done->Ready).
+    The name is derived from the manifest (here: a worker basename), NOT the
+    slugged long message. The event is persisted to the log for replay."""
+    sim = _GitSim(commits=[("sha-worker", ["scripts/workers/stock_sentinel.md"])])
+    rid = adaptations_lib.create("Build a worker that watches stock for me please", "")
+    events = _run(monkeypatch, rid,
+                  "Build a worker that watches stock for me please",
                   _canned_stream(session_id="sess-flip"), sim)
 
     adapt_evts = [e for e in events if e.get("kind") == "adaptation"]
-    assert len(adapt_evts) == 2
-    assert adapt_evts[0]["state"] == "building"
-    assert adapt_evts[1]["state"] == "off"
-    # Both events share the same adaptation id.
-    assert adapt_evts[0]["adaptation_id"] == adapt_evts[1]["adaptation_id"]
-    new_id = adapt_evts[0]["adaptation_id"]
+    assert len(adapt_evts) == 1
+    assert adapt_evts[0]["state"] == "off"
+    assert adapt_evts[0]["adaptation_id"] == rid
+    # Name derived from the worker artifact basename, not the long message.
+    assert adapt_evts[0]["name"] == "stock_sentinel"
 
-    # The flip event is in the durable log too.
-    logged = adapt_transcript.read_events(new_id)
+    rec = adaptations_lib.read(rid)
+    assert rec["state"] == "off"
+    assert rec["name"] == "stock_sentinel"
+    # Now visible in the rail.
+    assert rid in [r["id"] for r in adaptations_lib.list_all()]
+
+    # The off event is in the durable log too.
+    logged = adapt_transcript.read_events(rid)
     off_evts = [e for e in logged
                 if e.get("kind") == "adaptation" and e.get("state") == "off"]
     assert len(off_evts) == 1
 
 
-def test_provisional_name_capped_and_fallback(store, stub_model, monkeypatch):
+def test_name_falls_back_to_provisional_when_no_artifacts(store, stub_model, monkeypatch):
+    """The provisional-name cap/fallback rules still govern the row's name while
+    it is pending (no artifacts to derive from)."""
     sim = _GitSim(commits=[])
     long_msg = "x" * 200
-    events = _run(monkeypatch, None, long_msg, _canned_stream(), sim)
-    name = [e for e in events if e.get("kind") == "adaptation"][0]["name"]
-    assert len(name) <= 48
+    rid = adaptations_lib.create(adapt_runner._provisional_name(long_msg), "")
+    _run(monkeypatch, rid, long_msg, _canned_stream(), sim)
+    assert len(adaptations_lib.read(rid)["name"]) <= 48
 
-    sim2 = _GitSim(commits=[])
-    events2 = _run(monkeypatch, None, "   ", _canned_stream(session_id="sess-z"), sim2)
-    name2 = [e for e in events2 if e.get("kind") == "adaptation"][0]["name"]
-    assert name2 == "New adaptation"
+    rid2 = adaptations_lib.create(adapt_runner._provisional_name("   "), "")
+    _run(monkeypatch, rid2, "   ", _canned_stream(session_id="sess-z"), _GitSim(commits=[]))
+    assert adaptations_lib.read(rid2)["name"] == "New adaptation"
 
 
 # --- Manifest capture: worker (ref convention pin) ---------------------------
@@ -315,10 +324,15 @@ def test_adapter_skips_contract_and_init(store, stub_model, monkeypatch):
         "scripts/adapters/ecommerce/__init__.py",
         "scripts/adapters/ecommerce/_contract.py",
     ])])
-    events = _run(monkeypatch, None, "touch adapter plumbing", _canned_stream(), sim)
-    new_id = [e for e in events if e.get("kind") == "adaptation"][0]["adaptation_id"]
-    rec = adaptations_lib.read(new_id)
+    # __init__/_contract are plumbing, not routable providers: the manifest does
+    # NOT grow, so no adaptation event fires and the row stays pending. Read by
+    # the pre-created id.
+    rid = adaptations_lib.create("touch adapter plumbing", "")
+    events = _run(monkeypatch, rid, "touch adapter plumbing", _canned_stream(), sim)
+    assert [e for e in events if e.get("kind") == "adaptation"] == []
+    rec = adaptations_lib.read(rid)
     assert not [m for m in rec["manifest"] if m["surface"] == "adapter"]
+    assert rec["state"] == "pending"
 
 
 # --- Manifest capture: card-type ---------------------------------------------
@@ -362,21 +376,22 @@ def test_new_build_with_preexisting_row_lacking_session_id_mints_session(
     claude_session_id, then keys the run by that id. run_turn must treat an id
     whose row has no claude_session_id as a NEW session: mint a UUID, run with
     --session-id (not --resume), persist the minted/result session id onto the
-    EXISTING row, and yield an `adaptation` event (state building) for that id.
-    No second row is created."""
+    EXISTING row. When a build LANDS (manifest grows) it promotes pending->off
+    and yields one `adaptation` event (state off) for that id. No second row is
+    created."""
     rid = adaptations_lib.create("Build the foo worker", "")
     assert adaptations_lib.read(rid)["claude_session_id"] == ""
 
     captured = {}
 
     def fake_spawn(cmd, exit_holder=None):
-        captured["cmd"] = cmd
+        captured.setdefault("cmd", cmd)  # first (build) spawn, not the compact one
         for ln in _canned_stream(session_id="sess-new-on-row"):
             yield ln
         if exit_holder is not None:
             exit_holder["returncode"] = 0
 
-    sim = _GitSim(commits=[])
+    sim = _GitSim(commits=[("sha-w", ["scripts/workers/foo.md"])])
     state = _install_git(monkeypatch, sim, head_before="HEAD0")
 
     def wrapped(cmd, exit_holder=None):
@@ -391,11 +406,11 @@ def test_new_build_with_preexisting_row_lacking_session_id_mints_session(
     assert "--session-id" in cmd
     assert "--resume" not in cmd
 
-    # The adaptation event carries the SAME pre-created id, state building.
+    # The adaptation event carries the SAME pre-created id, state off (promoted).
     adapt_evts = [e for e in events if e.get("kind") == "adaptation"]
     assert len(adapt_evts) == 1
     assert adapt_evts[0]["adaptation_id"] == rid
-    assert adapt_evts[0]["state"] == "building"
+    assert adapt_evts[0]["state"] == "off"
 
     # The session id was persisted onto the EXISTING row (no new row created).
     rec = adaptations_lib.read(rid)
@@ -558,25 +573,26 @@ def test_post_ship_enqueues_one_compact_turn_best_effort(store, stub_model, monk
 # --- Persistence: event log --------------------------------------------------
 
 def test_yielded_events_are_appended_to_event_log(store, stub_model, monkeypatch):
-    sim = _GitSim(commits=[])
-    events = _run(monkeypatch, None, "build a thing",
-                  _canned_stream(session_id="sess-log"), sim)
-    new_id = [e for e in events if e.get("kind") == "adaptation"][0]["adaptation_id"]
+    # A build turn (manifest grows) so the row is promoted off pending and the
+    # off adaptation event is logged alongside the user-visible stream events.
+    sim = _GitSim(commits=[("sha-w", ["scripts/workers/foo.md"])])
+    rid = adaptations_lib.create("build a thing", "")
+    _run(monkeypatch, rid, "build a thing", _canned_stream(session_id="sess-log"), sim)
 
-    logged = adapt_transcript.read_events(new_id)
+    logged = adapt_transcript.read_events(rid)
     kinds = [e.get("kind") for e in logged]
     # The user-visible stream events made it into the log.
     assert "think" in kinds
     assert "tool_step" in kinds
     assert "text" in kinds
-    # The adaptation event (pre-id, buffered then flushed) is in the log too.
+    # The off adaptation event (emitted on promotion) is in the log too.
     assert "adaptation" in kinds
 
 
 def test_event_log_roundtrips_text(store, stub_model, monkeypatch):
     sim = _GitSim(commits=[])
-    events = _run(monkeypatch, None, "build", _canned_stream(), sim)
-    new_id = [e for e in events if e.get("kind") == "adaptation"][0]["adaptation_id"]
-    logged = adapt_transcript.read_events(new_id)
+    rid = adaptations_lib.create("build", "")
+    _run(monkeypatch, rid, "build", _canned_stream(), sim)
+    logged = adapt_transcript.read_events(rid)
     texts = [e.get("text") for e in logged if e.get("kind") == "text"]
     assert any("Done - built the worker." in (t or "") for t in texts)
