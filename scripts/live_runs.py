@@ -107,6 +107,20 @@ def is_live(key):
     return state is not None and not state.done
 
 
+def run_error(key):
+    """Return the captured source exception for a DONE run, else None.
+
+    The source thread stores any exception it hit on RunState.error and only
+    after marking the run done. This accessor surfaces it so a consumer (the SSE
+    handler) can tell an abnormal end from a clean finish: while a run is still
+    live, or if it finished cleanly, or if `key` was never started, this is None.
+    """
+    state = _get(key)
+    if state is None or not state.done:
+        return None
+    return state.error
+
+
 def tail(key, read_fn, heartbeat=15.0):
     """Yield events for `key`: replay the log, then stream new events live.
 

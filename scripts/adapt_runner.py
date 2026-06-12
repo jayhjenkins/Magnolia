@@ -259,15 +259,35 @@ def run_turn(adaptation_id, message):
     tools = ",".join(adapt_tools.ADAPT_ALLOWED_TOOLS)
     model = profile_lib.resolve_model(None)
 
+    # Three entry shapes (decision A - uniform server flow):
+    #   id None              -> NEW build, row minted internally on first result.
+    #   id given, no sid yet -> NEW build on a PRE-CREATED row (the server made
+    #                           the row at POST time so the run could be keyed by
+    #                           id before claude reports a session). Mint a UUID,
+    #                           run new_session, persist the session id onto the
+    #                           EXISTING row on the first result; never mint a
+    #                           second row. Provisional name comes from the row.
+    #   id given, has sid    -> RESUME/edit (unchanged).
     if adaptation_id is None:
         new_session = True
+        new_row_needed = True
         sid = str(uuid.uuid4())
         provisional = _provisional_name(message)
     else:
-        new_session = False
         rec = adaptations_lib.read(adaptation_id)
-        sid = rec.get("claude_session_id")
-        provisional = None
+        existing_sid = rec.get("claude_session_id")
+        if existing_sid:
+            new_session = False
+            new_row_needed = False
+            sid = existing_sid
+            provisional = None
+        else:
+            # Pre-created row, no session yet: treat as a NEW session bound to
+            # this existing row (do not create another row).
+            new_session = True
+            new_row_needed = False
+            sid = str(uuid.uuid4())
+            provisional = rec.get("name")
 
     cmd = build_chat_cmd(
         session_id=sid,
@@ -290,6 +310,10 @@ def run_turn(adaptation_id, message):
     # On a resume the id is known up front, so nothing buffers.
     pre_id_buffer = []
     current_id = adaptation_id
+    # A NEW session still owes ONE adaptation(building) announcement on the first
+    # result: minted-row builds announce when the row is created; pre-created-row
+    # builds announce after persisting the session id onto the existing row.
+    announced = not new_session
     shipped = False  # set True if this turn produced manifest artifacts
     result_usage = {}
 
@@ -323,11 +347,22 @@ def run_turn(adaptation_id, message):
                 # result lacking session_id would never create the row, silently
                 # dropping the buffered pre-id events and the manifest.
                 result_sid = event.get("session_id") or sid
-                # NEW build: mint the row on the first result, then flush the
-                # pre-id buffer into the real log and announce the row so the UI
-                # can add the rail entry immediately.
-                if adaptation_id is None and current_id is None and result_sid:
-                    current_id = adaptations_lib.create(provisional, result_sid)
+                # NEW build, first result: bind the session id and announce the
+                # row so the UI can add the rail entry immediately.
+                if new_session and not announced and result_sid:
+                    if current_id is None:
+                        # Minted-row build (id was None): create the row now and
+                        # flush the buffered pre-id events into the real log.
+                        current_id = adaptations_lib.create(provisional, result_sid)
+                        for buffered in pre_id_buffer:
+                            adapt_transcript.append_event(current_id, buffered)
+                        pre_id_buffer = []
+                    else:
+                        # Pre-created-row build (server made the row at POST): the
+                        # row exists and events already log directly; just persist
+                        # the freshly-bound session id onto the EXISTING row.
+                        adaptations_lib.update(
+                            current_id, {"claude_session_id": result_sid})
                     adapt_evt = {
                         "kind": "adaptation",
                         "adaptation_id": current_id,
@@ -335,9 +370,7 @@ def run_turn(adaptation_id, message):
                         "state": "building",
                     }
                     adapt_transcript.append_event(current_id, adapt_evt)
-                    for buffered in pre_id_buffer:
-                        adapt_transcript.append_event(current_id, buffered)
-                    pre_id_buffer = []
+                    announced = True
                     yield adapt_evt
                 # The result itself is metadata for the UI - yield, don't log.
                 yield event

@@ -354,6 +354,86 @@ def test_registry_added_from_pair_identical_is_empty():
     assert adapt_runner._registry_added_from_pair(same, same) == []
 
 
+# --- New build keyed by a pre-created row (server-created row, decision A) ----
+
+def test_new_build_with_preexisting_row_lacking_session_id_mints_session(
+        store, stub_model, monkeypatch):
+    """The server creates the adaptation row at POST time with an EMPTY
+    claude_session_id, then keys the run by that id. run_turn must treat an id
+    whose row has no claude_session_id as a NEW session: mint a UUID, run with
+    --session-id (not --resume), persist the minted/result session id onto the
+    EXISTING row, and yield an `adaptation` event (state building) for that id.
+    No second row is created."""
+    rid = adaptations_lib.create("Build the foo worker", "")
+    assert adaptations_lib.read(rid)["claude_session_id"] == ""
+
+    captured = {}
+
+    def fake_spawn(cmd, exit_holder=None):
+        captured["cmd"] = cmd
+        for ln in _canned_stream(session_id="sess-new-on-row"):
+            yield ln
+        if exit_holder is not None:
+            exit_holder["returncode"] = 0
+
+    sim = _GitSim(commits=[])
+    state = _install_git(monkeypatch, sim, head_before="HEAD0")
+
+    def wrapped(cmd, exit_holder=None):
+        state["phase"] = "after"
+        yield from fake_spawn(cmd, exit_holder)
+
+    monkeypatch.setattr(adapt_runner, "_spawn", wrapped)
+    events = list(adapt_runner.run_turn(rid, "Build the foo worker"))
+
+    cmd = captured["cmd"]
+    # NEW session: --session-id present, --resume absent.
+    assert "--session-id" in cmd
+    assert "--resume" not in cmd
+
+    # The adaptation event carries the SAME pre-created id, state building.
+    adapt_evts = [e for e in events if e.get("kind") == "adaptation"]
+    assert len(adapt_evts) == 1
+    assert adapt_evts[0]["adaptation_id"] == rid
+    assert adapt_evts[0]["state"] == "building"
+
+    # The session id was persisted onto the EXISTING row (no new row created).
+    rec = adaptations_lib.read(rid)
+    assert rec["claude_session_id"] == "sess-new-on-row"
+    # Exactly one active adaptation exists (no duplicate row was minted).
+    assert len(adaptations_lib.list_all()) == 1
+
+
+def test_new_build_on_preexisting_row_persists_minted_sid_when_result_lacks_one(
+        store, stub_model, monkeypatch):
+    """Same as above but the result has no session_id: fall back to the minted
+    --session-id sid and persist THAT onto the existing row."""
+    rid = adaptations_lib.create("Build foo", "")
+    captured = {}
+
+    def fake_spawn(cmd, exit_holder=None):
+        captured["cmd"] = cmd
+        for ln in [
+            _assistant_text("Done."),
+            _line({"type": "result", "usage": {}, "total_cost_usd": 0.01}),
+        ]:
+            yield ln
+
+    sim = _GitSim(commits=[])
+    state = _install_git(monkeypatch, sim, head_before="HEAD0")
+
+    def wrapped(cmd, exit_holder=None):
+        state["phase"] = "after"
+        yield from fake_spawn(cmd, exit_holder)
+
+    monkeypatch.setattr(adapt_runner, "_spawn", wrapped)
+    list(adapt_runner.run_turn(rid, "Build foo"))
+
+    cmd = captured["cmd"]
+    minted_sid = cmd[cmd.index("--session-id") + 1]
+    assert adaptations_lib.read(rid)["claude_session_id"] == minted_sid
+
+
 # --- Resume path argv --------------------------------------------------------
 
 def test_resume_argv_has_resume_harness_settings_allowedtools(store, stub_model, monkeypatch):

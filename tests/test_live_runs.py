@@ -92,3 +92,52 @@ def test_event_appended_between_read_and_wait_is_not_lost():
         if time.time() > deadline:
             break
     assert {"n": 42} in seen
+
+
+def test_run_error_returns_none_for_clean_completion():
+    """A run that finishes normally exposes no error."""
+    src = iter([{"n": 1}, {"n": 2}])
+    live_runs.start("err-clean", src, lambda e: None)
+    deadline = time.time() + 2
+    while live_runs.is_live("err-clean") and time.time() < deadline:
+        time.sleep(0.01)
+    assert not live_runs.is_live("err-clean")
+    assert live_runs.run_error("err-clean") is None
+
+
+def test_run_error_returns_the_captured_exception():
+    """A source that raises has its exception captured and exposed once done."""
+    boom = RuntimeError("source blew up")
+
+    def src():
+        yield {"n": 1}
+        raise boom
+
+    live_runs.start("err-boom", src(), lambda e: None)
+    deadline = time.time() + 2
+    while live_runs.is_live("err-boom") and time.time() < deadline:
+        time.sleep(0.01)
+    assert not live_runs.is_live("err-boom")
+    assert live_runs.run_error("err-boom") is boom
+
+
+def test_run_error_is_none_while_still_live():
+    """While a run is in-flight, run_error reports None (error only after done)."""
+    go = threading.Event()
+
+    def src():
+        yield {"n": 1}
+        go.wait(2)
+        raise RuntimeError("late")
+
+    live_runs.start("err-live", src(), lambda e: None)
+    # Give the thread a beat to start and yield the first event.
+    time.sleep(0.1)
+    assert live_runs.is_live("err-live")
+    assert live_runs.run_error("err-live") is None
+    go.set()
+
+
+def test_run_error_unknown_key_is_none():
+    """A key that was never started reports no error."""
+    assert live_runs.run_error("never-started") is None

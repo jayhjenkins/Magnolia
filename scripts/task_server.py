@@ -42,6 +42,9 @@ import profile_lib
 import packs_lib
 import platform_lib
 import adaptations_lib
+import adapt_runner
+import adapt_transcript
+import live_runs
 import adapters
 from adapters.project_management._contract import NotConfigured
 from adapters import NeedsConfirmation
@@ -1421,6 +1424,253 @@ def handle_chat(handler, task_id):
         _release_chat_run(task_id)
 
 
+# ─── Adapt: gated build session + rail CRUD ────────────────────────────────────
+# The build run is DECOUPLED from the SSE client via live_runs: the run is keyed
+# by adaptation_id, runs to completion on its own daemon thread, and a client
+# disconnect only stops the tail (never the run). One LIVE run per key (a NEW
+# message while live -> 409); the GET stream may always reconnect and tail.
+
+def _adapt_heartbeat_or_send(handler, event):
+    """Stream one tail event as SSE, turning heartbeats into a `: ping` comment.
+
+    The client ignores comment lines; data frames carry real build events.
+    Raises BrokenPipeError/ConnectionResetError on a dead socket (the caller
+    stops tailing on that - the run keeps going).
+    """
+    if event.get("kind") == "heartbeat":
+        handler.wfile.write(b": ping\n\n")
+        handler.wfile.flush()
+    else:
+        _sse_send(handler, event)
+
+
+def _stream_adapt_run(handler, key):
+    """Tail the live run for `key` over SSE, then surface a run error if any.
+
+    Replays the durable event log and tails new events (live_runs.tail). On a
+    client disconnect we stop tailing but DO NOT touch the run. After the tail
+    drains, if the run ended abnormally (live_runs.run_error), emit a terminal
+    error frame so a crashed build is not mistaken for a clean finish. Always
+    closes with the `event: done` sentinel when the socket is still alive.
+    """
+    disconnected = False
+    try:
+        for event in live_runs.tail(key, lambda: adapt_transcript.read_events(key)):
+            _adapt_heartbeat_or_send(handler, event)
+    except (BrokenPipeError, ConnectionResetError):
+        # Client went away mid-stream. Stop tailing; the run is owned by
+        # live_runs and keeps filling the durable log for a later reconnect.
+        disconnected = True
+    if disconnected:
+        return
+    # Tail drained with the socket intact. If the run ended in error, the tail
+    # looked like a clean finish (adapt_runner emits no error event) - surface a
+    # terminal error frame so the client can offer a retry.
+    try:
+        if live_runs.run_error(key) is not None:
+            _sse_send(handler, {
+                "kind": "error",
+                "role": "error",
+                "text": "The build run ended unexpectedly. You can retry.",
+            })
+        _sse_end(handler)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+
+
+def handle_adapt(handler):
+    """POST /api/adapt {message, adaptation_id?} - run a build turn over SSE.
+
+    New build (no adaptation_id): create the row at POST time so the run can be
+    keyed by id before claude reports a session (provisional name = first chars
+    of the message). Resume/edit (adaptation_id given): key by that id.
+
+    Decoupled run: if no live run exists for the key, start one
+    (live_runs.start) with a NO-OP append_fn - adapt_runner already appends every
+    event to its own durable log, so the read side uses adapt_transcript.
+    Then stream by tailing that log. A NEW message while a run is already live
+    returns 409 (the client should reconnect via GET /api/adapt/stream instead).
+    """
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    message = (body.get("message") or "").strip()
+    if not message:
+        _error_response(handler, "message is required")
+        return
+    adaptation_id = (body.get("adaptation_id") or "").strip() or None
+
+    # New build: mint the row now so the run is keyed by a real id from the
+    # start (provisional name = leading chars of the message; empty session id
+    # so adapt_runner treats it as a new session and binds the id on first
+    # result).
+    if adaptation_id is None:
+        try:
+            provisional = adapt_runner._provisional_name(message)
+            adaptation_id = adaptations_lib.create(provisional, "")
+        except Exception as e:
+            _error_response(handler, f"Failed to create adaptation: {e}", status=500)
+            return
+    else:
+        # Resume/edit: a NEW message while the run is already live is a 409 -
+        # the client should reconnect via the GET stream, not start a 2nd run.
+        if live_runs.is_live(adaptation_id):
+            _error_response(handler, "A build run is already in progress", status=409)
+            return
+
+    # Start the decoupled run if not already live. NO-OP append_fn: adapt_runner
+    # owns the durable log (adapt_transcript); passing append_event here would
+    # double-log. start() is itself a no-op if a run for this key is live.
+    live_runs.start(
+        adaptation_id,
+        adapt_runner.run_turn(adaptation_id, message),
+        lambda event: None,
+    )
+
+    _sse_begin(handler)
+    _stream_adapt_run(handler, adaptation_id)
+
+
+def handle_adapt_stream(handler, query_params):
+    """GET /api/adapt/stream?adaptation=<id> - reconnect: replay + tail a run.
+
+    Tails the run keyed by the adaptation id, replaying the durable event log
+    first (live_runs.tail does the replay-then-stream). Works whether the run is
+    in-progress or already finished; a finished-with-error run gets a terminal
+    error frame after the replay.
+    """
+    adaptation_id = (query_params.get("adaptation", [None])[0] or "").strip()
+    if not adaptation_id:
+        _error_response(handler, "adaptation query parameter is required", status=400)
+        return
+    _sse_begin(handler)
+    _stream_adapt_run(handler, adaptation_id)
+
+
+def handle_list_adaptations(handler):
+    """GET /api/adaptations - rail data: every active adaptation (id, name, state)."""
+    try:
+        adaptations = adaptations_lib.list_all()
+    except Exception as e:
+        _error_response(handler, f"Failed to list adaptations: {e}", status=500)
+        return
+    _json_response(handler, {"adaptations": adaptations})
+
+
+def handle_toggle_adaptation(handler, adaptation_id):
+    """PUT /api/adaptations/{id}/toggle {state} - flip on/off (rail toggle)."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    state = (body.get("state") or "").strip()
+    # Only on/off are user-toggleable; "building" is a runner-internal state.
+    if state not in ("on", "off"):
+        _error_response(handler, "state must be 'on' or 'off'", status=400)
+        return
+    try:
+        adaptations_lib.set_state(adaptation_id, state)
+    except FileNotFoundError:
+        _error_response(handler, f"Adaptation {adaptation_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Toggle failed: {e}", status=500)
+        return
+    _json_response(handler, {"ok": True, "state": state})
+
+
+def handle_rename_adaptation(handler, adaptation_id):
+    """PUT /api/adaptations/{id} {name} - inline rename (id is stable)."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    name = (body.get("name") or "").strip()
+    if not name:
+        _error_response(handler, "name is required", status=400)
+        return
+    try:
+        adaptations_lib.set_name(adaptation_id, name)
+    except FileNotFoundError:
+        _error_response(handler, f"Adaptation {adaptation_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Rename failed: {e}", status=500)
+        return
+    _json_response(handler, {"ok": True, "name": name})
+
+
+def _adapt_git_revert(sha):
+    """Revert one commit, best-effort. Returns (ok, message).
+
+    Reuses undo_receipt's mechanism: `git revert --no-edit <sha>`; on failure
+    (a later commit touched the same lines, or the commit is already reverted)
+    abort to restore the tree and report the failure rather than raising - the
+    bundle delete tolerates a partial failure (it must still tombstone). A
+    module-level seam so tests assert revert ORDER without touching the repo.
+    """
+    rv = subprocess.run(["git", "-C", PM_OS_DIR, "revert", "--no-edit", sha],
+                        capture_output=True, text=True)
+    if rv.returncode != 0:
+        subprocess.run(["git", "-C", PM_OS_DIR, "revert", "--abort"],
+                       capture_output=True, text=True)
+        return (False, (rv.stderr or rv.stdout or "revert failed").strip()[:200])
+    return (True, "")
+
+
+def handle_delete_adaptation(handler, adaptation_id):
+    """POST /api/adaptations/{id}/delete - bundle revert, then tombstone.
+
+    Reverts each manifest commit NEWEST-first (reverse of capture order, which
+    the manifest stores oldest->newest), best-effort: a conflicting/already-
+    reverted commit is skipped and reported as a partial failure rather than a
+    500. After reverting, tombstone the row (invariant #6: never hard-delete;
+    the file stays, marked deleted). The warning modal is client-side.
+    """
+    try:
+        rec = adaptations_lib.read(adaptation_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Adaptation {adaptation_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Delete failed: {e}", status=500)
+        return
+
+    manifest = rec.get("manifest") or []
+    # Capture order is oldest->newest; revert newest-first. De-dupe shas (a
+    # single commit can produce several manifest entries) while preserving the
+    # newest-first order.
+    shas = []
+    for entry in reversed(manifest):
+        sha = entry.get("commit")
+        if sha and sha not in shas:
+            shas.append(sha)
+
+    partial = False
+    failures = []
+    for sha in shas:
+        ok, msg = _adapt_git_revert(sha)
+        if not ok:
+            partial = True
+            failures.append({"commit": sha, "error": msg})
+
+    try:
+        adaptations_lib.tombstone(adaptation_id)
+    except Exception as e:
+        _error_response(handler, f"Delete failed to tombstone: {e}", status=500)
+        return
+
+    resp = {"ok": True}
+    if partial:
+        resp["partial"] = True
+        resp["failures"] = failures
+    _json_response(handler, resp)
+
+
 def handle_rerun_task(handler, task_id):
     """POST /api/tasks/{id}/rerun — Reset agent state and re-dispatch the task."""
     try:
@@ -2188,6 +2438,38 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/workers" and method == "GET":
             handle_list_workers(self)
+            return True
+
+        # ─── Adapt API routes ──────────────────────────────────────────
+        # POST /api/adapt - run a build turn (decoupled SSE). GET stream
+        # reconnects. Rail CRUD lives under /api/adaptations. Specific action
+        # paths precede the generic /api/adaptations/{id} rename route.
+
+        if path == "/api/adapt" and method == "POST":
+            handle_adapt(self)
+            return True
+
+        if path == "/api/adapt/stream" and method == "GET":
+            handle_adapt_stream(self, query_params)
+            return True
+
+        if path == "/api/adaptations" and method == "GET":
+            handle_list_adaptations(self)
+            return True
+
+        match = re.match(r"^/api/adaptations/([^/]+)/toggle$", path)
+        if match and method == "PUT":
+            handle_toggle_adaptation(self, unquote(match.group(1)))
+            return True
+
+        match = re.match(r"^/api/adaptations/([^/]+)/delete$", path)
+        if match and method == "POST":
+            handle_delete_adaptation(self, unquote(match.group(1)))
+            return True
+
+        match = re.match(r"^/api/adaptations/([^/]+)$", path)
+        if match and method == "PUT":
+            handle_rename_adaptation(self, unquote(match.group(1)))
             return True
 
         # ─── Task trace routes ─────────────────────────────────────────
