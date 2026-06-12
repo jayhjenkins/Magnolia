@@ -19,7 +19,6 @@ import socket
 import shlex
 import subprocess
 import sys
-import threading
 import traceback
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
@@ -55,27 +54,16 @@ from shipper import (
     _attempt_publish, _emit_confirm_card, _note, _load_email_cache,
 )
 
-# ─── Chat run-lock ─────────────────────────────────────────────────────────────
-# A session must never have two concurrent chat runs. The server is a
-# ThreadingHTTPServer (one thread per request) within a single process, so an
-# in-memory set guarded by a lock is sufficient to serialize per task_id.
-_CHAT_RUNS = set()              # task_ids with an active chat run (this process)
-_CHAT_RUNS_GUARD = threading.Lock()
-
-
-def _try_acquire_chat_run(task_id):
-    """Atomically claim the chat run-lock for a task. True if acquired."""
-    with _CHAT_RUNS_GUARD:
-        if task_id in _CHAT_RUNS:
-            return False
-        _CHAT_RUNS.add(task_id)
-        return True
-
-
-def _release_chat_run(task_id):
-    """Release the chat run-lock for a task (idempotent)."""
-    with _CHAT_RUNS_GUARD:
-        _CHAT_RUNS.discard(task_id)
+# ─── Chat concurrency ────────────────────────────────────────────────────────
+# A session must never have two concurrent chat runs. This guarantee — and the
+# survive-disconnect substrate — is now provided by live_runs: a chat run is
+# keyed by `chat:<task_id>`, a second concurrent POST while that key is live
+# returns 409, and a client disconnect only stops the SSE tail (never the run).
+# See handle_chat below. (The old in-memory _CHAT_RUNS lock was removed when this
+# moved onto live_runs — it had no other callers.)
+def _chat_run_key(task_id):
+    """live_runs key for a task's chat run. Namespaced to avoid adapt-key collision."""
+    return "chat:%s" % (task_id,)
 
 
 # ─── Load LangFuse env vars if not already set ───────────────────────────────
@@ -1344,11 +1332,20 @@ def handle_chat(handler, task_id):
     Enforces two guards before streaming:
       1. The background worker must not be mid-run on this session
          (frontmatter agent_status == "running" → 409).
-      2. No other chat run may be active for this session (run-lock → 409).
+      2. No other chat run may be live for this session (live_runs.is_live → 409).
 
-    The run-lock is ALWAYS released in a finally, including on client
-    disconnect (a write raising BrokenPipeError/ConnectionResetError) — which
-    also closes the run_turn generator, killing the claude process group.
+    DECOUPLED run (mirrors Adapt): the chat turn no longer streams the
+    chat_runner.run_turn generator directly. Instead it is started on a
+    live_runs daemon thread (keyed by `chat:<task_id>`) and the SSE handler only
+    TAILS the durable chat transcript. So a client disconnect (the panel closing
+    / the task closing) stops only the tail — never the run. The run finishes on
+    its own and keeps persisting to the transcript; reopening the panel replays
+    the progress-so-far via GET /api/tasks/{id}/chat.
+
+    NO-OP append_fn: chat_runner.run_turn ALREADY appends every event to the
+    chat transcript itself (chat_transcript.append_event), so the read side
+    tails chat_transcript.read_events(task_id) and start() is given a no-op
+    append_fn to avoid double-logging (same decision as Adapt).
 
     Frontend contract: once _sse_begin has sent 200 OK, the stream ALWAYS
     terminates with a normal `event: done` (via _sse_end), a `kind:error`
@@ -1380,48 +1377,30 @@ def handle_chat(handler, task_id):
         _error_response(handler, "Agent is currently working", status=409)
         return
 
-    # Chat-concurrency lock: one active chat run per session.
-    if not _try_acquire_chat_run(task_id):
+    # Chat-concurrency: one LIVE chat run per session. A second concurrent POST
+    # while the run is live is a 409 (same status the old in-memory lock
+    # returned) — the surviving run keeps filling the transcript regardless.
+    key = _chat_run_key(task_id)
+    if live_runs.is_live(key):
         _error_response(handler, "A chat run is already in progress", status=409)
         return
 
-    try:
-        _sse_begin(handler)
-        try:
-            for event in chat_runner.run_turn(task_id, message):
-                _sse_send(handler, event)
-            _sse_end(handler)
-        except (BrokenPipeError, ConnectionResetError):
-            # Client disconnected mid-stream. Stop iterating — the for-loop's
-            # exit closes the run_turn generator (its finally kills the claude
-            # process group). The socket is gone, so do NOT try to write more;
-            # the finally releases the lock.
-            pass
-        except Exception as exc:
-            # Any OTHER failure after 200 OK was committed (a task_lib /
-            # chat_transcript write failure, an OSError, a normalize bug, …).
-            # Headers are already sent, so we cannot send a 500 — instead emit
-            # a terminal error frame so the client always gets a signal rather
-            # than an unsignaled half-stream. Log the original exception so the
-            # failure is diagnosable rather than swallowed.
-            sys.stderr.write(
-                "[chat] run_turn failed for %s after stream began: %r\n"
-                % (task_id, exc)
-            )
-            try:
-                _sse_send(handler, {
-                    "kind": "error",
-                    "role": "error",
-                    "text": "The chat run failed unexpectedly. You can retry.",
-                })
-                _sse_end(handler)
-            except (BrokenPipeError, ConnectionResetError, Exception):
-                # The client also went away (or the socket broke) while we were
-                # reporting the error. Nothing more we can do — never let a
-                # write failure during error reporting escape handle_chat.
-                pass
-    finally:
-        _release_chat_run(task_id)
+    # Start the decoupled run. NO-OP append_fn: run_turn owns the durable log
+    # (chat_transcript); passing append_event here would double-log. start() is
+    # itself a no-op if a run for this key is already live.
+    live_runs.start(
+        key,
+        chat_runner.run_turn(task_id, message),
+        lambda event: None,
+    )
+
+    _sse_begin(handler)
+    _stream_live_run(
+        handler,
+        key,
+        lambda: chat_transcript.read_events(task_id),
+        "The chat run ended unexpectedly. You can retry.",
+    )
 
 
 # ─── Adapt: gated build session + rail CRUD ────────────────────────────────────
@@ -1430,12 +1409,12 @@ def handle_chat(handler, task_id):
 # disconnect only stops the tail (never the run). One LIVE run per key (a NEW
 # message while live -> 409); the GET stream may always reconnect and tail.
 
-def _adapt_heartbeat_or_send(handler, event):
+def _heartbeat_or_send(handler, event):
     """Stream one tail event as SSE, turning heartbeats into a `: ping` comment.
 
-    The client ignores comment lines; data frames carry real build events.
-    Raises BrokenPipeError/ConnectionResetError on a dead socket (the caller
-    stops tailing on that - the run keeps going).
+    The client ignores comment lines; data frames carry real events. Raises
+    BrokenPipeError/ConnectionResetError on a dead socket (the caller stops
+    tailing on that - the run keeps going).
     """
     if event.get("kind") == "heartbeat":
         handler.wfile.write(b": ping\n\n")
@@ -1444,19 +1423,22 @@ def _adapt_heartbeat_or_send(handler, event):
         _sse_send(handler, event)
 
 
-def _stream_adapt_run(handler, key):
+def _stream_live_run(handler, key, read_fn, error_text):
     """Tail the live run for `key` over SSE, then surface a run error if any.
 
-    Replays the durable event log and tails new events (live_runs.tail). On a
-    client disconnect we stop tailing but DO NOT touch the run. After the tail
-    drains, if the run ended abnormally (live_runs.run_error), emit a terminal
-    error frame so a crashed build is not mistaken for a clean finish. Always
-    closes with the `event: done` sentinel when the socket is still alive.
+    Shared survive-disconnect streaming substrate for both Adapt and the task
+    chat panel. Replays the durable event log and tails new events
+    (live_runs.tail over `read_fn`). On a client disconnect we stop tailing but
+    DO NOT touch the run — it is owned by live_runs, keeps filling its durable
+    log, and reaches completion. After the tail drains with the socket intact,
+    if the run ended abnormally (live_runs.run_error) we emit a terminal error
+    frame (`error_text`) so a crashed run is not mistaken for a clean finish.
+    Always closes with the `event: done` sentinel when the socket is still alive.
     """
     disconnected = False
     try:
-        for event in live_runs.tail(key, lambda: adapt_transcript.read_events(key)):
-            _adapt_heartbeat_or_send(handler, event)
+        for event in live_runs.tail(key, read_fn):
+            _heartbeat_or_send(handler, event)
     except (BrokenPipeError, ConnectionResetError):
         # Client went away mid-stream. Stop tailing; the run is owned by
         # live_runs and keeps filling the durable log for a later reconnect.
@@ -1464,18 +1446,28 @@ def _stream_adapt_run(handler, key):
     if disconnected:
         return
     # Tail drained with the socket intact. If the run ended in error, the tail
-    # looked like a clean finish (adapt_runner emits no error event) - surface a
-    # terminal error frame so the client can offer a retry.
+    # looked like a clean finish (the runner may emit no error event) - surface
+    # a terminal error frame so the client can offer a retry.
     try:
         if live_runs.run_error(key) is not None:
             _sse_send(handler, {
                 "kind": "error",
                 "role": "error",
-                "text": "The build run ended unexpectedly. You can retry.",
+                "text": error_text,
             })
         _sse_end(handler)
     except (BrokenPipeError, ConnectionResetError):
         pass
+
+
+def _stream_adapt_run(handler, key):
+    """Tail the live Adapt build run for `key` over SSE (see _stream_live_run)."""
+    _stream_live_run(
+        handler,
+        key,
+        lambda: adapt_transcript.read_events(key),
+        "The build run ended unexpectedly. You can retry.",
+    )
 
 
 def handle_adapt(handler):

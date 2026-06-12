@@ -421,7 +421,17 @@ async function sendChat() {
       if (line.startsWith('event:') && line.slice(6).trim() === 'done') isDone = true;
       else if (line.startsWith('data:')) dataLine = line.slice(5).trim();
     }
-    if (isDone) { streamDone = true; return; }   // terminal sentinel — stop the read loop
+    if (isDone) {
+      streamDone = true;   // terminal sentinel - stop the read loop
+      // Live turn completed cleanly (socket intact: the backend only emits the
+      // `event: done` sentinel from _sse_end, never on client disconnect). Settle
+      // the left detail from real persisted state so any artifact edits the agent
+      // made this turn appear without reopening the panel. This is the LIVE-only
+      // trigger: the GET-history replay path never reaches here, matching base
+      // (which settled only on live-turn completion, not on replay).
+      settleDetailFromServer();
+      return;
+    }
     if (!dataLine) return;
     let ev; try { ev = JSON.parse(dataLine); } catch (_) { return; }
     renderEvent(ev);
@@ -459,10 +469,10 @@ async function sendChat() {
       clearTyping();
       const n = renderTurn({ role: 'notice', text: ev.text || '' }, false);
       thread.appendChild(n); revealNow(n, 'show'); scrollThread();
-    } else if (ev.kind === 'result') {
-      // turn complete — settle the left detail from real persisted state
-      settleDetailFromServer();
     }
+    // NOTE: turn-completion settle is driven by the `event: done` sentinel (see
+    // handleFrame), not a `result` event: the live read tails the durable
+    // transcript, which does NOT carry the runner's `result` metadata frame.
   }
 
   chatState.busy = false;
@@ -471,8 +481,9 @@ async function sendChat() {
 }
 
 // ── Settle the LEFT detail from real persisted state ─────────────────
-// On a turn's `result` event, re-read the current task and refresh the left
-// pane so any artifact edits the agent made during the turn appear, plus the
+// On a live turn's clean completion (the `event: done` SSE sentinel), re-read
+// the current task and refresh the left pane so any artifact edits the agent
+// made during the turn appear, plus the
 // (blurred) board behind. The chat itself never fires an external write — this
 // is read-and-reflect only. Prefer the board's own detail renderer (openTask)
 // so the left pane stays a single source of truth; fall back to in-place chip /
