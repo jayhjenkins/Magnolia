@@ -1341,9 +1341,10 @@
   .adapt-turn.turn-error .adapt-notice { background: var(--danger-soft); border-left-color: var(--danger); }
   .adapt-turn.turn-error .adapt-notice svg { color: var(--danger); }
 
-  /* assistant step log */
-  .adapt-steps { display: flex; flex-direction: column; align-items: flex-start; gap: 11px; margin-bottom: 14px; }
-  .adapt-steps:empty { display: none; }
+  /* assistant flow: prose blocks + work groups interleaved in arrival order */
+  .adapt-flow { display: flex; flex-direction: column; align-items: flex-start; gap: 13px; }
+  .adapt-flow:empty { display: none; }
+  .adapt-flow .adapt-text { align-self: stretch; }
   .adapt-think { font-size: 12.5px; line-height: 1.5; color: var(--text-dim); }
   .adapt-tool { display: inline-flex; align-items: baseline; gap: 7px; font-size: 12.5px; color: var(--text-dim); max-width: 100%; }
   .adapt-tool .adapt-verb { font-weight: 600; color: var(--text-muted); flex: 0 0 auto; }
@@ -1358,6 +1359,7 @@
   .adapt-steps-toggle .adapt-step-check { width: 13px; height: 13px; color: var(--success); flex: 0 0 auto; }
   .adapt-steps-toggle .adapt-step-chev { width: 13px; height: 13px; color: var(--text-dim); transition: transform 0.25s; }
   .adapt-steps-toggle.open .adapt-step-chev { transform: rotate(90deg); }
+  .adapt-steps-list { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; padding: 2px 0 2px 20px; }
   .adapt-steps-list.collapsed { display: none; }
 
   /* assistant prose */
@@ -1560,7 +1562,7 @@
       <div class="adapt-head">
         <div>
           <h3 class="adapt-title">Adapt</h3>
-          <p class="adapt-subline">Teach Magnolia something new - new types of tasks, workflows, or integrations.</p>
+          <p class="adapt-subline">Teach Magnolia something new - types of tasks, workflows, or integrations.</p>
         </div>
       </div>
 

@@ -205,34 +205,46 @@ function postNotice(text, terminal) {
   adaptThread().appendChild(el); adaptRevealNow(el, 'show'); adaptScroll();
 }
 
-// ── Step log (think + tool steps, with ≥5 collapse) ─────────────────────
+// ── Work log (thinking + tool steps, collapsed by default) ──────────────
+// A "work group" folds the model's reasoning (think rows) AND its tool steps
+// into one disclosure that is COLLAPSED by default - the stream stays clean and
+// the user expands it only if curious. The flow interleaves these groups with
+// prose blocks in arrival order (see openAssistantTurn), so a tool call between
+// two sentences breaks them into separate paragraphs instead of gluing them.
 const ADAPT_VERB = { Read: 'Read', Grep: 'Searched', Glob: 'Searched', Write: 'Wrote', Edit: 'Wrote', Bash: 'Ran' };
 function adaptVerb(raw) {
   const v = String(raw || '').trim();
   if (v.startsWith('mcp__qmd')) return 'Searched';
   return ADAPT_VERB[v] || (v ? 'Ran' : 'Tool');
 }
-const ADAPT_COLLAPSE_AT = 5;
 
-function makeStepsGroup() {
+function makeWorkGroup() {
   const group = document.createElement('div'); group.className = 'adapt-steps-group';
-  const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'adapt-steps-toggle';
-  const list = document.createElement('div'); list.className = 'adapt-steps-list';
+  const toggle = document.createElement('button'); toggle.type = 'button';
+  toggle.className = 'adapt-steps-toggle'; toggle.style.display = 'inline-flex';
+  const list = document.createElement('div'); list.className = 'adapt-steps-list collapsed';
   group.appendChild(toggle); group.appendChild(list);
-  return { group, toggle, list };
-}
-function collapseGroup(g, count) {
-  g.list.classList.add('collapsed');
-  g.toggle.style.display = 'inline-flex';
-  g.toggle.innerHTML =
-    `<span class="adapt-step-check">${ADAPT_SVG.check}</span>` +
-    `<span class="adapt-steps-count">Worked across ${count} steps</span>` +
-    `<span class="adapt-step-chev">${ADAPT_SVG.chev}</span>`;
-  g.toggle.onclick = () => {
-    const collapsed = g.list.classList.toggle('collapsed');
-    g.toggle.classList.toggle('open', !collapsed);
+  const g = { group, toggle, list, tools: 0, thinks: 0 };
+  toggle.onclick = () => {
+    const collapsed = list.classList.toggle('collapsed');
+    toggle.classList.toggle('open', !collapsed);
     adaptScroll();
   };
+  setWorkHeader(g);
+  return g;
+}
+// Header label tracks what the group holds: tool work reads "Worked across N
+// steps"; a think-only group (reasoning, no tool calls) reads "Thought it
+// through". The chevron expands the collapsed body.
+function setWorkHeader(g) {
+  const label = g.tools > 0
+    ? `Worked across ${g.tools} step${g.tools === 1 ? '' : 's'}`
+    : 'Thought it through';
+  g.toggle.innerHTML =
+    `<span class="adapt-step-check">${ADAPT_SVG.check}</span>` +
+    `<span class="adapt-steps-count"></span>` +
+    `<span class="adapt-step-chev">${ADAPT_SVG.chev}</span>`;
+  g.toggle.querySelector('.adapt-steps-count').textContent = label;
 }
 function thinkRow(text) {
   const r = document.createElement('div'); r.className = 'adapt-think'; r.textContent = text; return r;
@@ -524,25 +536,51 @@ function handleAdaptFrame(frame, turn) {
   return false;
 }
 
-// An assistant turn shell: typing indicator, a steps box, and a text box. The
-// turn object carries the live render cursors.
+// An assistant turn shell: a typing indicator plus a single ordered `flow`
+// container. Prose blocks and collapsed work groups are appended to `flow` in
+// ARRIVAL order, so the conversation reads top-to-bottom as it actually
+// happened. The turn object carries the live render cursors: `tail` records
+// what kind of block is currently open ('text' | 'work'); a kind switch starts
+// a fresh block (so text after a tool call is its own paragraph, not glued on).
 function openAssistantTurn() {
   const el = document.createElement('div');
   el.className = 'adapt-turn turn-assistant show';
   el.innerHTML =
     `<div class="adapt-typing"><span></span><span></span><span></span></div>` +
-    `<div class="adapt-steps"></div>` +
-    `<div class="adapt-text"></div>`;
+    `<div class="adapt-flow"></div>`;
   adaptThread().appendChild(el); adaptScroll();
   return {
     el,
     typing: el.querySelector('.adapt-typing'),
-    steps: el.querySelector('.adapt-steps'),
-    text: el.querySelector('.adapt-text'),
-    group: null, toolCount: 0, rawText: '', sawText: false, typingCleared: false,
-    cardHost: el, // ask/plan cards append after text
+    flow: el.querySelector('.adapt-flow'),
+    tail: null,                 // 'text' | 'work' — the currently-open block
+    textEl: null, textRaw: '',  // current prose block + its accumulated markdown
+    group: null,                // current work group {group,toggle,list,tools,thinks}
+    sawText: false, anyContent: false, typingCleared: false,
+    cardHost: el, cardAdded: false, // ask/plan cards append after the flow
   };
 }
+
+// Open (or reuse) the current prose block. A new block starts whenever the tail
+// is not already prose — i.e. after a work group — so consecutive text deltas
+// concatenate, but text on the far side of a tool call is a separate paragraph.
+function ensureTextBlock(turn) {
+  if (turn.tail === 'text' && turn.textEl) return turn.textEl;
+  const t = document.createElement('div'); t.className = 'adapt-text';
+  turn.flow.appendChild(t);
+  turn.textEl = t; turn.textRaw = ''; turn.tail = 'text';
+  return t;
+}
+// Open (or reuse) the current work group. A new group starts whenever the tail
+// is not already a work group — i.e. after prose.
+function ensureWorkGroup(turn) {
+  if (turn.tail === 'work' && turn.group) return turn.group;
+  const g = makeWorkGroup();
+  turn.flow.appendChild(g.group);
+  turn.group = g; turn.tail = 'work';
+  return g;
+}
+
 function clearTyping(turn) {
   if (turn.typingCleared) return;
   if (turn.typing) turn.typing.remove();
@@ -550,7 +588,7 @@ function clearTyping(turn) {
 }
 function finalizeAssistantTurn(turn) {
   clearTyping(turn);
-  if (turn.text && !turn.rawText && !turn.steps.childElementCount && !turn.cardAdded) {
+  if (!turn.anyContent && !turn.cardAdded) {
     // Empty assistant turn (e.g. reconnect to a run with no replayable prose):
     // remove the bare shell rather than leaving an empty bubble.
     if (turn.el && turn.el.parentNode) turn.el.parentNode.removeChild(turn.el);
@@ -563,24 +601,23 @@ function renderAdaptEvent(ev, turn) {
   if (kind === 'think') {
     clearTyping(turn);
     if (!(ev.text || '').trim()) return;
+    const g = ensureWorkGroup(turn);
     const r = thinkRow(ev.text);
-    turn.steps.appendChild(r); adaptRevealNow(r, 'in'); adaptScroll();
+    g.list.appendChild(r); adaptRevealNow(r, 'in');
+    g.thinks += 1; turn.anyContent = true; setWorkHeader(g); adaptScroll();
   } else if (kind === 'tool_step') {
     clearTyping(turn);
-    if (!turn.group) { turn.group = makeStepsGroup(); turn.steps.appendChild(turn.group.group); }
+    const g = ensureWorkGroup(turn);
     const row = toolRow(ev.verb, ev.target);
-    turn.group.list.appendChild(row); adaptRevealNow(row, 'in'); adaptScroll();
-    turn.toolCount += 1;
-    if (turn.toolCount === ADAPT_COLLAPSE_AT) collapseGroup(turn.group, turn.toolCount);
-    else if (turn.toolCount > ADAPT_COLLAPSE_AT) {
-      const c = turn.group.toggle.querySelector('.adapt-steps-count');
-      if (c) c.textContent = `Worked across ${turn.toolCount} steps`;
-    }
+    g.list.appendChild(row); adaptRevealNow(row, 'in');
+    g.tools += 1; turn.anyContent = true; setWorkHeader(g); adaptScroll();
   } else if (kind === 'text') {
     clearTyping(turn);
-    turn.sawText = true;
-    turn.rawText += ev.text || '';
-    turn.text.innerHTML = (typeof renderMarkdown === 'function') ? renderMarkdown(turn.rawText) : escapeHtml(turn.rawText);
+    if (!(ev.text || '')) return;
+    turn.sawText = true; turn.anyContent = true;
+    const t = ensureTextBlock(turn);
+    turn.textRaw += ev.text || '';
+    t.innerHTML = (typeof renderMarkdown === 'function') ? renderMarkdown(turn.textRaw) : escapeHtml(turn.textRaw);
     adaptScroll();
   } else if (kind === 'notice') {
     clearTyping(turn);

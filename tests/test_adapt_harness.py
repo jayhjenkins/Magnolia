@@ -91,6 +91,21 @@ def test_forbids_native_preamble():
     assert "START with the user's request" in text
 
 
+def test_outcome_first_conversation_discipline():
+    # The session must talk to a non-technical user about OUTCOMES, never make
+    # them pick an internal implementation shape, and never double-ask (prose +
+    # structured card). These anchors pin that guidance so it cannot silently
+    # regress back to the jargon-heavy "worker vs card vs adapter?" questioning.
+    text = build_harness_prompt()
+    assert "outcome-first" in text.lower()
+    assert "NON-TECHNICAL" in text
+    assert "NEVER ask the user to choose the implementation" in text
+    # The user-facing taxonomy must be explicitly kept out of the conversation.
+    assert "Keep your own taxonomy out of the conversation" in text
+    # One channel only: no duplicating structured questions in prose.
+    assert "Ask through ONE channel" in text
+
+
 def test_byte_for_byte_stable_across_calls():
     assert build_harness_prompt() == build_harness_prompt()
 

@@ -19,33 +19,35 @@ def test_compact_turn_message_is_literal_slash_compact():
 
 # ─── should_recommend_compact: above / below threshold ───────────────────────
 
-def test_recommends_when_input_plus_cache_read_exceeds_half_of_default_window():
-    # 150000 + 0 = 150000 > 0.5 * 200000 (=100000) -> True
-    usage = {"input_tokens": 150000, "cache_read_input_tokens": 0}
+def test_recommends_when_input_plus_cache_read_exceeds_default_threshold():
+    # 170000 + 0 = 170000 > 0.8 * 200000 (=160000) -> True
+    usage = {"input_tokens": 170000, "cache_read_input_tokens": 0}
     assert compaction.should_recommend_compact(usage) is True
 
 
 def test_cache_read_tokens_count_toward_the_window():
-    # 60000 + 60000 = 120000 > 100000 -> True (proves cache_read is summed in)
-    usage = {"input_tokens": 60000, "cache_read_input_tokens": 60000}
+    # 90000 + 90000 = 180000 > 160000 -> True (proves cache_read is summed in)
+    usage = {"input_tokens": 90000, "cache_read_input_tokens": 90000}
     assert compaction.should_recommend_compact(usage) is True
 
 
 def test_does_not_recommend_below_threshold():
-    usage = {"input_tokens": 50000}
+    # A large fixed baseline must NOT trip the nudge on its own: 120000 is well
+    # past the OLD 0.5 default (100000) but below the 0.8 default (160000).
+    usage = {"input_tokens": 120000}
     assert compaction.should_recommend_compact(usage) is False
 
 
 # ─── boundary: exactly at threshold is NOT past it (strict >) ─────────────────
 
 def test_exactly_at_threshold_does_not_recommend():
-    # 100000 == 0.5 * 200000 -> not strictly past -> False
-    usage = {"input_tokens": 100000}
+    # 160000 == 0.8 * 200000 -> not strictly past -> False
+    usage = {"input_tokens": 160000}
     assert compaction.should_recommend_compact(usage) is False
 
 
 def test_one_token_past_threshold_recommends():
-    usage = {"input_tokens": 100001}
+    usage = {"input_tokens": 160001}
     assert compaction.should_recommend_compact(usage) is True
 
 
@@ -82,10 +84,10 @@ def test_custom_threshold_is_honored():
 # ─── model window: 1m variant raises the window ──────────────────────────────
 
 def test_1m_model_raises_window_so_same_tokens_no_longer_trip():
-    usage = {"input_tokens": 150000}
-    # Trips the 200k default...
+    usage = {"input_tokens": 170000}
+    # Trips the 200k default (170000 > 0.8 * 200000 = 160000)...
     assert compaction.should_recommend_compact(usage) is True
-    # ...but not a 1m-context model (0.5 * 1_000_000 = 500000).
+    # ...but not a 1m-context model (0.8 * 1_000_000 = 800000).
     assert compaction.should_recommend_compact(usage, model="claude-opus-4-8[1m]") is False
 
 

@@ -504,8 +504,8 @@ def test_new_build_argv_uses_session_id_and_adapt_tools(store, stub_model, monke
 # --- Compaction --------------------------------------------------------------
 
 def test_compaction_notice_when_window_full(store, stub_model, monkeypatch):
-    # input_tokens way over half of the 200k default window.
-    usage = {"input_tokens": 150000}
+    # input_tokens past 0.8 of the 200k default window (> 160000).
+    usage = {"input_tokens": 175000}
     sim = _GitSim(commits=[])
     events = _run(monkeypatch, None, "big build",
                   _canned_stream(usage=usage), sim)
