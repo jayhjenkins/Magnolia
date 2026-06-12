@@ -1267,8 +1267,8 @@
   .adapt-title { font-family: var(--font-serif); font-size: 22px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
   .adapt-subline { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
   .adapt-new-btn {
-    display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%;
-    padding: 8px 12px; border-radius: var(--r-btn); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px; align-self: flex-start;
+    padding: 6px 12px 6px 10px; border-radius: var(--r-btn); cursor: pointer;
     font-family: inherit; font-size: 12.5px; font-weight: 600;
     background: var(--surface-hover); border: 1px solid var(--border-soft); color: var(--text-muted);
     transition: color var(--ease), border-color var(--ease), background var(--ease), opacity var(--ease);
@@ -1306,7 +1306,7 @@
   }
   .adapt-empty.gone { display: none; }
   .adapt-empty-line { font-size: 12px; line-height: 1.65; color: var(--text-dim); }
-  .adapt-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .adapt-chips { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .adapt-chip {
     background: var(--surface-hover); border: 1px solid var(--border-soft); border-radius: 999px;
     padding: 5px 12px; font-size: 11.5px; color: var(--text-muted); cursor: pointer; font-family: inherit;
@@ -1560,7 +1560,7 @@
       <div class="adapt-head">
         <div>
           <h3 class="adapt-title">Adapt</h3>
-          <p class="adapt-subline">Teach Magnolia something new. Add an integration, a data source, a worker, or a new card output or action - it extends what Magnolia can do without changing the app itself.</p>
+          <p class="adapt-subline">Teach Magnolia something new - extend what it can do for you, not change the app itself.</p>
         </div>
       </div>
 
@@ -1585,7 +1585,7 @@
         <!-- chat body -->
         <div class="adapt-body" id="adapt-body">
           <div class="adapt-empty" id="adapt-empty">
-            <div class="adapt-empty-line">Describe a capability to add - a new integration, data source, worker, or card output.</div>
+            <div class="adapt-empty-line">Describe a capability you want - or pick a starting point below.</div>
             <div class="adapt-chips" id="adapt-chips">
               <button class="adapt-chip" type="button">Add a new integration.</button>
               <button class="adapt-chip" type="button">Build a new use case to automate.</button>
