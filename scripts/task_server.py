@@ -41,6 +41,7 @@ import jira_publish
 import profile_lib
 import packs_lib
 import platform_lib
+import adaptations_lib
 import adapters
 from adapters.project_management._contract import NotConfigured
 from adapters import NeedsConfirmation
@@ -246,6 +247,19 @@ def handle_list_tasks(handler, query_params):
             priority=priority,
             include_archive=False,
         )
+        # Adaptation liveness seam: hide cards whose card-type is owned by an
+        # adaptation that is currently off. Core/unowned types (task, receipt,
+        # recommendation, ...) are never in a manifest, so is_live returns True
+        # for them and they always show. Cache by distinct card_type so each type
+        # is checked once: is_live scans the store per call (avoid O(tasks x adapt)).
+        _live = {}
+
+        def _card_live(card_type):
+            if card_type not in _live:
+                _live[card_type] = adaptations_lib.is_live("card-type", card_type)
+            return _live[card_type]
+
+        tasks = [t for t in tasks if _card_live(t.get("card_type") or "task")]
         for t in tasks:
             _enrich_sharepoint_url(t)
         _json_response(handler, tasks)
