@@ -65,13 +65,30 @@ def test_offers_only_three_toggleable_surfaces():
 def test_omits_dropped_ornamentation():
     # Case-insensitive: the SKILL phrases the merge question with a capital "Merge",
     # so a lowercase-only guard would miss a reintroduction of the exact SKILL text.
+    # NOTE: the word "preflight" now appears legitimately in a PROHIBITION ("do NOT
+    # run ... any ... preflight ... check"), so it is no longer an absence signal;
+    # test_forbids_native_preamble guards that the prohibition is present instead.
     text = build_harness_prompt().lower()
     for dropped in (
         "merge to main when it's green, or open a pr",
-        "preflight",
         "gh auth",
     ):
         assert dropped not in text, f"ornamentation leaked: {dropped!r}"
+
+
+def test_forbids_native_preamble():
+    # The root-cause fix: the harness must be authoritative and explicitly stop
+    # the session from re-acquiring the native /magnolia-build preamble (preflight
+    # + merge/git kickoff) from the ambient context (CLAUDE.md, the skill list).
+    text = build_harness_prompt()
+    assert "COMPLETE AND ONLY OPERATING MANUAL" in text
+    # Forbids loading/following the native skill by name.
+    assert "Do NOT invoke, load, read, or follow the `workflow-magnolia-build`" in text
+    # Forbids the env/preflight check and the merge-authority / git-identity kickoff.
+    assert "Do NOT run or narrate any environment, preflight" in text
+    assert "Do NOT ask the user about merge authority" in text
+    # Directs the session to start with the ask, not the machinery.
+    assert "START with the user's request" in text
 
 
 def test_byte_for_byte_stable_across_calls():
