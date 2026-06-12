@@ -1256,6 +1256,235 @@
   }
   .toast.qa-confirm .qa-confirm-mark { display: inline-flex; color: var(--accent); flex: 0 0 auto; }
   .toast.qa-confirm .qa-confirm-mark svg { width: 16px; height: 16px; }
+
+  /* ─── Adapt tab — token-only; mirrors the design handoff ───────────── */
+  .adapt-view {
+    max-width: 1100px; margin: 0 auto; padding: 6px 0 32px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; align-items: start;
+  }
+  .adapt-chat-col { display: flex; flex-direction: column; min-width: 0; }
+  .adapt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .adapt-title { font-family: var(--font-serif); font-size: 22px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+  .adapt-subline { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
+  .adapt-new-btn {
+    display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;
+    padding: 6px 12px 6px 10px; border-radius: var(--r-btn); cursor: pointer;
+    font-family: inherit; font-size: 12.5px; font-weight: 600;
+    background: var(--surface-hover); border: 1px solid var(--border-soft); color: var(--text-muted);
+    transition: color var(--ease), border-color var(--ease), background var(--ease);
+  }
+  .adapt-new-btn:hover { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 32%, transparent); background: var(--accent-soft); }
+  .adapt-new-btn svg { width: 14px; height: 14px; }
+
+  .adapt-lane {
+    display: flex; flex-direction: column; height: calc(100vh - 220px); min-height: 540px;
+    background: color-mix(in oklab, var(--surface) 64%, var(--bg));
+    border: 1px solid var(--border-soft); border-radius: var(--r-lane); overflow: hidden;
+  }
+  .adapt-lane-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 20px; border-bottom: 1px solid var(--border-soft); flex: 0 0 auto;
+  }
+  .adapt-assistant { display: inline-flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .adapt-assistant-icon { display: inline-flex; color: var(--text-muted); }
+  .adapt-assistant-icon svg { width: 16px; height: 16px; }
+  .adapt-tracker { display: inline-flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+  .adapt-tracker-segs { display: inline-flex; gap: 4px; }
+  .adapt-seg {
+    width: 23px; height: 7px; border-radius: 2px; transform: skewX(-16deg);
+    background: var(--surface-hover); border: 1px solid var(--border-soft);
+  }
+  .adapt-seg.filled { background: var(--accent); border-color: var(--accent); opacity: 0.9; }
+  .adapt-seg.active { background: var(--accent); border-color: var(--accent); opacity: 1; animation: breathe 2.8s ease-in-out infinite; }
+  .adapt-tracker-word { font-size: 10.5px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+
+  .adapt-body { flex: 1; min-height: 0; overflow-y: auto; position: relative; padding: 20px; }
+  .adapt-empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px; text-align: center; padding: 0 11%;
+  }
+  .adapt-empty.gone { display: none; }
+  .adapt-empty-line { font-size: 12px; line-height: 1.65; color: var(--text-dim); }
+  .adapt-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .adapt-chip {
+    background: var(--surface-hover); border: 1px solid var(--border-soft); border-radius: 999px;
+    padding: 5px 12px; font-size: 11.5px; color: var(--text-muted); cursor: pointer; font-family: inherit;
+    transition: border-color var(--ease), color var(--ease);
+  }
+  .adapt-chip:hover { border-color: var(--accent); color: var(--text); }
+
+  .adapt-thread { display: flex; flex-direction: column; gap: 22px; }
+  .adapt-turn { display: flex; flex-direction: column; }
+  .adapt-turn.turn-assistant { animation: rise var(--ease); }
+  /* user bubble */
+  .adapt-turn.turn-user { align-items: flex-end; }
+  .adapt-turn.turn-user .adapt-bubble {
+    max-width: 86%; padding: 9px 13px; border-radius: 15px 15px 5px 15px;
+    background: var(--surface-hover); border: 1px solid var(--border-soft);
+    font-size: 13px; line-height: 1.55; color: var(--text); white-space: pre-wrap;
+  }
+  /* session divider */
+  .adapt-turn.turn-session { flex-direction: row; align-items: center; gap: 10px; margin: 2px 0; }
+  .adapt-session-rule { flex: 1 1 auto; height: 1px; background: var(--border-soft); }
+  .adapt-session-label { display: inline-flex; align-items: center; gap: 7px; font-size: 10.5px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; }
+  .adapt-session-leaf { width: 7px; height: 7px; border-radius: 0 62% 0 62%; background: var(--accent); transform: rotate(-12deg); opacity: 0.8; }
+  /* notice aside */
+  .adapt-turn.turn-notice .adapt-notice {
+    display: flex; gap: 8px; align-items: flex-start; background: var(--accent-soft);
+    border: 1px solid var(--border-soft); border-left: 2px solid var(--accent); border-radius: 9px;
+    padding: 9px 12px; animation: rise var(--ease);
+  }
+  .adapt-notice svg { flex-shrink: 0; width: 15px; height: 15px; color: var(--accent); margin-top: 2px; }
+  .adapt-notice-text { font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+  /* error aside (terminal) */
+  .adapt-turn.turn-error .adapt-notice { background: var(--danger-soft); border-left-color: var(--danger); }
+  .adapt-turn.turn-error .adapt-notice svg { color: var(--danger); }
+
+  /* assistant step log */
+  .adapt-steps { display: flex; flex-direction: column; align-items: flex-start; gap: 11px; margin-bottom: 14px; }
+  .adapt-steps:empty { display: none; }
+  .adapt-think { font-size: 12.5px; line-height: 1.5; color: var(--text-dim); }
+  .adapt-tool { display: inline-flex; align-items: baseline; gap: 7px; font-size: 12.5px; color: var(--text-dim); max-width: 100%; }
+  .adapt-tool .adapt-verb { font-weight: 600; color: var(--text-muted); flex: 0 0 auto; }
+  .adapt-tool .adapt-target { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .adapt-tool .adapt-chevtgt { opacity: 0.6; font-size: 14px; align-self: center; }
+  .adapt-steps-group { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .adapt-steps-toggle {
+    display: none; align-items: center; gap: 7px; background: none; border: none; padding: 0;
+    font-family: inherit; font-size: 12.5px; color: var(--text-muted); cursor: pointer; transition: color var(--ease);
+  }
+  .adapt-steps-toggle:hover { color: var(--text); }
+  .adapt-steps-toggle .adapt-step-check { width: 13px; height: 13px; color: var(--success); flex: 0 0 auto; }
+  .adapt-steps-toggle .adapt-step-chev { width: 13px; height: 13px; color: var(--text-dim); transition: transform 0.25s; }
+  .adapt-steps-toggle.open .adapt-step-chev { transform: rotate(90deg); }
+  .adapt-steps-list.collapsed { display: none; }
+
+  /* assistant prose */
+  .adapt-text { font-size: 13.5px; line-height: 1.66; color: var(--text); white-space: pre-wrap; }
+  .adapt-text p { margin: 0 0 10px; } .adapt-text p:last-child { margin-bottom: 0; }
+  .adapt-text code { font-family: var(--mono, monospace); font-size: 0.92em; background: var(--surface-hover); padding: 1px 5px; border-radius: var(--r-badge); }
+  .adapt-text a { color: var(--accent); }
+  .adapt-cursor { display: inline-block; }
+
+  /* typing dots */
+  .adapt-typing { display: inline-flex; align-items: center; gap: 4px; padding: 3px 0; }
+  .adapt-typing span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); animation: typing 1.2s ease-in-out infinite; }
+  .adapt-typing span:nth-child(2) { animation-delay: 0.18s; }
+  .adapt-typing span:nth-child(3) { animation-delay: 0.36s; }
+
+  /* Magnolia asks (AskUserQuestion) + The build (ExitPlanMode) cards */
+  .adapt-card {
+    margin-top: 14px; border: 1px solid var(--border-soft); border-radius: 12px;
+    background: color-mix(in oklab, var(--surface-hover) 45%, transparent); animation: rise var(--ease);
+  }
+  .adapt-ask { padding: 14px 16px; }
+  .adapt-ask-head { display: flex; align-items: center; gap: 8px; }
+  .adapt-ask-leaf { width: 11px; height: 11px; border-radius: 0 62% 0 62%; background: var(--accent); transform: rotate(-12deg); opacity: 0.9; flex: 0 0 auto; }
+  .adapt-ask-kicker { font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--accent); }
+  .adapt-ask-q { margin-top: 13px; }
+  .adapt-ask-prompt { font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+  .adapt-ask-opts { display: flex; flex-direction: column; gap: 7px; }
+  .adapt-opt {
+    display: flex; align-items: flex-start; gap: 11px; width: 100%; padding: 10px 13px; border-radius: 10px;
+    cursor: pointer; font-family: inherit; text-align: left; border: 1px solid var(--border-soft); background: transparent;
+    transition: border-color var(--ease), background var(--ease);
+  }
+  .adapt-opt:hover { border-color: var(--border); background: var(--surface-hover); }
+  .adapt-opt.selected { border-color: var(--accent); background: var(--accent-soft); }
+  .adapt-opt-radio { flex: 0 0 auto; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; margin-top: 2px; border: 1.5px solid var(--border); }
+  .adapt-opt.selected .adapt-opt-radio { border-color: var(--accent); }
+  .adapt-opt-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); opacity: 0; }
+  .adapt-opt.selected .adapt-opt-dot { opacity: 1; }
+  .adapt-opt-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .adapt-opt-label { font-size: 13px; color: var(--text); }
+  .adapt-opt-desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.45; }
+  .adapt-ask-foot { display: flex; justify-content: flex-end; margin-top: 14px; }
+  .adapt-ask-answered { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); padding-top: 10px; }
+  .adapt-ask-answered svg { width: 13px; height: 13px; color: var(--success); flex: 0 0 auto; }
+
+  .adapt-plan-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--border-soft); }
+  .adapt-plan-title { font-family: var(--font-serif); font-size: 15px; font-weight: 500; color: var(--text); }
+  .adapt-plan-body { padding: 14px 16px; font-size: 13.5px; line-height: 1.66; color: var(--text); white-space: pre-wrap; }
+  .adapt-plan-foot { display: flex; gap: 8px; padding: 13px 16px; border-top: 1px solid var(--border-soft); align-items: center; }
+  .adapt-plan-approved { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--success); }
+  .adapt-plan-approved svg { width: 14px; height: 14px; }
+  .adapt-ghost-btn {
+    padding: 8px 16px; border-radius: var(--r-btn); font-size: 13px; font-weight: 600; cursor: pointer;
+    border: 1px solid transparent; background: transparent; color: var(--text-muted); font-family: inherit;
+    transition: background var(--ease), color var(--ease), border-color var(--ease);
+  }
+  .adapt-ghost-btn:hover { background: var(--surface-hover); border-color: var(--border-soft); color: var(--text); }
+
+  /* composer */
+  .adapt-composer-wrap { flex: 0 0 auto; padding: 14px 16px 16px; border-top: 1px solid var(--border-soft); }
+  .adapt-composer { display: flex; align-items: flex-end; gap: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 13px; padding: 7px 7px 7px 13px; }
+  .adapt-composer textarea {
+    flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); font-family: inherit;
+    font-size: 13.5px; line-height: 1.5; resize: none; max-height: 140px; outline: none; padding: 5px 0;
+  }
+  .adapt-send {
+    flex: 0 0 auto; width: 33px; height: 33px; display: grid; place-items: center; border-radius: 9px; cursor: pointer;
+    background: var(--accent); border: 1px solid var(--accent); color: var(--accent-ink);
+    transition: filter var(--ease), opacity var(--ease);
+  }
+  .adapt-send:hover:not(:disabled) { filter: brightness(1.07); }
+  .adapt-send:disabled { opacity: 0.4; cursor: default; }
+  .adapt-send svg { width: 15px; height: 15px; }
+
+  /* primary button reused inside cards (Use these / Approve & build) */
+  .adapt-primary-btn {
+    padding: 8px 16px; border-radius: var(--r-btn); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+    background: var(--accent); border: 1px solid var(--accent); color: var(--accent-ink);
+    transition: filter var(--ease), opacity var(--ease);
+  }
+  .adapt-primary-btn:hover:not(:disabled) { filter: brightness(1.07); }
+  .adapt-primary-btn:disabled { opacity: 0.45; cursor: default; }
+
+  /* ─── Adaptations rail ───────────────────────────────────────────── */
+  .adapt-rail { position: sticky; top: 88px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .adapt-rail-title { font-family: var(--font-serif); font-size: 16px; font-weight: 500; color: var(--text); padding-top: 2px; }
+  .adapt-rail-list {
+    display: flex; flex-direction: column; background: color-mix(in oklab, var(--surface) 64%, var(--bg));
+    border: 1px solid var(--border-soft); border-radius: var(--r-lane); overflow: hidden;
+  }
+  .adapt-rail-empty { padding: 14px 13px; font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+  .adapt-row {
+    display: flex; align-items: center; gap: 10px; padding: 7px 11px 7px 13px;
+    border-top: 1px solid var(--border-soft); transition: background var(--ease), opacity var(--ease);
+  }
+  .adapt-row:first-child { border-top: none; }
+  .adapt-row:hover { background: var(--surface-hover); }
+  .adapt-row.is-off { opacity: 0.66; }
+  .adapt-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .adapt-row.is-off .adapt-dot { background: var(--text-dim); }
+  .adapt-row.is-building .adapt-dot { background: var(--accent); animation: breathe 2.8s ease-in-out infinite; }
+  .adapt-name { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adapt-row.is-off .adapt-name { color: var(--text-muted); }
+  .adapt-name-input {
+    flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 600; font-family: inherit; color: var(--text);
+    background: var(--bg); border: 1px solid var(--accent); border-radius: var(--r-badge); padding: 2px 6px; outline: none;
+  }
+  .adapt-icon-btn {
+    flex: 0 0 auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px;
+    border: 1px solid transparent; background: transparent; color: var(--text-dim); cursor: pointer;
+    transition: color var(--ease), background var(--ease), border-color var(--ease);
+  }
+  .adapt-icon-btn:hover { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 32%, transparent); }
+  .adapt-icon-btn.danger:hover { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in oklab, var(--danger) 32%, transparent); }
+  .adapt-icon-btn svg { width: 13px; height: 13px; }
+  .adapt-toggle {
+    position: relative; display: inline-block; flex: 0 0 auto; width: 34px; height: 19px; border-radius: 999px; cursor: pointer; padding: 0;
+    border: 1px solid var(--border-soft); background: var(--surface-hover); transition: background var(--ease), border-color var(--ease);
+  }
+  .adapt-toggle.on { background: var(--accent-soft); border-color: var(--accent); }
+  .adapt-toggle-knob { position: absolute; width: 13px; height: 13px; border-radius: 50%; top: 2px; left: 2px; background: var(--text-muted); transition: transform var(--ease), background var(--ease); }
+  .adapt-toggle.on .adapt-toggle-knob { transform: translateX(15px); background: var(--accent); }
+  .adapt-building-label { flex: 0 0 auto; font-size: 10.5px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+
+  @media (max-width: 860px) {
+    .adapt-view { grid-template-columns: minmax(0, 1fr); }
+    .adapt-rail { position: static; }
+  }
 </style>
 <!-- Magnolia Phase 6 — new surfaces: card kinds, shell states, Profile room, Quality trust -->
 <link rel="stylesheet" href="/css/magnolia.css">
@@ -1269,6 +1498,7 @@
   <div class="topbar-tabs">
     <button class="topbar-tab active" data-tab="now" onclick="switchTab('now')">Now</button>
     <button class="topbar-tab" data-tab="schedules" onclick="switchTab('schedules')">Schedules</button>
+    <button class="topbar-tab" data-tab="adapt" onclick="switchTab('adapt')">Adapt</button>
     <button class="topbar-tab" data-tab="quality" onclick="switchTab('quality')">Quality</button>
     <button class="topbar-tab" data-tab="activity" onclick="switchTab('activity')">Activity</button>
   </div>
@@ -1318,6 +1548,86 @@
 <div id="tab-schedules" class="tab-content">
   <div class="cron-view" id="cron-view">
     <div class="loading">Loading cron jobs...</div>
+  </div>
+</div>
+
+<!-- Adapt — teach Magnolia a new capability. Two columns: build chat + rail. -->
+<div id="tab-adapt" class="tab-content">
+  <div class="adapt-view">
+    <!-- Build chat column -->
+    <section class="adapt-chat-col">
+      <div class="adapt-head">
+        <div>
+          <h3 class="adapt-title">Adapt</h3>
+          <p class="adapt-subline">Teach Magnolia something new.</p>
+        </div>
+        <button class="adapt-new-btn" id="adapt-new-btn" type="button" title="Start a fresh adaptation">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.4v9.2M3.4 8h9.2"/></svg>
+          <span>New adaptation</span>
+        </button>
+      </div>
+
+      <div class="adapt-lane">
+        <!-- lane header: build assistant + compact phase tracker -->
+        <div class="adapt-lane-head">
+          <span class="adapt-assistant">
+            <span class="adapt-assistant-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 4.2h10.4v6H7.4l-2.8 2.4V10.2H2.8z"/></svg></span>
+            Build assistant
+          </span>
+          <span class="adapt-tracker" id="adapt-tracker" aria-label="Build phase">
+            <span class="adapt-tracker-segs">
+              <span class="adapt-seg" data-phase="brainstorm" title="Brainstorm"></span>
+              <span class="adapt-seg" data-phase="plan" title="Plan"></span>
+              <span class="adapt-seg" data-phase="build" title="Build"></span>
+              <span class="adapt-seg" data-phase="ready" title="Ready"></span>
+            </span>
+            <span class="adapt-tracker-word" id="adapt-tracker-word"></span>
+          </span>
+        </div>
+
+        <!-- chat body -->
+        <div class="adapt-body" id="adapt-body">
+          <div class="adapt-empty" id="adapt-empty">
+            <div class="adapt-empty-line">Describe something you wish Magnolia could do.</div>
+            <div class="adapt-chips" id="adapt-chips">
+              <button class="adapt-chip" type="button">Watch my Shopify store and warn me before bestsellers sell out</button>
+              <button class="adapt-chip" type="button">Pull new Stripe disputes into my morning review</button>
+              <button class="adapt-chip" type="button">Track the school portal and surface permission slips</button>
+            </div>
+          </div>
+          <div class="adapt-thread" id="adapt-thread"></div>
+        </div>
+
+        <!-- composer -->
+        <div class="adapt-composer-wrap">
+          <div class="adapt-composer">
+            <textarea id="adapt-input" rows="1" placeholder="Describe something you wish Magnolia could do…" aria-label="Describe an adaptation"></textarea>
+            <button class="adapt-send" id="adapt-send" type="button" aria-label="Send" title="Send" disabled>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2.6 7 9"/><path d="M13.4 2.6 9.4 13.2l-2.4-4.2-4.2-2.4Z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Adaptations rail -->
+    <aside class="adapt-rail" aria-label="Your adaptations">
+      <h3 class="adapt-rail-title">Your adaptations</h3>
+      <div class="adapt-rail-list" id="adapt-rail-list"></div>
+    </aside>
+  </div>
+</div>
+
+<!-- Adapt delete-warning modal -->
+<div class="confirm-overlay" id="adapt-del-overlay" role="dialog" aria-modal="true" aria-labelledby="adapt-del-title">
+  <div class="confirm-box">
+    <h3 class="confirm-title" id="adapt-del-title">Delete this adaptation?</h3>
+    <p class="confirm-msg">Are you sure? You can just toggle it off instead. Deleting reverts the files it added.</p>
+    <div class="confirm-actions">
+      <span class="confirm-hint"><kbd>esc</kbd> cancel</span>
+      <button class="btn btn-quiet" id="adapt-del-cancel">Cancel</button>
+      <button class="btn btn-danger" id="adapt-del-ok">Delete</button>
+    </div>
   </div>
 </div>
 
@@ -1398,6 +1708,7 @@
 <script src="/js/quality.js"></script>
 <script src="/js/agents.js"></script>
 <script src="/js/schedules.js"></script>
+<script src="/js/adapt.js"></script>
 <script src="/js/profile.js"></script>
 <script src="/js/app.js"></script>
 <script src="/js/quickadd.js"></script>

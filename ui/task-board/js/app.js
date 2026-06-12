@@ -10,6 +10,7 @@ function switchTab(tabName) {
   if (tabName === 'quality') renderQuality();
   if (tabName === 'engine') fetchWorkers();
   if (tabName === 'schedules') fetchCronJobs();
+  if (tabName === 'adapt') renderAdapt();
 }
 
 // ─── Engine sub-nav (Profile · Workers & prompts) ───────────────────
@@ -51,6 +52,16 @@ document.addEventListener('click', (e) => {
 
 fetchTasks();
 checkLangfuseHealth();
+
+// Deep-link: opening with a #<tab> hash (e.g. #adapt) selects that tab on load,
+// so a tab is shareable/bookmarkable. Falls through silently for an unknown hash.
+(function () {
+  const hash = (location.hash || '').replace(/^#/, '');
+  const known = ['now', 'schedules', 'adapt', 'quality', 'activity'];
+  if (known.includes(hash)) {
+    try { switchTab(hash); } catch (_) {}
+  }
+})();
 // Auto-refresh every 15 seconds
 setInterval(fetchTasks, 15000);
 // Check LangFuse health every 60 seconds

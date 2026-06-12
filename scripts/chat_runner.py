@@ -76,7 +76,8 @@ CHAT_ALLOWED_TOOLS = [
 ]
 
 
-def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=None):
+def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=None,
+                   append_system_prompt=None, settings=None):
     """Build the `claude` argv for a chat turn.
 
     The prompt MUST stay the first positional arg: --allowedTools is variadic
@@ -86,10 +87,18 @@ def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=
 
     new_session=True  -> start a fresh session with --session-id <id>.
     new_session=False -> resume an existing session with --resume <id>.
+
+    The Adapt build session (scripts/adapt_runner.py) reuses this builder via two
+    optional middle flags (both default None, so existing chat callers are
+    unaffected and the prompt-first / --allowedTools-last invariant holds):
+      - append_system_prompt: re-injects the build harness every turn (the slash
+        steering is not sticky across resumed turns).
+      - settings: an absolute path to a --settings file (the Adapt fairway hook
+        lives there; it is the REAL enforcement, so it must be passed).
     """
     tools = allowed_tools or ",".join(CHAT_ALLOWED_TOOLS)
     session_flag = "--session-id" if new_session else "--resume"
-    return [
+    cmd = [
         "claude",
         message,
         "-p",
@@ -97,8 +106,14 @@ def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=
         "--verbose",
         "--model", model,
         session_flag, session_id,
-        "--allowedTools", tools,
     ]
+    if append_system_prompt is not None:
+        cmd += ["--append-system-prompt", append_system_prompt]
+    if settings is not None:
+        cmd += ["--settings", settings]
+    # --allowedTools stays LAST (variadic; nothing may trail it).
+    cmd += ["--allowedTools", tools]
+    return cmd
 
 
 def _task_context_block(task, *, include_description=True, heading="## Task context"):
@@ -316,7 +331,10 @@ def normalize(raw_event):
     """Map one raw `claude --output-format stream-json` event to a list of
     normalized UI events.
 
-    The four UI kinds are: ``think``, ``tool_step``, ``text``, ``result``.
+    The UI kinds are: ``think``, ``tool_step``, ``text``, ``result``, plus
+    ``ask`` (an AskUserQuestion tool_use, carrying ``questions``) and ``plan``
+    (an ExitPlanMode tool_use, carrying ``body``) emitted alongside the
+    ``tool_step`` for those two tools so the Adapt UI can render rich cards.
     An ``assistant`` event with multiple content blocks yields multiple rows,
     in order. Uninteresting or unknown events (``system``, ``user``/tool_result,
     ``rate_limit_event``, anything else) yield ``[]``. Pure: no I/O, never
@@ -363,6 +381,29 @@ def normalize(raw_event):
                     "verb": block.get("name", ""),
                     "target": target,
                 })
+                # Adapt build chat: two interactive tools get a SECOND, richer
+                # event ALONGSIDE the tool_step (chat.js ignores unknown kinds,
+                # so the existing chat panel is unaffected). These are the only
+                # two stream primitives the Adapt design renders as cards. The
+                # extra event is best-effort: when claude -p does NOT surface
+                # these as structured tool_use (it may just write prose), no card
+                # appears and the conversational flow carries the UX.
+                name = block.get("name", "")
+                if name == "AskUserQuestion":
+                    out.append({
+                        "kind": "ask",
+                        "role": "assistant",
+                        # The CLI nests the prompts under `questions`; pass it
+                        # through verbatim so the UI can shape options/labels.
+                        "questions": tool_input.get("questions") or [],
+                    })
+                elif name == "ExitPlanMode":
+                    out.append({
+                        "kind": "plan",
+                        "role": "assistant",
+                        # Plan text lives under `plan` in the block input.
+                        "body": tool_input.get("plan") or "",
+                    })
         return out
 
     if etype == "result":

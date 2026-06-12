@@ -19,7 +19,6 @@ import socket
 import shlex
 import subprocess
 import sys
-import threading
 import traceback
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
@@ -41,6 +40,10 @@ import jira_publish
 import profile_lib
 import packs_lib
 import platform_lib
+import adaptations_lib
+import adapt_runner
+import adapt_transcript
+import live_runs
 import adapters
 from adapters.project_management._contract import NotConfigured
 from adapters import NeedsConfirmation
@@ -51,27 +54,16 @@ from shipper import (
     _attempt_publish, _emit_confirm_card, _note, _load_email_cache,
 )
 
-# ─── Chat run-lock ─────────────────────────────────────────────────────────────
-# A session must never have two concurrent chat runs. The server is a
-# ThreadingHTTPServer (one thread per request) within a single process, so an
-# in-memory set guarded by a lock is sufficient to serialize per task_id.
-_CHAT_RUNS = set()              # task_ids with an active chat run (this process)
-_CHAT_RUNS_GUARD = threading.Lock()
-
-
-def _try_acquire_chat_run(task_id):
-    """Atomically claim the chat run-lock for a task. True if acquired."""
-    with _CHAT_RUNS_GUARD:
-        if task_id in _CHAT_RUNS:
-            return False
-        _CHAT_RUNS.add(task_id)
-        return True
-
-
-def _release_chat_run(task_id):
-    """Release the chat run-lock for a task (idempotent)."""
-    with _CHAT_RUNS_GUARD:
-        _CHAT_RUNS.discard(task_id)
+# ─── Chat concurrency ────────────────────────────────────────────────────────
+# A session must never have two concurrent chat runs. This guarantee — and the
+# survive-disconnect substrate — is now provided by live_runs: a chat run is
+# keyed by `chat:<task_id>`, a second concurrent POST while that key is live
+# returns 409, and a client disconnect only stops the SSE tail (never the run).
+# See handle_chat below. (The old in-memory _CHAT_RUNS lock was removed when this
+# moved onto live_runs — it had no other callers.)
+def _chat_run_key(task_id):
+    """live_runs key for a task's chat run. Namespaced to avoid adapt-key collision."""
+    return "chat:%s" % (task_id,)
 
 
 # ─── Load LangFuse env vars if not already set ───────────────────────────────
@@ -246,6 +238,19 @@ def handle_list_tasks(handler, query_params):
             priority=priority,
             include_archive=False,
         )
+        # Adaptation liveness seam: hide cards whose card-type is owned by an
+        # adaptation that is currently off. Core/unowned types (task, receipt,
+        # recommendation, ...) are never in a manifest, so is_live returns True
+        # for them and they always show. Cache by distinct card_type so each type
+        # is checked once: is_live scans the store per call (avoid O(tasks x adapt)).
+        _live = {}
+
+        def _card_live(card_type):
+            if card_type not in _live:
+                _live[card_type] = adaptations_lib.is_live("card-type", card_type)
+            return _live[card_type]
+
+        tasks = [t for t in tasks if _card_live(t.get("card_type") or "task")]
         for t in tasks:
             _enrich_sharepoint_url(t)
         _json_response(handler, tasks)
@@ -1327,11 +1332,20 @@ def handle_chat(handler, task_id):
     Enforces two guards before streaming:
       1. The background worker must not be mid-run on this session
          (frontmatter agent_status == "running" → 409).
-      2. No other chat run may be active for this session (run-lock → 409).
+      2. No other chat run may be live for this session (live_runs.is_live → 409).
 
-    The run-lock is ALWAYS released in a finally, including on client
-    disconnect (a write raising BrokenPipeError/ConnectionResetError) — which
-    also closes the run_turn generator, killing the claude process group.
+    DECOUPLED run (mirrors Adapt): the chat turn no longer streams the
+    chat_runner.run_turn generator directly. Instead it is started on a
+    live_runs daemon thread (keyed by `chat:<task_id>`) and the SSE handler only
+    TAILS the durable chat transcript. So a client disconnect (the panel closing
+    / the task closing) stops only the tail — never the run. The run finishes on
+    its own and keeps persisting to the transcript; reopening the panel replays
+    the progress-so-far via GET /api/tasks/{id}/chat.
+
+    NO-OP append_fn: chat_runner.run_turn ALREADY appends every event to the
+    chat transcript itself (chat_transcript.append_event), so the read side
+    tails chat_transcript.read_events(task_id) and start() is given a no-op
+    append_fn to avoid double-logging (same decision as Adapt).
 
     Frontend contract: once _sse_begin has sent 200 OK, the stream ALWAYS
     terminates with a normal `event: done` (via _sse_end), a `kind:error`
@@ -1363,48 +1377,290 @@ def handle_chat(handler, task_id):
         _error_response(handler, "Agent is currently working", status=409)
         return
 
-    # Chat-concurrency lock: one active chat run per session.
-    if not _try_acquire_chat_run(task_id):
+    # Chat-concurrency: one LIVE chat run per session. A second concurrent POST
+    # while the run is live is a 409 (same status the old in-memory lock
+    # returned) — the surviving run keeps filling the transcript regardless.
+    key = _chat_run_key(task_id)
+    if live_runs.is_live(key):
         _error_response(handler, "A chat run is already in progress", status=409)
         return
 
+    # Start the decoupled run. NO-OP append_fn: run_turn owns the durable log
+    # (chat_transcript); passing append_event here would double-log. start() is
+    # itself a no-op if a run for this key is already live.
+    live_runs.start(
+        key,
+        chat_runner.run_turn(task_id, message),
+        lambda event: None,
+    )
+
+    _sse_begin(handler)
+    _stream_live_run(
+        handler,
+        key,
+        lambda: chat_transcript.read_events(task_id),
+        "The chat run ended unexpectedly. You can retry.",
+    )
+
+
+# ─── Adapt: gated build session + rail CRUD ────────────────────────────────────
+# The build run is DECOUPLED from the SSE client via live_runs: the run is keyed
+# by adaptation_id, runs to completion on its own daemon thread, and a client
+# disconnect only stops the tail (never the run). One LIVE run per key (a NEW
+# message while live -> 409); the GET stream may always reconnect and tail.
+
+def _heartbeat_or_send(handler, event):
+    """Stream one tail event as SSE, turning heartbeats into a `: ping` comment.
+
+    The client ignores comment lines; data frames carry real events. Raises
+    BrokenPipeError/ConnectionResetError on a dead socket (the caller stops
+    tailing on that - the run keeps going).
+    """
+    if event.get("kind") == "heartbeat":
+        handler.wfile.write(b": ping\n\n")
+        handler.wfile.flush()
+    else:
+        _sse_send(handler, event)
+
+
+def _stream_live_run(handler, key, read_fn, error_text):
+    """Tail the live run for `key` over SSE, then surface a run error if any.
+
+    Shared survive-disconnect streaming substrate for both Adapt and the task
+    chat panel. Replays the durable event log and tails new events
+    (live_runs.tail over `read_fn`). On a client disconnect we stop tailing but
+    DO NOT touch the run — it is owned by live_runs, keeps filling its durable
+    log, and reaches completion. After the tail drains with the socket intact,
+    if the run ended abnormally (live_runs.run_error) we emit a terminal error
+    frame (`error_text`) so a crashed run is not mistaken for a clean finish.
+    Always closes with the `event: done` sentinel when the socket is still alive.
+    """
+    disconnected = False
     try:
-        _sse_begin(handler)
+        for event in live_runs.tail(key, read_fn):
+            _heartbeat_or_send(handler, event)
+    except (BrokenPipeError, ConnectionResetError):
+        # Client went away mid-stream. Stop tailing; the run is owned by
+        # live_runs and keeps filling the durable log for a later reconnect.
+        disconnected = True
+    if disconnected:
+        return
+    # Tail drained with the socket intact. If the run ended in error, the tail
+    # looked like a clean finish (the runner may emit no error event) - surface
+    # a terminal error frame so the client can offer a retry.
+    try:
+        if live_runs.run_error(key) is not None:
+            _sse_send(handler, {
+                "kind": "error",
+                "role": "error",
+                "text": error_text,
+            })
+        _sse_end(handler)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+
+
+def _stream_adapt_run(handler, key):
+    """Tail the live Adapt build run for `key` over SSE (see _stream_live_run)."""
+    _stream_live_run(
+        handler,
+        key,
+        lambda: adapt_transcript.read_events(key),
+        "The build run ended unexpectedly. You can retry.",
+    )
+
+
+def handle_adapt(handler):
+    """POST /api/adapt {message, adaptation_id?} - run a build turn over SSE.
+
+    New build (no adaptation_id): create the row at POST time so the run can be
+    keyed by id before claude reports a session (provisional name = first chars
+    of the message). Resume/edit (adaptation_id given): key by that id.
+
+    Decoupled run: if no live run exists for the key, start one
+    (live_runs.start) with a NO-OP append_fn - adapt_runner already appends every
+    event to its own durable log, so the read side uses adapt_transcript.
+    Then stream by tailing that log. A NEW message while a run is already live
+    returns 409 (the client should reconnect via GET /api/adapt/stream instead).
+    """
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    message = (body.get("message") or "").strip()
+    if not message:
+        _error_response(handler, "message is required")
+        return
+    adaptation_id = (body.get("adaptation_id") or "").strip() or None
+
+    # New build: mint the row now so the run is keyed by a real id from the
+    # start (provisional name = leading chars of the message; empty session id
+    # so adapt_runner treats it as a new session and binds the id on first
+    # result).
+    if adaptation_id is None:
         try:
-            for event in chat_runner.run_turn(task_id, message):
-                _sse_send(handler, event)
-            _sse_end(handler)
-        except (BrokenPipeError, ConnectionResetError):
-            # Client disconnected mid-stream. Stop iterating — the for-loop's
-            # exit closes the run_turn generator (its finally kills the claude
-            # process group). The socket is gone, so do NOT try to write more;
-            # the finally releases the lock.
-            pass
-        except Exception as exc:
-            # Any OTHER failure after 200 OK was committed (a task_lib /
-            # chat_transcript write failure, an OSError, a normalize bug, …).
-            # Headers are already sent, so we cannot send a 500 — instead emit
-            # a terminal error frame so the client always gets a signal rather
-            # than an unsignaled half-stream. Log the original exception so the
-            # failure is diagnosable rather than swallowed.
-            sys.stderr.write(
-                "[chat] run_turn failed for %s after stream began: %r\n"
-                % (task_id, exc)
-            )
-            try:
-                _sse_send(handler, {
-                    "kind": "error",
-                    "role": "error",
-                    "text": "The chat run failed unexpectedly. You can retry.",
-                })
-                _sse_end(handler)
-            except (BrokenPipeError, ConnectionResetError, Exception):
-                # The client also went away (or the socket broke) while we were
-                # reporting the error. Nothing more we can do — never let a
-                # write failure during error reporting escape handle_chat.
-                pass
-    finally:
-        _release_chat_run(task_id)
+            provisional = adapt_runner._provisional_name(message)
+            adaptation_id = adaptations_lib.create(provisional, "")
+        except Exception as e:
+            _error_response(handler, f"Failed to create adaptation: {e}", status=500)
+            return
+    else:
+        # Resume/edit: a NEW message while the run is already live is a 409 -
+        # the client should reconnect via the GET stream, not start a 2nd run.
+        if live_runs.is_live(adaptation_id):
+            _error_response(handler, "A build run is already in progress", status=409)
+            return
+
+    # Start the decoupled run if not already live. NO-OP append_fn: adapt_runner
+    # owns the durable log (adapt_transcript); passing append_event here would
+    # double-log. start() is itself a no-op if a run for this key is live.
+    live_runs.start(
+        adaptation_id,
+        adapt_runner.run_turn(adaptation_id, message),
+        lambda event: None,
+    )
+
+    _sse_begin(handler)
+    _stream_adapt_run(handler, adaptation_id)
+
+
+def handle_adapt_stream(handler, query_params):
+    """GET /api/adapt/stream?adaptation=<id> - reconnect: replay + tail a run.
+
+    Tails the run keyed by the adaptation id, replaying the durable event log
+    first (live_runs.tail does the replay-then-stream). Works whether the run is
+    in-progress or already finished; a finished-with-error run gets a terminal
+    error frame after the replay.
+    """
+    adaptation_id = (query_params.get("adaptation", [None])[0] or "").strip()
+    if not adaptation_id:
+        _error_response(handler, "adaptation query parameter is required", status=400)
+        return
+    _sse_begin(handler)
+    _stream_adapt_run(handler, adaptation_id)
+
+
+def handle_list_adaptations(handler):
+    """GET /api/adaptations - rail data: every active adaptation (id, name, state)."""
+    try:
+        adaptations = adaptations_lib.list_all()
+    except Exception as e:
+        _error_response(handler, f"Failed to list adaptations: {e}", status=500)
+        return
+    _json_response(handler, {"adaptations": adaptations})
+
+
+def handle_toggle_adaptation(handler, adaptation_id):
+    """PUT /api/adaptations/{id}/toggle {state} - flip on/off (rail toggle)."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    state = (body.get("state") or "").strip()
+    # Only on/off are user-toggleable; "building" is a runner-internal state.
+    if state not in ("on", "off"):
+        _error_response(handler, "state must be 'on' or 'off'", status=400)
+        return
+    try:
+        adaptations_lib.set_state(adaptation_id, state)
+    except FileNotFoundError:
+        _error_response(handler, f"Adaptation {adaptation_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Toggle failed: {e}", status=500)
+        return
+    _json_response(handler, {"ok": True, "state": state})
+
+
+def handle_rename_adaptation(handler, adaptation_id):
+    """PUT /api/adaptations/{id} {name} - inline rename (id is stable)."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    name = (body.get("name") or "").strip()
+    if not name:
+        _error_response(handler, "name is required", status=400)
+        return
+    try:
+        adaptations_lib.set_name(adaptation_id, name)
+    except FileNotFoundError:
+        _error_response(handler, f"Adaptation {adaptation_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Rename failed: {e}", status=500)
+        return
+    _json_response(handler, {"ok": True, "name": name})
+
+
+def _adapt_git_revert(sha):
+    """Revert one commit, best-effort. Returns (ok, message).
+
+    Reuses undo_receipt's mechanism: `git revert --no-edit <sha>`; on failure
+    (a later commit touched the same lines, or the commit is already reverted)
+    abort to restore the tree and report the failure rather than raising - the
+    bundle delete tolerates a partial failure (it must still tombstone). A
+    module-level seam so tests assert revert ORDER without touching the repo.
+    """
+    rv = subprocess.run(["git", "-C", PM_OS_DIR, "revert", "--no-edit", sha],
+                        capture_output=True, text=True)
+    if rv.returncode != 0:
+        subprocess.run(["git", "-C", PM_OS_DIR, "revert", "--abort"],
+                       capture_output=True, text=True)
+        return (False, (rv.stderr or rv.stdout or "revert failed").strip()[:200])
+    return (True, "")
+
+
+def handle_delete_adaptation(handler, adaptation_id):
+    """POST /api/adaptations/{id}/delete - bundle revert, then tombstone.
+
+    Reverts each manifest commit NEWEST-first (reverse of capture order, which
+    the manifest stores oldest->newest), best-effort: a conflicting/already-
+    reverted commit is skipped and reported as a partial failure rather than a
+    500. After reverting, tombstone the row (invariant #6: never hard-delete;
+    the file stays, marked deleted). The warning modal is client-side.
+    """
+    try:
+        rec = adaptations_lib.read(adaptation_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Adaptation {adaptation_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Delete failed: {e}", status=500)
+        return
+
+    manifest = rec.get("manifest") or []
+    # Capture order is oldest->newest; revert newest-first. De-dupe shas (a
+    # single commit can produce several manifest entries) while preserving the
+    # newest-first order.
+    shas = []
+    for entry in reversed(manifest):
+        sha = entry.get("commit")
+        if sha and sha not in shas:
+            shas.append(sha)
+
+    partial = False
+    failures = []
+    for sha in shas:
+        ok, msg = _adapt_git_revert(sha)
+        if not ok:
+            partial = True
+            failures.append({"commit": sha, "error": msg})
+
+    try:
+        adaptations_lib.tombstone(adaptation_id)
+    except Exception as e:
+        _error_response(handler, f"Delete failed to tombstone: {e}", status=500)
+        return
+
+    resp = {"ok": True}
+    if partial:
+        resp["partial"] = True
+        resp["failures"] = failures
+    _json_response(handler, resp)
 
 
 def handle_rerun_task(handler, task_id):
@@ -2174,6 +2430,38 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/workers" and method == "GET":
             handle_list_workers(self)
+            return True
+
+        # ─── Adapt API routes ──────────────────────────────────────────
+        # POST /api/adapt - run a build turn (decoupled SSE). GET stream
+        # reconnects. Rail CRUD lives under /api/adaptations. Specific action
+        # paths precede the generic /api/adaptations/{id} rename route.
+
+        if path == "/api/adapt" and method == "POST":
+            handle_adapt(self)
+            return True
+
+        if path == "/api/adapt/stream" and method == "GET":
+            handle_adapt_stream(self, query_params)
+            return True
+
+        if path == "/api/adaptations" and method == "GET":
+            handle_list_adaptations(self)
+            return True
+
+        match = re.match(r"^/api/adaptations/([^/]+)/toggle$", path)
+        if match and method == "PUT":
+            handle_toggle_adaptation(self, unquote(match.group(1)))
+            return True
+
+        match = re.match(r"^/api/adaptations/([^/]+)/delete$", path)
+        if match and method == "POST":
+            handle_delete_adaptation(self, unquote(match.group(1)))
+            return True
+
+        match = re.match(r"^/api/adaptations/([^/]+)$", path)
+        if match and method == "PUT":
+            handle_rename_adaptation(self, unquote(match.group(1)))
             return True
 
         # ─── Task trace routes ─────────────────────────────────────────
