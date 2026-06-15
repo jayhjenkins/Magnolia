@@ -301,7 +301,32 @@
   .card-from svg { width: 12px; height: 12px; color: var(--text-dim); flex: 0 0 auto; }
   .card-from span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card-domain { color: var(--text-dim); }
+  .card-age { color: var(--text-dim); opacity: 0.75; }
   .sep { color: var(--text-dim); opacity: 0.6; }
+  .dt-priority-select {
+    appearance: auto;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border-soft);
+    border-left: 3px solid var(--prio, var(--border));
+    border-radius: var(--r-badge, 4px);
+    font: inherit; font-size: 13px;
+    cursor: pointer; padding: 2px 6px;
+    outline-offset: 3px;
+  }
+  .dt-priority-select:hover { background: var(--surface-hover); }
+  .dt-due-input {
+    background: var(--surface);
+    color: var(--text-dim);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-badge, 4px);
+    font: inherit; font-size: 13px;
+    cursor: pointer; padding: 2px 6px;
+    outline-offset: 3px;
+    color-scheme: dark light;
+  }
+  .dt-due-input.has-date { color: var(--text); }
+  .dt-due-input:hover { background: var(--surface-hover); }
 
   .card-signals { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
   .chip {

@@ -92,14 +92,55 @@ def headless_claude_env(base=None):
     return env
 
 
+def _find_windows_claude():
+    """Search Windows-specific claude install locations.
+
+    VS Code and Cursor ship the claude CLI as a native binary inside their
+    extension folder, which is never on PATH by default. We glob for the
+    latest installed version so this survives extension updates.
+    """
+    import glob as _glob
+    user = os.path.expanduser("~")
+    patterns = [
+        # npm global install (most standard CLI install path)
+        os.path.join(user, "AppData", "Roaming", "npm", "claude.cmd"),
+        os.path.join(user, "AppData", "Roaming", "npm", "claude"),
+        # VS Code extension native binary
+        os.path.join(user, ".vscode", "extensions",
+                     "anthropic.claude-code-*", "resources", "native-binary", "claude.exe"),
+        # Cursor extension native binary
+        os.path.join(user, ".cursor", "extensions",
+                     "anthropic.claude-code-*", "resources", "native-binary", "claude.exe"),
+        # Anthropic desktop app (standard Windows install location)
+        os.path.join(user, "AppData", "Local", "AnthropicClaude", "claude.exe"),
+        os.path.join(user, "AppData", "Local", "Programs", "claude", "claude.exe"),
+    ]
+    candidates = []
+    for pat in patterns:
+        candidates.extend(_glob.glob(pat))
+    candidates = [c for c in candidates if os.path.isfile(c)]
+    if not candidates:
+        return None
+    # Prefer the most recently modified (picks the newest extension version).
+    candidates.sort(key=os.path.getmtime, reverse=True)
+    return candidates[0]
+
+
 def resolve_claude(path=None):
     """Absolute path to the claude CLI, or the bare name as a last resort.
 
     shutil.which honors PATHEXT on Windows (finds claude.exe / claude.cmd).
+    On Windows, if shutil.which misses (claude not on PATH), falls back to
+    searching known install locations: VS Code/Cursor extension native-binary
+    dirs, Anthropic desktop app, npm global.
     """
     found = shutil.which("claude", path=path)
     if found:
         return found
+    if os_kind() == "windows":
+        win = _find_windows_claude()
+        if win:
+            return win
     for d in _CLAUDE_PREPEND_DIRS:
         cand = os.path.join(d, "claude")
         if os.path.isfile(cand):

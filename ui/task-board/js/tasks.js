@@ -262,14 +262,22 @@ async function openTask(taskId, keepChat) {
     html += `<div class="dt-section">`;
     html += `<div class="dt-sec-head"><span class="dt-sec-title">Details</span></div>`;
     html += `<div class="dt-summary">`;
+    // Priority — inline select so it's editable without the chat.
+    const curPrio = task.priority || 'medium';
+    html += `<div class="dt-sum-item"><span class="dt-sum-k">Priority</span><span class="dt-sum-v"><select class="dt-priority-select prio-${curPrio}" onchange="setPriority('${task.id}',this.value,this)">`;
+    ['critical','high','medium','low'].forEach(p => {
+      html += `<option value="${p}"${p === curPrio ? ' selected' : ''}>${p}</option>`;
+    });
+    html += `</select></span></div>`;
+    // Due date — inline date input, always shown so it can be set or cleared.
+    const curDue = task.due || '';
+    html += `<div class="dt-sum-item"><span class="dt-sum-k">Due</span><span class="dt-sum-v"><input type="date" class="dt-due-input${curDue ? ' has-date' : ''}" value="${escapeHtml(curDue)}" onchange="setDueDate('${task.id}',this.value,this)"></span></div>`;
     const sum = [
-      ['Priority', task.priority || '—'],
       ['Domain', task.domain || '—'],
       ['Assignee', task.assignee || '—'],
       ['Source', taskSource(task)],
       ['Project', task.project || '—'],
     ];
-    if (task.due) sum.push(['Due', task.due]);
     sum.push(['Created', formatDate(task.created)]);
     if (task.waiting_on) { sum.push(['Waiting on', task.waiting_on]); sum.push(['Expected', task.waiting_expected || '—']); }
     sum.forEach(([k, v]) => html += `<div class="dt-sum-item"><span class="dt-sum-k">${k}</span><span class="dt-sum-v">${escapeHtml(String(v))}</span></div>`);
@@ -1149,5 +1157,38 @@ async function publishToJira(taskId) {
   } catch (err) {
     toast(`Publish failed: ${err.message}`);
     if (btn) { btn.disabled = false; btn.textContent = 'Publish to Jira'; }
+  }
+}
+
+async function setPriority(taskId, priority, selectEl) {
+  try {
+    const res = await fetch(`${API}/tasks/${taskId}/set-priority`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ priority }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Update the dot colour on the select without a full re-render.
+    if (selectEl) {
+      selectEl.className = `dt-priority-select prio-${priority}`;
+    }
+    fetchTasks();
+  } catch (err) {
+    toast(`Could not update priority: ${err.message}`);
+  }
+}
+
+async function setDueDate(taskId, due, inputEl) {
+  try {
+    const res = await fetch(`${API}/tasks/${taskId}/set-due`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ due }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (inputEl) inputEl.classList.toggle('has-date', !!due);
+    fetchTasks();
+  } catch (err) {
+    toast(`Could not update due date: ${err.message}`);
   }
 }

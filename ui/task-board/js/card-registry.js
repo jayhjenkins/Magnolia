@@ -292,11 +292,25 @@ function _renderTitle(task) {
   return `<div class="card-title"><span class="prio-dot ${prioClass}" title="${task.priority || 'low'} priority"></span><span>${escapeHtml(task.title)}</span></div>`;
 }
 
+function _cardAge(created) {
+  if (!created) return '';
+  const ms = Date.now() - new Date(created).getTime();
+  if (isNaN(ms) || ms < 0) return '';
+  const days = Math.floor(ms / 86400000);
+  if (days === 0) return 'today';
+  if (days === 1) return '1 day old';
+  if (days < 60) return `${days} days old`;
+  // Older: show a short date so the exact timestamp is readable.
+  return new Date(created).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function _renderContext(task) {
   const ctxParts = [];
   const mtg = meetingName(task.source_meeting);
   if (mtg) ctxParts.push(`<span class="card-from" title="From: ${escapeHtml(task.source_meeting)}">${svgIcon('meeting')}<span>${escapeHtml(mtg)}</span></span>`);
   if (task.domain) ctxParts.push(`<span class="card-domain">${escapeHtml(task.domain)}</span>`);
+  const age = _cardAge(task.created);
+  if (age) ctxParts.push(`<span class="card-age">${age}</span>`);
   return ctxParts.length ? `<div class="card-context">${ctxParts.join('<span class="sep">·</span>')}</div>` : '';
 }
 

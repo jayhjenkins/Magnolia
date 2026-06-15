@@ -124,7 +124,7 @@ def _error_response(handler, message, status=400):
 def _sse_begin(handler):
     """Send the SSE response headers (200 + text/event-stream, unbuffered)."""
     handler.send_response(200)
-    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
     handler.send_header("Cache-Control", "no-cache")
     # The server is HTTP/1.1 (keep-alive by default) and an SSE body has no
     # Content-Length, so a browser fetch() reader would never see end-of-stream
@@ -823,6 +823,48 @@ def handle_complete_and_delete_task(handler, task_id):
         _error_response(handler, f"Task {task_id} not found", status=404)
     except Exception as e:
         _error_response(handler, f"Failed to complete task: {e}", status=500)
+
+
+_VALID_PRIORITIES = {"critical", "high", "medium", "low"}
+
+def handle_set_priority(handler, task_id):
+    """POST /api/tasks/{id}/set-priority — update the priority field."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    priority = (body.get("priority") or "").strip().lower()
+    if priority not in _VALID_PRIORITIES:
+        _error_response(handler, "priority must be critical, high, medium, or low", status=400)
+        return
+    try:
+        task_lib.update_task(task_id, {"priority": priority})
+        _json_response(handler, {"ok": True, "priority": priority})
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+    except Exception as e:
+        _error_response(handler, f"Failed to update priority: {e}", status=500)
+
+
+def handle_set_due_date(handler, task_id):
+    """POST /api/tasks/{id}/set-due — update or clear the due field (YYYY-MM-DD)."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    due = (body.get("due") or "").strip()
+    if due and not re.match(r"^\d{4}-\d{2}-\d{2}$", due):
+        _error_response(handler, "due must be YYYY-MM-DD or empty to clear", status=400)
+        return
+    try:
+        task_lib.update_task(task_id, {"due": due or None})
+        _json_response(handler, {"ok": True, "due": due or None})
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+    except Exception as e:
+        _error_response(handler, f"Failed to update due date: {e}", status=500)
 
 
 def handle_update_description(handler, task_id):
@@ -2251,6 +2293,26 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
                 handle_react(self, task_id)
             return True
 
+        # Match /api/tasks/{id}/set-priority
+        match = re.match(r"^/api/tasks/([^/]+)/set-priority$", path)
+        if match and method == "POST":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_set_priority(self, task_id)
+            return True
+
+        # Match /api/tasks/{id}/set-due
+        match = re.match(r"^/api/tasks/([^/]+)/set-due$", path)
+        if match and method == "POST":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_set_due_date(self, task_id)
+            return True
+
         # Match /api/tasks/{id}/chat — POST runs a turn (SSE), GET reloads history.
         match = re.match(r"^/api/tasks/([^/]+)/chat$", path)
         if match and method in ("POST", "GET"):
@@ -2493,8 +2555,9 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
         _error_response(self, "PUT not allowed for this path", status=405)
 
     def end_headers(self):
-        """Inject CORS header into all responses (including static files)."""
+        """Inject CORS and no-cache headers into all responses."""
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         super().end_headers()
 
 
