@@ -574,7 +574,9 @@ def build_cadence_payload(root=None):
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import task_lib
-        prog_id_re = re.compile(r"^PROG-\d{4}$")
+        # {4,} not {4}: _next_id zero-pads to a MINIMUM of 4 digits, so program
+        # ids past PROG-9999 are longer and must still count toward needs_you.
+        prog_id_re = re.compile(r"^PROG-\d{4,}$")
         for t in task_lib.list_tasks(queue="human", status="open"):
             seen = set()
             for tag in (t.get("tags") or []):
