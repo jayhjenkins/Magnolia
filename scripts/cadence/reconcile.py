@@ -23,6 +23,13 @@ from datetime import date, datetime, timedelta
 _VERDICTS = ("holding", "drifting", "broken")
 _RANK = {v: i for i, v in enumerate(_VERDICTS)}
 
+# Threshold constants - named per the sibling program_lib._SERIES_TOL convention.
+_SOON_WINDOW_DAYS = 7      # a pending checkpoint due within this window -> drifting
+_DRIFT_FRACTION = 0.8      # >this fraction of an age/policy limit -> drifting
+_DEFAULT_POLICY_DAYS = 14  # register item age window when none is declared
+_DEFAULT_TOLERANCE = 8     # target series tolerance when none is declared
+_BROKEN_MULTIPLIER = 2     # diff beyond this multiple of tolerance -> broken
+
 
 def _worse(a, b):
     """Return the worse of two verdicts (broken > drifting > holding)."""
@@ -137,7 +144,7 @@ def _verdict_pipeline(fm, type_entry, now):
                 facts = {"reason": f"{label} overdue {overdue}d",
                          "next": f"ship {label}"}
             verdict = _worse(verdict, "broken")
-        elif due <= now_date + timedelta(days=7):
+        elif due <= now_date + timedelta(days=_SOON_WINDOW_DAYS):
             remaining = (due - now_date).days
             if verdict == "holding":
                 facts = {"reason": f"{label} due in {remaining}d",
@@ -159,7 +166,7 @@ def _verdict_pipeline(fm, type_entry, now):
                 facts = {"reason": f"phase {phase} {days_in_phase}d over limit",
                          "next": f"advance {phase}"}
             verdict = _worse(verdict, "broken")
-        elif days_in_phase > 0.8 * max_age:
+        elif days_in_phase > _DRIFT_FRACTION * max_age:
             if verdict == "holding":
                 facts = {"reason": f"phase {phase} aging ({days_in_phase}d)",
                          "next": f"watch {phase}"}
@@ -184,11 +191,11 @@ def _phase_entered_date(fm, phase):
 
 def _verdict_register(fm):
     """register: each item's age vs the policy window (default 14 days)."""
-    policy = fm.get("policy", 14)
+    policy = fm.get("policy", _DEFAULT_POLICY_DAYS)
     try:
         policy = int(policy)
     except (TypeError, ValueError):
-        policy = 14
+        policy = _DEFAULT_POLICY_DAYS
     items = fm.get("items") or []
     verdict = "holding"
     facts = {"reason": "within policy", "next": "none"}
@@ -202,7 +209,7 @@ def _verdict_register(fm):
                 facts = {"reason": f"{name} aged {age}d (policy {policy})",
                          "next": f"clear {name}"}
             verdict = _worse(verdict, "broken")
-        elif age > 0.8 * policy:
+        elif age > _DRIFT_FRACTION * policy:
             if verdict == "holding":
                 facts = {"reason": f"{name} aging {age}d (policy {policy})",
                          "next": f"watch {name}"}
@@ -217,14 +224,17 @@ def _verdict_target(fm):
     pred = series.get("pred") or []
     if not act or not pred:
         return "holding", {"reason": "no series", "next": "none"}
+    # Compare the latest actual against its predicted counterpart. When actuals
+    # run past predictions (a longer act series), the index pins to the last
+    # prediction - the final predicted point is the standing expectation.
     expected = pred[min(len(act) - 1, len(pred) - 1)]
     actual = act[-1]
-    tol = (fm.get("metric") or {}).get("tolerance", 8)
+    tol = (fm.get("metric") or {}).get("tolerance", _DEFAULT_TOLERANCE)
     try:
         diff = abs(actual - expected)
     except TypeError:
         return "holding", {"reason": "no series", "next": "none"}
-    if diff > 2 * tol:
+    if diff > _BROKEN_MULTIPLIER * tol:
         return "broken", {"reason": f"actual {actual} vs expected {expected}",
                           "next": "diagnose metric"}
     if diff > tol:

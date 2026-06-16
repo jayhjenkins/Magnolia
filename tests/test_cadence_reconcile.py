@@ -265,6 +265,18 @@ def test_target_custom_tolerance():
     assert verdict == "drifting"
 
 
+def test_target_act_longer_than_pred_pins_to_last_prediction():
+    # When actuals run past predictions, expected pins to the LAST prediction.
+    # pred=[50,55], act=[49,58,99]: expected = pred[1] = 55, actual = 99;
+    # diff |99-55| = 44 > 2*8 = 16 -> broken.
+    fm = {
+        "type": "did-it-work",
+        "series": {"pred": [50, 55], "act": [49, 58, 99]},
+    }
+    verdict, _ = reconcile.compute_verdict(_prog(fm), _registry(), NOW)
+    assert verdict == "broken"
+
+
 def test_target_no_series_holding():
     fm = {"type": "did-it-work", "series": {}}
     verdict, _ = reconcile.compute_verdict(_prog(fm), _registry(), NOW)
@@ -312,11 +324,15 @@ def test_cycle_no_periods_holding():
     assert verdict == "holding"
 
 
-def test_cycle_human_string_due_does_not_raise():
-    # A cycle program whose checkpoint `due` is a human string must not crash.
+def test_pipeline_human_string_due_skipped_not_raised():
+    # A PIPELINE program (roadmap-initiative) DOES read checkpoint `due` dates,
+    # so this exercises the real reconcile continue-path on a non-ISO due: the
+    # human-string checkpoint contributes no signal and must not raise. With no
+    # other signal (current phase has no age window) the verdict is holding.
     fm = {
-        "type": "eos-cycle",
-        "periods": [{"w": "W24", "s": "sent"}],
+        "type": "roadmap-initiative",
+        "phase": "execution",
+        "phase_entered": {"execution": "2026-06-01"},
         "checkpoints": [
             {"id": "l10", "label": "L10", "due": "Thu 9:00am", "status": "pending"},
         ],
