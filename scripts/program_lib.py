@@ -68,14 +68,17 @@ def _next_id(root=None):
     pdir = _program_dir(root)
     os.makedirs(pdir, exist_ok=True)
     counter = _counter_path(root)
-    if not os.path.exists(counter):
-        with open(counter, "w", encoding="utf-8") as f:
-            f.write("1")
 
-    fd = open(counter, "r+")
+    # Open create+read+write so we can seed under the lock without a TOCTOU
+    # window: two concurrent first-callers would otherwise both seed.
+    fd = open(counter, "a+", encoding="utf-8")
     try:
         platform_lib.lock(fd)
-        current = int(fd.read().strip())
+        fd.seek(0)
+        raw = fd.read().strip()
+        # Counter holds the NEXT id; seed at 1 so the first program is PROG-0001
+        # (task_lib's conftest seeds "0" instead; here there is no conftest).
+        current = int(raw) if raw else 1
         program_id = f"PROG-{current:04d}"
         fd.seek(0)
         fd.write(str(current + 1))
