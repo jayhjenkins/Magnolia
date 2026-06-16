@@ -469,8 +469,18 @@ def render_view(program, registry):
 
     if state_model == "pipeline":
         phases_def = type_entry.get("phases", []) or []
-        entered = fm.get("phase_entered") or {}
         current_phase = fm.get("phase")
+        # phase_entered tolerates two shapes: a dict {phase_id: date} (the
+        # richer seed form) and a scalar date string (the brief's form — the
+        # date the CURRENT phase was entered). Normalize the scalar into a
+        # dict keyed by the current phase id; missing/None -> no entered dates.
+        raw_entered = fm.get("phase_entered")
+        if isinstance(raw_entered, dict):
+            entered = raw_entered
+        elif raw_entered:
+            entered = {current_phase: raw_entered}
+        else:
+            entered = {}
         current = 0
         for i, ph in enumerate(phases_def):
             if ph.get("id") == current_phase:

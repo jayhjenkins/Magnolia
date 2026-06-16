@@ -64,6 +64,27 @@ def test_render_pipeline_current_index(tmp_path):
     assert vm["intent"] == "Rebuild reconciliation."
 
 
+def test_render_pipeline_tolerates_scalar_phase_entered(tmp_path):
+    # The Cadence design brief (§4) documents phase_entered as a SCALAR date
+    # string (the date the CURRENT phase was entered). render_view must tolerate
+    # it without raising — and attribute it to the current phase only.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Scalar entered", owner_role="product",
+        root=root, frontmatter_extra={
+            "phase": "execution", "drift": "holding",
+            "phase_entered": "2026-06-01",  # scalar form
+        })
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["current"] == 2  # discovery=0, planning=1, execution=2
+    # The execution (current) phase carries the scalar date.
+    assert vm["phases"][2]["entered"] == "2026-06-01"
+    # An earlier/other phase has no entered date.
+    assert not vm["phases"][0]["entered"]
+    assert not vm["phases"][1]["entered"]
+
+
 def test_render_target_delta_and_series(tmp_path):
     root = str(tmp_path)
     reg = pl.load_registry()
