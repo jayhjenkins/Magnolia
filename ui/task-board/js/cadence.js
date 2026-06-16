@@ -182,8 +182,10 @@ function cadenceMetric(p, tone) {
   const unit = m.unit || '';
   // Big-number color: holding→text, drifting→warning, broken→danger.
   const mtone = p.drift === 'broken' ? 'var(--danger)' : p.drift === 'drifting' ? 'var(--warning)' : 'var(--text)';
-  const big = `${m.actual}${unit}`;
-  const targetStr = `${m.target}${unit}`;
+  // Guard missing numeric fields: ?? (not ||) so 0 stays a valid value, and a
+  // null/undefined actual/target shows '-' (no stray unit) instead of "null%".
+  const big = m.actual == null ? '-' : `${m.actual}${unit}`;
+  const targetStr = m.target == null ? '-' : `${m.target}${unit}`;
   // delta_str arrives pre-formatted from the server (ASCII hyphen). Color:
   // positive → success; negative → drift tone.
   const delta = p.delta_str || '';
@@ -280,11 +282,11 @@ function cadenceChart(p, tone) {
       <polygon points="${escapeAttr(s.band || '')}" fill="var(--text-dim)" opacity="0.10"></polygon>
       <polyline points="${escapeAttr(s.predPts || '')}" fill="none" stroke="var(--text-dim)" stroke-width="1.4" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"></polyline>
       <polyline points="${escapeAttr(s.actPts || '')}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline>
-      ${s.lastX !== '' && s.lastX !== undefined ? `<circle cx="${escapeAttr(s.lastX)}" cy="${escapeAttr(s.lastY)}" r="3" fill="${stroke}"></circle>` : ''}
+      ${s.lastX != null && s.lastX !== '' ? `<circle cx="${escapeAttr(s.lastX)}" cy="${escapeAttr(s.lastY)}" r="3" fill="${stroke}"></circle>` : ''}
     </svg>
     <div class="cadence-chart-legend">
       <span class="cadence-legend-item"><span class="cadence-legend-dash"></span>Expected</span>
-      <span class="cadence-legend-item"><span class="cadence-legend-line"></span>Actual</span>
+      <span class="cadence-legend-item"><span class="cadence-legend-line" style="background:${stroke};"></span>Actual</span>
     </div>
   </div>`;
 }
@@ -309,12 +311,16 @@ function cadenceItems(p) {
   let rows = '';
   for (const it of items) {
     const age = it.age;
+    // Missing age → neutral --text-dim and a bare '-' (no trailing 'd');
+    // a present age (incl. 0) keeps its color comparison and 'Nd' label.
+    const hasAge = age != null;
     let ageColor = 'var(--text-dim)';
-    if (policy != null && age > policy) ageColor = 'var(--danger)';
-    else if (age > 14) ageColor = 'var(--warning)';
+    if (hasAge && policy != null && age > policy) ageColor = 'var(--danger)';
+    else if (hasAge && age > 14) ageColor = 'var(--warning)';
+    const ageStr = hasAge ? `${escapeHtml(String(age))}d` : '-';
     rows += `<div class="cadence-item">
       <span class="cadence-item-name">${escapeHtml(it.name || '')}</span>
-      <span class="cadence-item-meta">${escapeHtml(it.owner || '')} · <span class="cadence-item-age" style="color:${ageColor};">${escapeHtml(String(age))}d</span></span>
+      <span class="cadence-item-meta">${escapeHtml(it.owner || '')} · <span class="cadence-item-age" style="color:${ageColor};">${ageStr}</span></span>
     </div>`;
   }
   return `<div class="cadence-items">${rows}</div>`;
