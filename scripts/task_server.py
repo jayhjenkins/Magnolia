@@ -36,6 +36,7 @@ import chat_runner
 import chat_transcript
 import ladder_lib
 import cron_lib
+import program_lib
 import jira_publish
 import profile_lib
 import packs_lib
@@ -2209,6 +2210,15 @@ def handle_list_cron_jobs(handler):
     _json_response(handler, {"jobs": jobs})
 
 
+def handle_list_cadence(handler):
+    """GET /api/cadence — List cadence program families (read-only)."""
+    try:
+        payload = program_lib.build_cadence_payload()
+        _json_response(handler, payload)
+    except Exception as e:
+        _error_response(handler, f"Failed to load cadence: {e}", status=500)
+
+
 def handle_get_cron_job(handler, job_id):
     """GET /api/cron/{id} — Get a single cron job."""
     job = cron_lib.get_job(job_id)
@@ -2424,6 +2434,10 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/cron" and method == "GET":
             handle_list_cron_jobs(self)
+            return True
+
+        if path == "/api/cadence" and method == "GET":
+            handle_list_cadence(self)
             return True
 
         # ─── Worker API routes ─────────────────────────────────────────
