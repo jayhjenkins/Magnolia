@@ -267,11 +267,14 @@ _SERIES_H = 66
 _SERIES_PAD = 5
 _SERIES_TOL = 8
 
-# Matches an Observations entry header: "### YYYY-MM-DD - sentinel:NAME [kind]".
-# The sentinel name and the [kind] are both optional, kept tolerant.
+# Matches an Observations entry header: "### YYYY-MM-DD — sentinel:NAME [kind]".
+# The sentinel name and the [kind] are both optional, kept tolerant. The
+# separator accepts an ASCII hyphen AND en/em dash, since the spec-conformant
+# brief format authors the header with an em-dash (—) — reading authored
+# content tolerantly, not emitting it (so this is outside invariant #8).
 _OBS_HEADER_RE = re.compile(
     r"^###\s+(?P<date>\d{4}-\d{2}-\d{2})\s*"
-    r"(?:-\s*(?:sentinel:(?P<sentinel>\S+))?\s*(?:\[(?P<kind>[^\]]+)\])?)?\s*$"
+    r"(?:[-–—]\s*(?:sentinel:(?P<sentinel>\S+))?\s*(?:\[(?P<kind>[^\]]+)\])?)?\s*$"
 )
 
 
@@ -391,12 +394,22 @@ def _build_series(series):
     top = [f"{x(i):.1f},{y(v + tol):.1f}" for i, v in enumerate(pred)]
     bot = [f"{x(i):.1f},{y(v - tol):.1f}" for i, v in enumerate(pred)][::-1]
     li = n - 1
+    # `act` may be shorter than `pred` (a target mid-flight has fewer actuals
+    # than predicted points). Anchor the last actual point to the final
+    # available actual; fall back to the last predicted point when act is empty,
+    # so a single mismatched series never raises and 500s the whole endpoint.
+    if act:
+        last_act_x = x(min(li, len(act) - 1))
+        last_act_y = y(act[min(li, len(act) - 1)])
+    else:
+        last_act_x = x(li)
+        last_act_y = y(pred[li])
     return {
         "predPts": pred_pts,
         "actPts": act_pts,
         "band": " ".join(top + bot),
-        "lastX": f"{x(li):.1f}",
-        "lastY": f"{y(act[li]):.1f}",
+        "lastX": f"{last_act_x:.1f}",
+        "lastY": f"{last_act_y:.1f}",
     }
 
 
@@ -415,6 +428,9 @@ def render_view(program, registry):
         (t for t in registry.get("types", []) if t.get("id") == type_id), {}
     )
     state_model = type_entry.get("state_model")
+    # An unknown type yields an empty type_entry, so family is None — such a
+    # program matches no registry family and is silently dropped from the
+    # payload by build_cadence_payload (intentional: unregistered types don't render).
     family = type_entry.get("family")
     type_label = type_entry.get("label", type_id)
 
@@ -427,12 +443,13 @@ def render_view(program, registry):
         "family": family,
         "type_label": type_label,
         "activity": _parse_observations(body),
+        # Canonical checkpoint keys are {id, label, due, instrument, status}.
         "checkpoints": [
             {
-                "label": c.get("label", c.get("l")),
+                "label": c.get("label"),
                 "due": c.get("due"),
-                "instrument": c.get("instrument", c.get("inst")),
-                "status": c.get("status", c.get("st")),
+                "instrument": c.get("instrument"),
+                "status": c.get("status"),
             }
             for c in (fm.get("checkpoints") or [])
         ],

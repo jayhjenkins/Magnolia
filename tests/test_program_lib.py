@@ -173,6 +173,61 @@ def test_render_activity_absent_degrades_to_empty():
     assert vm["activity"] == []
 
 
+def test_build_series_tolerates_short_act():
+    # act shorter than pred must not raise (one bad series would 500 the endpoint).
+    s = pl._build_series({"pred": [10, 20, 30], "act": [10, 20]})
+    assert isinstance(s, dict)
+    for k in ("predPts", "actPts", "band", "lastX", "lastY"):
+        assert k in s
+
+
+def test_render_activity_parses_emdash_header():
+    reg = pl.load_registry()
+    program = {
+        "frontmatter": {
+            "program_id": "PROG-9002",
+            "type": "roadmap-initiative",
+            "title": "Em-dash header",
+            "phase": "discovery",
+            "drift": "holding",
+        },
+        "body": (
+            "## Intent\nIntent text.\n\n"
+            "## Observations\n"
+            "### 2026-06-11 — sentinel:movement-watch [status-signal]\n"
+            "claim: Closed 4 of 9 stories.\n\n"
+            "## Cycles\n"
+        ),
+    }
+    vm = pl.render_view(program, reg)
+    assert len(vm["activity"]) == 1
+    entry = vm["activity"][0]
+    assert entry["date"] == "2026-06-11"
+    assert entry["text"] == "Closed 4 of 9 stories."
+    assert entry["tag"] == "movement-watch"
+
+
+def test_render_checkpoints_use_canonical_keys(tmp_path):
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Checkpointed", owner_role="product",
+        root=root, frontmatter_extra={
+            "phase": "execution", "drift": "holding",
+            "checkpoints": [
+                {"id": "cp1", "label": "Beta cut", "due": "2026-07-01",
+                 "instrument": "tracker", "status": "open"},
+            ],
+        })
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert len(vm["checkpoints"]) == 1
+    cp = vm["checkpoints"][0]
+    assert cp["label"] == "Beta cut"
+    assert cp["due"] == "2026-07-01"
+    assert cp["instrument"] == "tracker"
+    assert cp["status"] == "open"
+
+
 def test_build_payload_groups_by_family_and_drops_empty(tmp_path):
     root = str(tmp_path)
     pl.create_program(
