@@ -705,3 +705,168 @@ def test_list_tasks_projects_tags(tmp_path):
     assert len(cards) == 1
     assert "tags" in cards[0]
     assert cards[0]["tags"] == ["PROG-0001", "cadence"]
+
+
+# ─── reconcile_all (Task 4) ───────────────────────────────────────────────────
+#
+# The portfolio-level driver: load registry once, list active programs, reconcile
+# each inside a try/except so one bad program never stalls the run. Isolation is
+# mandatory — every test seeds a tmp datasets root via create_program(root=tmp);
+# the real datasets/programs/ is NEVER touched.
+
+
+def _seed_holding_register(root, last_cycle=OTHER_PERIOD, title="Issues list"):
+    """Create a register program that computes to `holding` (within policy)."""
+    program_id, _ = pl.create_program(
+        type="eos-issues",
+        title=title,
+        owner_role="ops",
+        frontmatter_extra={
+            "policy": 21,
+            "items": [{"name": "a", "owner": "ops", "age": 3}],
+            "last_cycle": last_cycle,
+        },
+        root=root,
+    )
+    return program_id
+
+
+def test_reconcile_all_reconciles_active_programs(tmp_path):
+    root = str(tmp_path / "data")
+    p1 = _seed_holding_register(root, title="List one")
+    p2 = _seed_broken_pipeline(root)
+
+    results = reconcile.reconcile_all(root=root, now=NOW)
+
+    assert len(results) == 2
+    by_id = {r["program_id"]: r for r in results}
+    assert by_id[p1]["verdict"] == "holding"
+    assert by_id[p2]["verdict"] == "broken"
+    assert all("error" not in r for r in results)
+
+
+def test_reconcile_all_resilient_to_one_failing_program(tmp_path, monkeypatch):
+    # Two well-formed active programs + one that makes reconcile_program raise.
+    # Monkeypatch reconcile_program with a wrapper that raises for one specific
+    # id and delegates otherwise — one bad program must NOT stall the run.
+    root = str(tmp_path / "data")
+    good1 = _seed_holding_register(root, title="Good one")
+    good2 = _seed_broken_pipeline(root)
+    bad = _seed_holding_register(root, title="Bad one")
+
+    real = reconcile.reconcile_program
+
+    def flaky(program, registry, **kwargs):
+        if program["frontmatter"].get("program_id") == bad:
+            raise RuntimeError("boom")
+        return real(program, registry, **kwargs)
+
+    monkeypatch.setattr(reconcile, "reconcile_program", flaky)
+
+    results = reconcile.reconcile_all(root=root, now=NOW)
+
+    assert len(results) == 3
+    by_id = {r["program_id"]: r for r in results}
+    # Exactly one carries an error key; it is the bad program.
+    errored = [r for r in results if "error" in r]
+    assert len(errored) == 1
+    assert errored[0]["program_id"] == bad
+    assert "boom" in errored[0]["error"]
+    # The other two reconciled normally — no exception propagated.
+    assert by_id[good1]["verdict"] == "holding"
+    assert by_id[good2]["verdict"] == "broken"
+    assert "error" not in by_id[good1]
+    assert "error" not in by_id[good2]
+
+
+def test_reconcile_all_skips_non_active_programs(tmp_path):
+    root = str(tmp_path / "data")
+    active = _seed_holding_register(root, title="Active list")
+    paused, _ = pl.create_program(
+        type="eos-issues",
+        title="Paused list",
+        owner_role="ops",
+        frontmatter_extra={
+            "status": "paused",
+            "policy": 21,
+            "items": [{"name": "a", "owner": "ops", "age": 3}],
+            "last_cycle": OTHER_PERIOD,
+        },
+        root=root,
+    )
+
+    results = reconcile.reconcile_all(root=root, now=NOW)
+
+    ids = {r["program_id"] for r in results}
+    assert active in ids
+    assert paused not in ids
+    assert len(results) == 1
+
+
+# ─── CLI (Task 4) ─────────────────────────────────────────────────────────────
+
+
+def test_main_all_force_returns_zero(tmp_path, monkeypatch, capsys):
+    # main() drives reconcile_all over the default root, so stub reconcile_all
+    # for the CLI smoke test (its real behavior is covered above with root=).
+    def stub(root=None, now=None, force=False):
+        assert force is True
+        return [
+            {"program_id": "PROG-0001", "verdict": "broken",
+             "new_cycle": True, "emitted": ["TASK-0123"]},
+            {"program_id": "PROG-0002", "verdict": "holding",
+             "new_cycle": False, "emitted": []},
+        ]
+
+    monkeypatch.setattr(reconcile, "reconcile_all", stub)
+
+    rc = reconcile.main(["--all", "--force"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "PROG-0001" in out
+    assert "PROG-0002" in out
+    assert "TASK-0123" in out
+    # ASCII only — no em/en dash in CLI output (invariant #8).
+    assert "—" not in out
+    assert "–" not in out
+
+
+def test_main_reports_errored_program(tmp_path, monkeypatch, capsys):
+    def stub(root=None, now=None, force=False):
+        return [{"program_id": "PROG-0004", "error": "boom"}]
+
+    monkeypatch.setattr(reconcile, "reconcile_all", stub)
+
+    rc = reconcile.main(["--all"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "PROG-0004" in out
+    assert "ERROR" in out
+    assert "boom" in out
+
+
+def test_main_bad_now_returns_nonzero(capsys):
+    rc = reconcile.main(["--now", "not-a-date", "--all"])
+    assert rc != 0
+    err = capsys.readouterr()
+    combined = err.out + err.err
+    assert "not-a-date" in combined or "now" in combined.lower()
+
+
+def test_main_accepts_trailing_z_in_now(tmp_path, monkeypatch):
+    captured = {}
+
+    def stub(root=None, now=None, force=False):
+        captured["now"] = now
+        return []
+
+    monkeypatch.setattr(reconcile, "reconcile_all", stub)
+
+    rc = reconcile.main(["--all", "--now", "2026-06-16T09:00:00Z"])
+    assert rc == 0
+    assert isinstance(captured["now"], datetime)
+
+
+def test_main_without_all_returns_nonzero(capsys):
+    rc = reconcile.main([])
+    assert rc != 0

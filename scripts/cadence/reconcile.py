@@ -17,6 +17,7 @@ All runtime-produced strings are ASCII-safe (hyphen, never em-dash) per
 invariant #8.
 """
 
+import argparse
 import os
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -496,3 +497,110 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
         "new_cycle": True,
         "emitted": emitted,
     }
+
+
+# ─── Portfolio driver + CLI (Task 4) ─────────────────────────────────────────
+#
+# reconcile_all is the once-per-cadence-tick driver: load the registry ONCE,
+# list the active programs, reconcile each inside try/except so one bad program
+# (an unwritable file, a corrupt shape that slips past compute_verdict's
+# degrade-to-holding guard) never stalls the whole run. Each program yields one
+# result dict; a failure yields {"program_id", "error"} and the run continues.
+# Tier-1: no scheduler here (Task 5), no new emitter actions, no external writes
+# beyond the existing escalate card.
+
+
+def reconcile_all(root=None, now=None, force=False):
+    """Reconcile every ACTIVE program. Returns one result dict per program.
+
+    Loads the registry once, lists `status="active"` programs (candidate/paused/
+    archived are filtered out by list_programs), and reconciles each inside a
+    try/except so one failure never stalls the run. On success appends the
+    reconcile_program result; on exception logs a tagged line to stderr and
+    appends {"program_id", "error": str(e)}, then continues.
+    """
+    registry = program_lib.load_registry()
+    programs = program_lib.list_programs(status="active", root=root)
+
+    results = []
+    for program in programs:
+        program_id = (program.get("frontmatter") or {}).get("program_id") or "?"
+        try:
+            results.append(
+                reconcile_program(program, registry, now=now, force=force, root=root)
+            )
+        except Exception as e:  # one bad program must not stall the run
+            sys.stderr.write(f"[cadence-reconcile] {program_id}: {e}\n")
+            results.append({"program_id": program_id, "error": str(e)})
+    return results
+
+
+def _parse_now(value):
+    """Parse an ISO timestamp (tolerating a trailing `Z`) into a datetime.
+
+    Raises ValueError on a bad value so the CLI can report it; mirrors
+    cron_lib's `Z`-to-offset normalization.
+    """
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _summary_line(result):
+    """Render a one-line ASCII summary for one reconcile result (invariant #8)."""
+    program_id = result.get("program_id", "?")
+    if "error" in result:
+        return f"{program_id} ERROR: {result['error']}"
+    verdict = result.get("verdict", "?")
+    if result.get("new_cycle"):
+        emitted = result.get("emitted") or []
+        if emitted:
+            cycle = f"new cycle, emitted {', '.join(emitted)}"
+        else:
+            cycle = "new cycle"
+    else:
+        cycle = "no change"
+    return f"{program_id} {verdict} ({cycle})"
+
+
+def main(argv=None):
+    """CLI entrypoint. Returns a process exit code (0 on success)."""
+    parser = argparse.ArgumentParser(
+        prog="reconcile",
+        description="Reconcile active Cadence programs (deterministic, Tier-1).",
+    )
+    parser.add_argument(
+        "--all", action="store_true",
+        help="reconcile all active programs (required for now)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="rerun even if a program already reconciled this period",
+    )
+    parser.add_argument(
+        "--now", metavar="ISO",
+        help="reconcile as of this ISO timestamp (a trailing Z is accepted)",
+    )
+    args = parser.parse_args(argv)
+
+    if not args.all:
+        sys.stderr.write("nothing to do: pass --all to reconcile active programs\n")
+        return 2
+
+    now = None
+    if args.now:
+        try:
+            now = _parse_now(args.now)
+        except ValueError:
+            sys.stderr.write(
+                f"error: could not parse --now value '{args.now}' "
+                f"(expected ISO format, e.g. 2026-06-16T09:00:00Z)\n"
+            )
+            return 2
+
+    results = reconcile_all(now=now, force=args.force)
+    for result in results:
+        print(_summary_line(result))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
