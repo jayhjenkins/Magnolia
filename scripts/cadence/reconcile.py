@@ -524,7 +524,9 @@ def reconcile_all(root=None, now=None, force=False):
 
     results = []
     for program in programs:
-        program_id = (program.get("frontmatter") or {}).get("program_id") or "?"
+        # list_programs sets a top-level program_id with a filename fallback, so a
+        # malformed program still names its file in the error line (not a bare "?").
+        program_id = program.get("program_id") or "?"
         try:
             results.append(
                 reconcile_program(program, registry, now=now, force=force, root=root)
