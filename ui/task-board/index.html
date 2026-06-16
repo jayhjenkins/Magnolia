@@ -616,6 +616,99 @@
   .cron-history a { color: var(--accent); text-decoration: none; }
   .cron-history a:hover { text-decoration: underline; }
 
+  /* ─── Cadence — read-only standing-loops ledger ────────────────────── */
+  .cadence-view { min-height: calc(100vh - 62px); }
+  .cadence-page { max-width: 1080px; margin: 0 auto; padding: 30px 24px 80px; }
+  .cadence-header { margin-bottom: 22px; }
+  .cadence-title { font-family: var(--font-serif); font-size: 23px; font-weight: 500; color: var(--text); margin: 0 0 5px; }
+  .cadence-subtitle { font-size: 13.5px; color: var(--text-muted); line-height: 1.5; max-width: 62ch; }
+  .cadence-empty { text-align: center; color: var(--text-muted); padding: 64px 20px; font-size: 14px; }
+
+  .cadence-family { margin-bottom: 26px; }
+  .cadence-family-label { font-family: var(--font-serif); font-size: 15px; font-weight: 500; color: var(--text); margin: 0 2px 9px; }
+  .cadence-lane { background: color-mix(in oklab, var(--surface) 80%, transparent); border: 1px solid var(--border-soft); border-radius: var(--r-lane); overflow: hidden; }
+
+  /* row */
+  .cadence-row.has-border { border-top: 1px solid var(--border-soft); }
+  .cadence-row-head { display: grid; grid-template-columns: minmax(180px, 1.25fr) minmax(280px, 1.9fr) minmax(110px, 0.7fr); column-gap: 20px; align-items: center; padding: 15px 18px; cursor: pointer; }
+  .cadence-name { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .cadence-chev { display: inline-flex; color: var(--text-dim); flex: 0 0 auto; transition: transform var(--ease); }
+  .cadence-name-text { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .cadence-col2 { min-width: 0; }
+  .cadence-health { text-align: right; min-width: 0; }
+  .cadence-health-word { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+  .cadence-status-line { font-size: 13.5px; color: var(--text); line-height: 1.45; }
+
+  /* column 2 — pipeline stepper */
+  .cadence-stepper { position: relative; padding-top: 3px; }
+  .cadence-stepper-track { position: absolute; left: 5px; right: 5px; top: 8px; height: 2px; background: var(--border-soft); }
+  .cadence-stepper-reach { position: absolute; left: 5px; top: 8px; height: 2px; background: color-mix(in oklab, var(--text-dim) 55%, transparent); }
+  .cadence-stepper-dots { position: relative; display: flex; justify-content: space-between; }
+  .cadence-phase { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+
+  /* column 2 — target metric */
+  .cadence-metric { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .cadence-metric-big { font-family: var(--font-serif); font-size: 24px; font-weight: 500; line-height: 1; letter-spacing: -0.01em; }
+  .cadence-metric-target { font-size: 12.5px; color: var(--text-dim); }
+  .cadence-metric-delta { font-size: 12px; font-weight: 600; }
+
+  /* expanded panel */
+  .cadence-expand { padding: 6px 22px 20px 41px; border-top: 1px solid var(--border-soft); background: color-mix(in oklab, var(--surface-hover) 22%, transparent); }
+  .cadence-intent { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; max-width: 80ch; text-wrap: pretty; margin: 15px 0 20px; }
+  .cadence-body { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+  .cadence-body-left { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+  .cadence-body-right { min-width: 0; }
+  .cadence-eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 11px; }
+
+  /* phase history */
+  .cadence-phase-hist-list { display: flex; flex-direction: column; gap: 3px; }
+  .cadence-phase-hist { display: flex; align-items: center; gap: 11px; }
+  .cadence-hist-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .cadence-hist-label { font-size: 13px; color: var(--text); min-width: 86px; flex: 0 0 auto; }
+  .cadence-hist-meta { font-size: 12px; }
+
+  /* target chart */
+  .cadence-chart-svg { width: 100%; max-width: 340px; height: 70px; overflow: visible; }
+  .cadence-chart-legend { display: flex; gap: 16px; margin-top: 7px; font-size: 11px; color: var(--text-dim); }
+  .cadence-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+  .cadence-legend-dash { width: 14px; border-top: 2px dashed var(--text-dim); }
+  .cadence-legend-line { width: 14px; height: 2px; border-radius: 2px; background: var(--accent); }
+
+  /* cycle periods */
+  .cadence-periods { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cadence-period { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .cadence-period-cell { width: 17px; height: 17px; border-radius: 4px; }
+  .cadence-period-label { font-size: 9px; color: var(--text-dim); }
+
+  /* register items */
+  .cadence-items { display: flex; flex-direction: column; gap: 7px; }
+  .cadence-item { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .cadence-item-name { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cadence-item-meta { font-size: 12px; color: var(--text-dim); flex: 0 0 auto; }
+  .cadence-item-age { font-variant-numeric: tabular-nums; }
+
+  /* checkpoints */
+  .cadence-checkpoints { display: flex; flex-direction: column; gap: 9px; }
+  .cadence-checkpoint-top { display: flex; align-items: baseline; gap: 10px; }
+  .cadence-checkpoint-label { font-size: 13px; color: var(--text); flex: 1 1 auto; min-width: 0; }
+  .cadence-checkpoint-due { font-size: 12px; white-space: nowrap; }
+  .cadence-checkpoint-status { font-size: 11px; font-weight: 600; white-space: nowrap; min-width: 48px; text-align: right; }
+  .cadence-checkpoint-sub { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+
+  /* activity */
+  .cadence-activity { display: flex; flex-direction: column; gap: 11px; }
+  .cadence-activity-row { display: flex; gap: 13px; align-items: baseline; }
+  .cadence-activity-date { font-size: 12px; color: var(--text-dim); width: 50px; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  .cadence-activity-text { font-size: 13px; color: var(--text-muted); line-height: 1.5; text-wrap: pretty; flex: 1 1 auto; min-width: 0; }
+  .cadence-activity-tag { color: var(--text-dim); }
+
+  /* footer */
+  .cadence-footer { margin-top: 20px; padding-top: 13px; border-top: 1px solid var(--border-soft); display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+  .cadence-binding { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-dim); }
+  .cadence-binding-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+  .cadence-footer-spacer { flex: 1 1 auto; }
+  .cadence-footer-str { font-size: 11.5px; color: var(--text-dim); }
+
   /* ─── Toasts ──────────────────────────────────────────────────────── */
   /* ─── Quality — calm worker-trust view (read-only) ─────────────────── */
   .quality-view { padding: 30px 24px; max-width: 920px; margin: 0 auto; min-height: calc(100vh - 62px); }
@@ -701,6 +794,7 @@
   @media (max-width: 640px) {
     .topbar { flex-wrap: wrap; }
     .topbar-tabs { order: 3; width: 100%; overflow-x: auto; }
+    .cadence-body { grid-template-columns: 1fr; gap: 20px; }
   }
 
   /* ═══════════════════════════════════════════════════════════════════
@@ -1511,6 +1605,7 @@
   <h1><span class="leaf-mark"></span>Magnolia</h1>
   <div class="topbar-tabs">
     <button class="topbar-tab active" data-tab="now" onclick="switchTab('now')">Now</button>
+    <button class="topbar-tab" data-tab="cadence" onclick="switchTab('cadence')">Cadence</button>
     <button class="topbar-tab" data-tab="schedules" onclick="switchTab('schedules')">Schedules</button>
     <button class="topbar-tab" data-tab="adapt" onclick="switchTab('adapt')">Adapt</button>
     <button class="topbar-tab" data-tab="quality" onclick="switchTab('quality')">Quality</button>
@@ -1530,6 +1625,12 @@
 
 <div id="tab-now" class="tab-content active">
   <div id="now-view">
+    <div class="loading">Loading…</div>
+  </div>
+</div>
+
+<div id="tab-cadence" class="tab-content">
+  <div class="cadence-view" id="cadence-view">
     <div class="loading">Loading…</div>
   </div>
 </div>
@@ -1722,6 +1823,7 @@
 <script src="/js/quality.js"></script>
 <script src="/js/agents.js"></script>
 <script src="/js/schedules.js"></script>
+<script src="/js/cadence.js"></script>
 <script src="/js/adapt.js"></script>
 <script src="/js/profile.js"></script>
 <script src="/js/app.js"></script>

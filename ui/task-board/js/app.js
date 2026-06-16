@@ -6,6 +6,7 @@ function switchTab(tabName) {
   document.getElementById(`tab-${tabName}`).classList.add('active');
   const tabBtn = document.querySelector(`.topbar-tab[data-tab="${tabName}"]`);
   if (tabBtn) tabBtn.classList.add('active');
+  if (tabName === 'cadence') fetchCadence();
   if (tabName === 'activity') renderActivity();
   if (tabName === 'quality') renderQuality();
   if (tabName === 'engine') fetchWorkers();
@@ -57,7 +58,7 @@ checkLangfuseHealth();
 // so a tab is shareable/bookmarkable. Falls through silently for an unknown hash.
 (function () {
   const hash = (location.hash || '').replace(/^#/, '');
-  const known = ['now', 'schedules', 'adapt', 'quality', 'activity'];
+  const known = ['now', 'cadence', 'schedules', 'adapt', 'quality', 'activity'];
   if (known.includes(hash)) {
     try { switchTab(hash); } catch (_) {}
   }

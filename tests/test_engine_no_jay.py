@@ -4,7 +4,8 @@ TARGETS = (
     glob.glob(os.path.join(ROOT, "scripts", "workers", "*.md")) +
     glob.glob(os.path.join(ROOT, ".claude", "skills", "**", "*.md"), recursive=True) +
     glob.glob(os.path.join(ROOT, ".claude", "commands", "*.md")) +
-    glob.glob(os.path.join(ROOT, "scripts", "adapters", "**", "*.py"), recursive=True)
+    glob.glob(os.path.join(ROOT, "scripts", "adapters", "**", "*.py"), recursive=True) +
+    glob.glob(os.path.join(ROOT, "cadence", "**", "*.json"), recursive=True)
 )
 DENY = [r"\bjay\b", r"jay-voice", r"712020:aeec48b7-3829-433b-9125-c8c2a4c84e6f", r"board 1096", r"~/pm-os", r"/Users/"]
 

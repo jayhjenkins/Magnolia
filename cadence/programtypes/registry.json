@@ -1,0 +1,59 @@
+{
+  "families": [
+    { "id": "roadmap",  "label": "Roadmap",  "order": 1 },
+    { "id": "weekly",   "label": "Weekly",   "order": 2 },
+    { "id": "outcomes", "label": "Outcomes", "order": 3 },
+    { "id": "eos",      "label": "EOS",      "order": 4 }
+  ],
+  "types": [
+    { "id": "roadmap-initiative", "label": "Roadmap initiative", "family": "roadmap",
+      "state_model": "pipeline",
+      "phases": [
+        { "id": "discovery", "label": "Discovery", "max_age_days": 21 },
+        { "id": "planning",  "label": "Planning",  "max_age_days": 14 },
+        { "id": "execution", "label": "Execution" },
+        { "id": "shipped",   "label": "Shipped" },
+        { "id": "verified",  "label": "Verified", "terminal": true }
+      ],
+      "cadence": "weekly",
+      "sources": [ { "kind": "transcripts", "mode": "read" }, { "kind": "project_management", "mode": "read" } ],
+      "presentation": { "chip_tokens": { "discovery": "--text-dim", "execution": "--accent" } } },
+
+    { "id": "weekly-priorities", "label": "Weekly priorities", "family": "weekly",
+      "state_model": "cycle", "cadence": "weekly",
+      "sources": [ { "kind": "transcripts", "mode": "read" } ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "eng-sync-prep", "label": "Eng sync prep", "family": "weekly",
+      "state_model": "cycle", "cadence": "weekly",
+      "sources": [ { "kind": "team_threads", "mode": "read" } ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "did-it-work", "label": "Did it work?", "family": "outcomes",
+      "state_model": "target", "cadence": "weekly",
+      "sources": [ { "kind": "metrics", "mode": "read" } ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "eos-rock", "label": "EOS rock", "family": "eos",
+      "state_model": "pipeline",
+      "phases": [
+        { "id": "define", "label": "Define", "max_age_days": 14 },
+        { "id": "build",  "label": "Build",  "max_age_days": 42 },
+        { "id": "beta",   "label": "Beta",   "max_age_days": 21 },
+        { "id": "ga",     "label": "GA", "terminal": true }
+      ],
+      "cadence": "weekly",
+      "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "eos-cycle", "label": "EOS cycle", "family": "eos",
+      "state_model": "cycle", "cadence": "weekly",
+      "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "eos-issues", "label": "EOS issues", "family": "eos",
+      "state_model": "register", "cadence": "weekly",
+      "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "presentation": { "chip_tokens": {} } }
+  ]
+}
