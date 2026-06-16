@@ -1,6 +1,7 @@
 import os
 
 import program_lib as pl
+import task_lib
 
 
 def test_create_and_read_roundtrip(tmp_path):
@@ -293,6 +294,95 @@ def test_cadence_payload_is_json_clean():
     assert "2026-05-19" in dues
     for d in dues:
         assert isinstance(d, str)
+
+
+# ─── needs_you count (Task 6) ──────────────────────────────────────────────────
+
+
+def test_render_view_needs_you_default_zero(tmp_path):
+    # Omitting the arg keeps needs_you at 0 (default keeps existing call sites valid).
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="No needs", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["needs_you"] == 0
+
+
+def test_render_view_needs_you_explicit(tmp_path):
+    # When passed explicitly, needs_you carries through into the JSON-clean vm.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Three needs", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+    vm = pl.render_view(pl.read_program(pid, root=root), reg, needs_you=3)
+    assert vm["needs_you"] == 3
+    import json
+    json.dumps(vm)  # needs_you is inside the _jsonable() return — stays JSON-clean.
+
+
+def _seed_isolated_queues(tmp_path, monkeypatch):
+    """Repoint task_lib at a fresh tmp tasks dir (mirrors test_cadence_reconcile)."""
+    tasks_dir = tmp_path / "tasks"
+    for q in ("human", "agent", "collab", "waiting"):
+        (tasks_dir / q).mkdir(parents=True, exist_ok=True)
+    counter = tasks_dir / "_counter"
+    counter.write_text("1")
+    monkeypatch.setattr(task_lib, "TASKS_DIR", str(tasks_dir))
+    monkeypatch.setattr(task_lib, "COUNTER_FILE", str(counter))
+    return tasks_dir
+
+
+def test_build_payload_needs_you_counts_tagged_open_human_card(tmp_path, monkeypatch):
+    _seed_isolated_queues(tmp_path, monkeypatch)
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Flagged program", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "broken"})
+    # One OPEN human card tagged with that program id (how the emitter tags it).
+    task_lib.create_task(
+        title="Cadence escalation", queue="human", priority="high",
+        tags=[pid, "cadence"], description="Flagged.")
+
+    payload = pl.build_cadence_payload(root=root)
+    prog = payload["families"][0]["programs"][0]
+    assert prog["id"] == pid
+    assert prog["needs_you"] == 1
+
+
+def test_build_payload_needs_you_zero_when_untagged(tmp_path, monkeypatch):
+    _seed_isolated_queues(tmp_path, monkeypatch)
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Unflagged program", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+    # An open human card tagged with a DIFFERENT program id must not be counted.
+    task_lib.create_task(
+        title="Other escalation", queue="human", priority="high",
+        tags=["PROG-9999", "cadence"], description="Other.")
+
+    payload = pl.build_cadence_payload(root=root)
+    prog = payload["families"][0]["programs"][0]
+    assert prog["id"] == pid
+    assert prog["needs_you"] == 0
+
+
+def test_build_payload_needs_you_resilient_when_task_lib_raises(tmp_path, monkeypatch):
+    # A task-system failure must NEVER break the payload — all needs_you fall to 0.
+    root = str(tmp_path)
+    pl.create_program(
+        type="roadmap-initiative", title="Resilient program", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+
+    def _boom(*a, **k):
+        raise RuntimeError("task system down")
+
+    monkeypatch.setattr(task_lib, "list_tasks", _boom)
+    payload = pl.build_cadence_payload(root=root)  # must not raise
+    prog = payload["families"][0]["programs"][0]
+    assert prog["needs_you"] == 0
 
 
 def test_all_seed_programs_render():

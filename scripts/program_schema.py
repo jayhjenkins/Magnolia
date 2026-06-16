@@ -6,10 +6,14 @@ appear only on pipeline types (and pipeline types must have them), every
 type's family resolves to a declared family, presentation chips reference
 theme tokens ONLY, and every source declares a mode.
 
-This validates only what the early Cadence slices use — emitter, sentinel,
-and intake blocks are deliberately deferred to later slices (the seed
-registry has none). This is the gate the read-only Cadence tab relies on so
-every row layout it renders is well-formed.
+As of the reconcile-engine increment this also validates each type's
+`emitters` block (the declarative drift -> action rules the reconciler reads):
+each emitter must name a non-empty `on` trigger and an `action` in the brief's
+closed action set. Still deferred (no producer yet): the read-mode-source ->
+no-write-emitter-target cross-check (there are no emitter targets to name yet),
+sentinel tool-lists, and the intake block. This is the gate the read-only
+Cadence tab and the reconciler both rely on so every row layout and emitter
+rule is well-formed.
 """
 import json
 import os
@@ -19,6 +23,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(ROOT, "cadence", "programtypes", "registry.json")
 TEMPLATE_CSS = os.path.join(ROOT, "ui", "task-board", "themes", "_TEMPLATE.css")
 STATE_MODELS = {"pipeline", "cycle", "target", "register"}
+# Brief §3 closed action set — the only actions an emitter may declare.
+CLOSED_ACTIONS = {"escalate", "draft-message", "produce-artifact",
+                  "propose-update", "draft-ticket"}
 
 
 def _theme_tokens():
@@ -78,6 +85,26 @@ def validate_doc(reg, tokens):
             if "mode" not in src:
                 errors.append(
                     f"type '{tid}': source '{src.get('kind', '?')}' has no mode")
+
+        if "emitters" in t:
+            emitters = t["emitters"]
+            if not isinstance(emitters, list):
+                errors.append(f"type '{tid}': emitters must be a list")
+            else:
+                for em in emitters:
+                    if not isinstance(em, dict):
+                        errors.append(
+                            f"type '{tid}': emitter '{em}' is not a dict")
+                        continue
+                    on = em.get("on")
+                    if not isinstance(on, str) or not on.strip():
+                        errors.append(
+                            f"type '{tid}': emitter has empty or non-string 'on'")
+                    action = em.get("action")
+                    if action not in CLOSED_ACTIONS:
+                        errors.append(
+                            f"type '{tid}': emitter action '{action}' not in "
+                            f"closed set {sorted(CLOSED_ACTIONS)}")
 
     return errors
 
