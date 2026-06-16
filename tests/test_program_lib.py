@@ -249,3 +249,17 @@ def test_build_payload_groups_by_family_and_drops_empty(tmp_path):
     assert roadmap["label"] == "Roadmap"
     assert len(roadmap["programs"]) == 1
     assert roadmap["programs"][0]["name"] == "Roadmap one"
+
+
+def test_all_seed_programs_render():
+    reg = pl.load_registry()
+    progs = pl.list_programs()  # real datasets root
+    assert len(progs) == 13     # concrete count: a silently-dropped/malformed seed fails here
+    for p in progs:
+        vm = pl.render_view(p, reg)
+        assert vm["model"] in {"pipeline", "target", "cycle", "register"}
+        assert vm["name"]
+    # the family payload groups them and drops no expected family
+    payload = pl.build_cadence_payload()
+    fam_ids = [f["id"] for f in payload["families"]]
+    assert fam_ids == ["roadmap", "weekly", "outcomes", "eos"]
