@@ -10,7 +10,9 @@ owns the program file format and its create/read/list operations.
 Mirrors scripts/task_lib.py - one implementation, zero drift.
 """
 
+import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from io import StringIO
@@ -244,3 +246,279 @@ def list_programs(status=None, root=None):
 
     results.sort(key=lambda p: p["program_id"])
     return results
+
+
+# ─── Render layer (file -> render contract) ────────────────────────────────────
+#
+# render_view maps a canonical program file into the terse render contract the
+# designer's prototype JS (rowVM / buildSeries) expects. It returns DATA ONLY —
+# no inline CSS, colors, or style dicts. The JS layer owns every tone/color
+# decision (from drift / age / status); render_view derives only the raw values
+# (current phase index, metric delta, chart geometry, activity feed, etc.).
+#
+# The registry lives in the ENGINE (cadence/programtypes/registry.json), not
+# under datasets, so load_registry resolves to the repo root regardless of the
+# programs `root`. build_cadence_payload reads programs from `root` but the
+# registry from the engine.
+
+# buildSeries geometry constants — ported verbatim from the prototype.
+_SERIES_W = 300
+_SERIES_H = 66
+_SERIES_PAD = 5
+_SERIES_TOL = 8
+
+# Matches an Observations entry header: "### YYYY-MM-DD - sentinel:NAME [kind]".
+# The sentinel name and the [kind] are both optional, kept tolerant.
+_OBS_HEADER_RE = re.compile(
+    r"^###\s+(?P<date>\d{4}-\d{2}-\d{2})\s*"
+    r"(?:-\s*(?:sentinel:(?P<sentinel>\S+))?\s*(?:\[(?P<kind>[^\]]+)\])?)?\s*$"
+)
+
+
+def load_registry(root=None):
+    """Read and parse cadence/programtypes/registry.json from the engine repo.
+
+    The registry is an engine artifact (NOT under datasets), so this always
+    resolves to the repo root's cadence/programtypes/registry.json, ignoring a
+    caller-supplied `root` (which addresses a PM-OS datasets root). The `root`
+    arg is accepted for call-site symmetry but does not relocate the registry.
+    Returns the parsed dict.
+    """
+    path = os.path.join(_PM_OS_DIR, "cadence", "programtypes", "registry.json")
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _parse_intent(body):
+    """Return the text under the body's `## Intent` section (stripped), or ''."""
+    if not body:
+        return ""
+    lines = body.splitlines()
+    out = []
+    in_intent = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if in_intent:
+                break  # next section ends Intent
+            in_intent = stripped[3:].strip().lower() == "intent"
+            continue
+        if in_intent:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def _parse_observations(body):
+    """Parse the body's `## Observations` section into activity entries.
+
+    Each observation looks like:
+
+        ### YYYY-MM-DD - sentinel:NAME [kind]
+        claim: <one-line claim text>
+        source: <optional>
+
+    Returns a list of {date, text, tag} dicts, most-recent-first (by reverse
+    document order — newest entries are appended, so we reverse). Degrades to an
+    empty list when the section is absent or in a simpler/unparseable shape.
+    """
+    if not body:
+        return []
+    lines = body.splitlines()
+    # Isolate the Observations section.
+    section = []
+    in_section = False
+    for line in lines:
+        if line.strip().startswith("## "):
+            if in_section:
+                break
+            in_section = line.strip()[3:].strip().lower() == "observations"
+            continue
+        if in_section:
+            section.append(line)
+    if not section:
+        return []
+
+    entries = []
+    current = None
+    for line in section:
+        m = _OBS_HEADER_RE.match(line.strip())
+        if m:
+            if current is not None:
+                entries.append(current)
+            tag = m.group("sentinel") or m.group("kind") or ""
+            current = {"date": m.group("date"), "text": "", "tag": tag}
+            continue
+        if current is None:
+            continue
+        stripped = line.strip()
+        if stripped.lower().startswith("claim:") and not current["text"]:
+            current["text"] = stripped[len("claim:"):].strip()
+    if current is not None:
+        entries.append(current)
+
+    # Drop entries that never found a claim line.
+    entries = [e for e in entries if e["text"]]
+    entries.reverse()  # most-recent-first
+    return entries
+
+
+def _build_series(series):
+    """Port of the prototype buildSeries(p) math — geometry only, no stroke.
+
+    series is {pred:[...], act:[...]}. Returns {predPts, actPts, band, lastX,
+    lastY} as strings. Color/tone is the client's job (from drift), so `stroke`
+    is intentionally omitted.
+    """
+    pred = list(series.get("pred", []))
+    act = list(series.get("act", []))
+    n = len(pred)
+    if n < 2:
+        return {"predPts": "", "actPts": "", "band": "", "lastX": "", "lastY": ""}
+
+    W, H, PAD, tol = _SERIES_W, _SERIES_H, _SERIES_PAD, _SERIES_TOL
+    max_v = max(pred + act) * 1.18
+    if max_v == 0:
+        max_v = 1  # avoid divide-by-zero on an all-zero series
+
+    def x(i):
+        return PAD + (i / (n - 1)) * (W - 2 * PAD)
+
+    def y(v):
+        return H - PAD - (v / max_v) * (H - 2 * PAD)
+
+    pred_pts = " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in enumerate(pred))
+    act_pts = " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in enumerate(act))
+    top = [f"{x(i):.1f},{y(v + tol):.1f}" for i, v in enumerate(pred)]
+    bot = [f"{x(i):.1f},{y(v - tol):.1f}" for i, v in enumerate(pred)][::-1]
+    li = n - 1
+    return {
+        "predPts": pred_pts,
+        "actPts": act_pts,
+        "band": " ".join(top + bot),
+        "lastX": f"{x(li):.1f}",
+        "lastY": f"{y(act[li]):.1f}",
+    }
+
+
+def render_view(program, registry):
+    """Map a program dict (frontmatter + body) into the render contract.
+
+    `program` is the shape returned by read_program (keys: frontmatter, body).
+    `registry` is the parsed registry dict (from load_registry). Returns DATA
+    ONLY — no styling. The client derives all tone/color from drift/age/status.
+    """
+    fm = program.get("frontmatter", {}) or {}
+    body = program.get("body", "") or ""
+
+    type_id = fm.get("type")
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == type_id), {}
+    )
+    state_model = type_entry.get("state_model")
+    family = type_entry.get("family")
+    type_label = type_entry.get("label", type_id)
+
+    vm = {
+        "id": fm.get("program_id"),
+        "name": fm.get("title"),
+        "model": state_model,
+        "drift": fm.get("drift", "holding"),
+        "intent": _parse_intent(body),
+        "family": family,
+        "type_label": type_label,
+        "activity": _parse_observations(body),
+        "checkpoints": [
+            {
+                "label": c.get("label", c.get("l")),
+                "due": c.get("due"),
+                "instrument": c.get("instrument", c.get("inst")),
+                "status": c.get("status", c.get("st")),
+            }
+            for c in (fm.get("checkpoints") or [])
+        ],
+        "bindings": [
+            {
+                "role": b.get("role"),
+                "anchor": b.get("anchor"),
+                "health": b.get("health", "ok"),
+                "last": b.get("last"),
+            }
+            for b in (fm.get("bindings") or [])
+        ],
+        "cadence": fm.get("cadence", type_entry.get("cadence")),
+        "last_cycle": fm.get("last_cycle"),
+        "last_run": fm.get("last_run"),
+    }
+
+    if state_model == "pipeline":
+        phases_def = type_entry.get("phases", []) or []
+        entered = fm.get("phase_entered") or {}
+        current_phase = fm.get("phase")
+        current = 0
+        for i, ph in enumerate(phases_def):
+            if ph.get("id") == current_phase:
+                current = i
+                break
+        vm["current"] = current
+        vm["phases"] = [
+            {
+                "label": ph.get("label"),
+                "window": ph.get("max_age_days"),
+                "entered": entered.get(ph.get("id")),
+            }
+            for ph in phases_def
+        ]
+    elif state_model == "target":
+        metric = fm.get("metric") or {}
+        actual = metric.get("actual")
+        target = metric.get("target")
+        unit = metric.get("unit", "")
+        vm["metric"] = {"actual": actual, "target": target, "unit": unit}
+        if actual is not None and target is not None:
+            delta = actual - target
+            sign = "+" if delta >= 0 else "-"  # ASCII hyphen, not unicode minus
+            vm["delta_str"] = f"{sign}{abs(delta)}pt"
+        else:
+            vm["delta_str"] = ""
+        vm["series"] = _build_series(fm.get("series") or {})
+    elif state_model == "cycle":
+        vm["status_line"] = fm.get("status_line")
+        vm["periods"] = [
+            {"w": p.get("w"), "s": p.get("s")} for p in (fm.get("periods") or [])
+        ]
+    elif state_model == "register":
+        vm["status_line"] = fm.get("status_line")
+        vm["items"] = [
+            {"name": it.get("name"), "owner": it.get("owner"), "age": it.get("age")}
+            for it in (fm.get("items") or [])
+        ]
+        vm["policy"] = fm.get("policy")
+
+    return vm
+
+
+def build_cadence_payload(root=None):
+    """Assemble the Cadence tab payload: active programs grouped by family.
+
+    Reads active programs from `root` (the datasets root) and the registry from
+    the engine. Groups rendered programs by their type's family, in the registry
+    `families` order, dropping families with no active programs. Returns
+    {"families": [{"id", "label", "programs": [render_view ...]}, ...]}.
+    """
+    registry = load_registry()
+    programs = list_programs(status="active", root=root)
+    rendered = [render_view(p, registry) for p in programs]
+
+    families = []
+    for fam in sorted(
+        registry.get("families", []), key=lambda f: f.get("order", 0)
+    ):
+        fam_id = fam.get("id")
+        fam_programs = [r for r in rendered if r.get("family") == fam_id]
+        if not fam_programs:
+            continue  # drop empty families
+        families.append(
+            {"id": fam_id, "label": fam.get("label"), "programs": fam_programs}
+        )
+
+    return {"families": families}
