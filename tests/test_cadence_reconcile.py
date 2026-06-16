@@ -9,8 +9,28 @@ from the real program_lib.load_registry().
 import os
 from datetime import date, datetime
 
+import pytest
+
 import program_lib as pl
+import task_lib
 from cadence import reconcile
+
+
+@pytest.fixture(autouse=True)
+def _isolated_task_queues(tmp_path_factory, monkeypatch):
+    """Isolate task_lib for EVERY test so reconciling a broken program (which
+    now fires the escalate emitter -> a human card) never touches the real
+    datasets/tasks/. task_lib resolves queue dirs from module constants set at
+    import, so we repoint both TASKS_DIR and COUNTER_FILE at a fresh tmp dir and
+    create the four queue subdirs. Pure-verdict tests simply never exercise it.
+    """
+    tasks_dir = tmp_path_factory.mktemp("tasks")
+    for q in ("human", "agent", "collab", "waiting"):
+        (tasks_dir / q).mkdir(parents=True, exist_ok=True)
+    counter = tasks_dir / "_counter"
+    counter.write_text("1")
+    monkeypatch.setattr(task_lib, "TASKS_DIR", str(tasks_dir))
+    monkeypatch.setattr(task_lib, "COUNTER_FILE", str(counter))
 
 
 # A fixed "now" used everywhere so verdicts are deterministic.
@@ -400,7 +420,8 @@ def test_reconcile_program_new_cycle_writes(tmp_path):
     assert result["program_id"] == program_id
     assert result["verdict"] == "broken"
     assert result["new_cycle"] is True
-    assert result["emitted"] == []
+    # Task 3: a broken program fires the escalate emitter -> one human card.
+    assert len(result["emitted"]) == 1
 
     reread = pl.read_program(program_id, root=root)
     fm = reread["frontmatter"]
@@ -524,3 +545,138 @@ def test_reconcile_program_resolves_filepath_when_absent(tmp_path):
 
     assert result["new_cycle"] is True
     assert f"### {PERIOD} - broken" in pl.read_program(program_id, root=root)["body"]
+
+
+def test_reconcile_program_two_cycles_both_entries_survive(tmp_path):
+    # Real two-cycle path (no string .replace): reconcile at an earlier period,
+    # then a later one. BOTH `## Cycles` entries survive, in order.
+    root = str(tmp_path)
+    program_id = _seed_broken_pipeline(root, last_cycle="2026-W20")
+
+    early = date(2026, 5, 26)   # ISO week 22
+    late = date(2026, 6, 16)    # ISO week 25 (PERIOD)
+    early_period = reconcile.current_period("weekly", early)
+    late_period = reconcile.current_period("weekly", late)
+    assert early_period != late_period
+
+    r1 = reconcile.reconcile_program(
+        pl.read_program(program_id, root=root), _registry(), now=early)
+    assert r1["new_cycle"] is True
+
+    r2 = reconcile.reconcile_program(
+        pl.read_program(program_id, root=root), _registry(), now=late)
+    assert r2["new_cycle"] is True
+
+    body = pl.read_program(program_id, root=root)["body"]
+    # BOTH cycle entries survive, in order (the real two-cycle path, not a
+    # string .replace). Verdict per period is whatever computed at that `now`.
+    assert f"### {early_period} -" in body
+    assert f"### {late_period} -" in body
+    assert body.index(f"### {early_period} -") < body.index(f"### {late_period} -")
+
+
+# ─── emitters (Task 3) ────────────────────────────────────────────────────────
+#
+# escalate fires a LOCAL human-queue card (Tier-1, no external writes). Isolation
+# is handled by the autouse _isolated_task_queues fixture above: task_lib
+# resolves its queue dirs from MODULE CONSTANTS at import, so the fixture
+# monkeypatches BOTH task_lib.TASKS_DIR (a tmp tasks dir with the four queue
+# subdirs) AND task_lib.COUNTER_FILE (a seeded tmp _counter). The real
+# datasets/tasks/ is NEVER touched.
+
+
+def test_emitter_broken_creates_one_human_card(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_broken_pipeline(root)
+    program = pl.read_program(program_id, root=root)
+
+    result = reconcile.reconcile_program(program, _registry(), now=NOW)
+
+    assert result["verdict"] == "broken"
+    assert len(result["emitted"]) == 1
+    task_id = result["emitted"][0]
+
+    cards = task_lib.list_tasks(queue="human", status="open")
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["id"] == task_id
+    assert program_id in card["tags"]
+    assert "cadence" in card["tags"]
+    assert card["priority"] == "high"
+
+    # The cycle-log line records the emitted task id.
+    body = pl.read_program(program_id, root=root)["body"]
+    cycles = body.split("## Cycles", 1)[1]
+    assert task_id in cycles
+    assert "emitted: none" not in cycles
+
+
+def test_emitter_dedupes_on_second_force_run(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_broken_pipeline(root)
+
+    program = pl.read_program(program_id, root=root)
+    first = reconcile.reconcile_program(program, _registry(), now=NOW)
+    assert len(first["emitted"]) == 1
+
+    # A second forced run in the same period: the open card already exists ->
+    # dedupe -> NO new card.
+    program = pl.read_program(program_id, root=root)
+    second = reconcile.reconcile_program(program, _registry(), now=NOW, force=True)
+    assert second["emitted"] == []
+
+    cards = task_lib.list_tasks(queue="human", status="open")
+    assert len(cards) == 1  # still just the one
+
+
+def test_emitter_holding_emits_none(tmp_path):
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="eos-issues",
+        title="Issues list",
+        owner_role="ops",
+        frontmatter_extra={
+            "policy": 21,
+            "items": [{"name": "a", "owner": "ops", "age": 3}],
+            "last_cycle": OTHER_PERIOD,
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+
+    result = reconcile.reconcile_program(program, _registry(), now=NOW)
+    assert result["verdict"] == "holding"
+    assert result["emitted"] == []
+    assert task_lib.list_tasks(queue="human", status="open") == []
+
+
+def test_emitter_drifting_emits_none(tmp_path):
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="eos-issues",
+        title="Drifting list",
+        owner_role="ops",
+        frontmatter_extra={
+            "policy": 21,
+            "items": [{"name": "a", "owner": "ops", "age": 18}],  # 0.8*21=16.8 -> drifting
+            "last_cycle": OTHER_PERIOD,
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+
+    result = reconcile.reconcile_program(program, _registry(), now=NOW)
+    assert result["verdict"] == "drifting"
+    assert result["emitted"] == []
+    assert task_lib.list_tasks(queue="human", status="open") == []
+
+
+def test_list_tasks_projects_tags(tmp_path):
+    # Item D: list_tasks must surface `tags` so the dedupe scan can read them.
+    # (Queues isolated by the autouse fixture.)
+    task_lib.create_task(title="tagged card", queue="human",
+                         tags=["PROG-0001", "cadence"], creator="cadence")
+    cards = task_lib.list_tasks(queue="human", status="open")
+    assert len(cards) == 1
+    assert "tags" in cards[0]
+    assert cards[0]["tags"] == ["PROG-0001", "cadence"]

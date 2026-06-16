@@ -263,23 +263,23 @@ def _verdict_cycle(fm):
     return "holding", {"reason": f"{week} sent", "next": "none"}
 
 
-# ─── Stateful one-program cycle (Task 2) ─────────────────────────────────────
+# ─── Stateful one-program cycle (Tasks 2 + 3) ────────────────────────────────
 #
 # reconcile_program runs ONE program's cycle: compute the verdict, guard it to
-# once-per-cadence-period, and on a fresh cycle write the verdict back into the
-# frontmatter (drift/last_cycle/last_run) and append a `## Cycles` log entry to
-# the body. Writes go through program_lib._write_program_file (its YAML
-# validation + revert gate). Append-only: prior `## Cycles` entries and the
-# `## Observations` section are never rewritten (invariant #6). The cycle header
-# uses an ASCII hyphen, never an em-dash (invariant #8). Emitters land in Task 3
-# — `emitted` stays empty here.
+# once-per-cadence-period, and on a fresh cycle evaluate the type's declarative
+# emitters, write the verdict back into the frontmatter (drift/last_cycle/
+# last_run), and append a `## Cycles` log entry to the body. Writes go through
+# program_lib._write_program_file (its YAML validation + revert gate).
+# Append-only: prior `## Cycles` entries and the `## Observations` section are
+# never rewritten (invariant #6). The cycle header uses an ASCII hyphen, never
+# an em-dash (invariant #8).
+#
+# Emitters are DECLARATIVE: the type's registry `emitters` list maps a verdict
+# (`on: drift:<verdict>`) to an `action`. Only `escalate` is acted on this
+# increment — it creates a local human-queue card (Tier-1, no external writes,
+# no judge/ladder). Other closed-set actions are recognized but no-op'd.
 
 _CYCLES_HEADING = "## Cycles"
-
-
-def _now_iso():
-    """Return current UTC time as an ISO-8601 string (mirrors program_lib)."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _resolve_cadence(fm, registry):
@@ -294,25 +294,39 @@ def _resolve_cadence(fm, registry):
     return type_entry.get("cadence") or "weekly"
 
 
-def _append_cycle_entry(body, period, verdict, facts):
+def _format_emitted(emitted):
+    """Render the cycle-log `emitted:` clause (ASCII, invariant #8).
+
+    `emitted: TASK-0123` (or comma-joined for several), `emitted: none` when no
+    cards fired.
+    """
+    ids = [tid for tid in (emitted or []) if tid]
+    if not ids:
+        return "none"
+    return ", ".join(ids)
+
+
+def _append_cycle_entry(body, period, verdict, facts, emitted=None):
     """Return `body` with a new cycle-log entry appended to `## Cycles`.
 
     The entry is two lines (ASCII hyphen separators, invariant #8):
 
         ### <period> - <verdict>
-        checks: <reason> - emitted: none - next: <next>
+        checks: <reason> - emitted: <TASK-xxxx | none> - next: <next>
 
-    Append-only: an existing `## Cycles` section keeps every prior entry; the
-    new block is added at the end of the body's Cycles section (which, by the
-    create_program layout, is the last section). If `## Cycles` is absent it is
-    created at the end of the body. A blank line separates entries so the
-    markdown stays clean and re-readable.
+    Heading-anchored append: the new block is inserted into the trailing
+    `## Cycles` segment (split on the LAST occurrence of the heading), so a
+    future program type that adds a section AFTER `## Cycles` would still place
+    entries under the heading rather than at the very end of the body.
+    Append-only: an existing `## Cycles` section keeps every prior entry, in
+    order (invariant #6). If `## Cycles` is absent it is created at the end of
+    the body. A blank line separates entries so the markdown stays re-readable.
     """
     reason = (facts or {}).get("reason", "none")
     nxt = (facts or {}).get("next", "none")
     entry = (
         f"### {period} - {verdict}\n"
-        f"checks: {reason} - emitted: none - next: {nxt}\n"
+        f"checks: {reason} - emitted: {_format_emitted(emitted)} - next: {nxt}\n"
     )
 
     body = body or ""
@@ -323,11 +337,91 @@ def _append_cycle_entry(body, period, verdict, facts):
             return f"{base}\n\n{_CYCLES_HEADING}\n\n{entry}"
         return f"{_CYCLES_HEADING}\n\n{entry}"
 
-    # Append to the existing section. `## Cycles` is the final section in the
-    # create_program layout, so appending to the end of the body keeps prior
-    # entries intact (append-only) and keeps the new entry under the heading.
-    base = body.rstrip("\n")
-    return f"{base}\n\n{entry}"
+    # Anchor on the LAST `## Cycles` heading: everything before it is preserved
+    # verbatim; the new entry is appended to the end of the trailing segment
+    # (which holds the heading + all prior cycle entries). This keeps the entry
+    # under the heading even if a later section is ever added past it.
+    head, sep, tail = body.rpartition(_CYCLES_HEADING)
+    tail = tail.rstrip("\n")
+    return f"{head}{sep}{tail}\n\n{entry}"
+
+
+def _build_card_description(facts, program_id):
+    """Build a <=2-sentence ASCII card body from facts + the program backlink.
+
+    `facts` carries the worst-signal {reason, next}; the backlink is the
+    program_id (the dedupe/render tag and how a reader navigates back).
+    """
+    reason = (facts or {}).get("reason", "needs attention")
+    nxt = (facts or {}).get("next", "review")
+    return f"Cadence flagged {program_id} as broken: {reason}. Next: {nxt}."
+
+
+def _open_human_tags(root=None):
+    """Return the set of tags carried by OPEN human-queue tasks.
+
+    Used as the escalate dedupe / rate fence. Lazily imports task_lib (mirrors
+    cron_lib's lazy import). task_lib resolves its queue dirs from module
+    constants, NOT from `root`; the arg is accepted for call-site symmetry and
+    so tests that monkeypatch those constants stay faithful.
+    """
+    import task_lib
+    tags = set()
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        for tag in t.get("tags", []) or []:
+            tags.add(tag)
+    return tags
+
+
+def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
+    """Evaluate the type's declarative emitters for `verdict`. Returns task ids.
+
+    For each emitter whose `on` matches `drift:<verdict>`:
+      - `escalate`: dedupe against open human cards already tagged with this
+        program_id; if none, create one high-priority human card tagged
+        [program_id, "cadence"] and collect its id. (Tier-1: a LOCAL card, no
+        external writes, no judge/ladder.)
+      - any other (recognized) action: no-op this increment (logged to stderr).
+    """
+    emitters = type_entry.get("emitters") or []
+    if not emitters:
+        return []
+
+    fm = program["frontmatter"]
+    program_id = fm.get("program_id")
+    title = fm.get("title") or program_id or "Program"
+    emitted = []
+    open_tags = None  # lazily computed only when an escalate emitter fires
+
+    for em in emitters:
+        if em.get("on") != f"drift:{verdict}":
+            continue
+        action = em.get("action")
+        if action == "escalate":
+            if open_tags is None:
+                open_tags = _open_human_tags(root)
+            if program_id in open_tags:
+                continue  # an open card already covers this program -> dedupe
+            import task_lib
+            task_id, _ = task_lib.create_task(
+                title=f"{title} needs attention",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                tags=[program_id, "cadence"],
+                description=_build_card_description(facts, program_id),
+            )
+            emitted.append(task_id)
+            # Reflect the just-created card so a second escalate emitter in the
+            # same evaluation cannot double-fire for this program.
+            open_tags.add(program_id)
+        elif action:
+            sys.stderr.write(
+                f"[cadence] emitter action '{action}' not acted on this "
+                f"increment ({program_id})\n"
+            )
+
+    return emitted
 
 
 def reconcile_program(program, registry, now=None, force=False, root=None):
@@ -336,13 +430,13 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     `program` is the read_program shape ({"frontmatter", "body", "filepath"}).
     Computes the verdict, then guards to once-per-cadence-period: if this
     program already ran this period (and not `force`), returns without touching
-    the file. On a fresh cycle, writes drift/last_cycle/last_run back into the
-    frontmatter and appends a `## Cycles` log entry, via
-    program_lib._write_program_file.
+    the file. On a fresh cycle, evaluates the type's declarative emitters
+    (the escalate card fires here, deduped), writes drift/last_cycle/last_run
+    back into the frontmatter, appends a `## Cycles` log entry recording any
+    emitted card ids, and writes the file ONCE via _write_program_file.
 
-    Returns {"program_id", "verdict", "new_cycle": bool, "emitted": []}.
-    Emitters arrive in Task 3 — `emitted` is always [] here. May raise on a
-    genuinely unwritable file; reconcile_all (Task 4) wraps it.
+    Returns {"program_id", "verdict", "new_cycle": bool, "emitted": [ids]}.
+    May raise on a genuinely unwritable file; reconcile_all (Task 4) wraps it.
     """
     now = now or datetime.now(timezone.utc)
     fm = program["frontmatter"]
@@ -363,11 +457,18 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
             "emitted": [],
         }
 
-    # Fresh cycle: write verdict back + append the cycle log.
+    # Fresh cycle: evaluate emitters FIRST (so the cycle log can record them),
+    # THEN write verdict back + append the cycle log, in ONE program-file write.
+    type_id = fm.get("type")
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == type_id), {}
+    )
+    emitted = _evaluate_emitters(program, type_entry, verdict, facts, root=root)
+
     fm["drift"] = verdict
     fm["last_cycle"] = period
-    fm["last_run"] = _now_iso()
-    body = _append_cycle_entry(body, period, verdict, facts)
+    fm["last_run"] = program_lib._now_iso()
+    body = _append_cycle_entry(body, period, verdict, facts, emitted=emitted)
 
     filepath = program.get("filepath")
     if not filepath:
@@ -380,5 +481,5 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
         "program_id": fm.get("program_id"),
         "verdict": verdict,
         "new_cycle": True,
-        "emitted": [],
+        "emitted": emitted,
     }

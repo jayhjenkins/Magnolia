@@ -17,21 +17,25 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" }, { "kind": "project_management", "mode": "read" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
       "presentation": { "chip_tokens": { "discovery": "--text-dim", "execution": "--accent" } } },
 
     { "id": "weekly-priorities", "label": "Weekly priorities", "family": "weekly",
       "state_model": "cycle", "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
       "presentation": { "chip_tokens": {} } },
 
     { "id": "eng-sync-prep", "label": "Eng sync prep", "family": "weekly",
       "state_model": "cycle", "cadence": "weekly",
       "sources": [ { "kind": "team_threads", "mode": "read" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
       "presentation": { "chip_tokens": {} } },
 
     { "id": "did-it-work", "label": "Did it work?", "family": "outcomes",
       "state_model": "target", "cadence": "weekly",
       "sources": [ { "kind": "metrics", "mode": "read" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
       "presentation": { "chip_tokens": {} } },
 
     { "id": "eos-rock", "label": "EOS rock", "family": "eos",
@@ -44,16 +48,19 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
       "presentation": { "chip_tokens": {} } },
 
     { "id": "eos-cycle", "label": "EOS cycle", "family": "eos",
       "state_model": "cycle", "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
       "presentation": { "chip_tokens": {} } },
 
     { "id": "eos-issues", "label": "EOS issues", "family": "eos",
       "state_model": "register", "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
       "presentation": { "chip_tokens": {} } }
   ]
 }
