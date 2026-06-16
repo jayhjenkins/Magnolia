@@ -435,12 +435,15 @@ def _jsonable(obj):
     return obj
 
 
-def render_view(program, registry):
+def render_view(program, registry, needs_you=0):
     """Map a program dict (frontmatter + body) into the render contract.
 
     `program` is the shape returned by read_program (keys: frontmatter, body).
-    `registry` is the parsed registry dict (from load_registry). Returns DATA
-    ONLY — no styling. The client derives all tone/color from drift/age/status.
+    `registry` is the parsed registry dict (from load_registry). `needs_you` is
+    the count of open Now (human-queue) cards linked to this program; the caller
+    (build_cadence_payload) supplies it, defaulting to 0 for unit-test/call-site
+    simplicity. Returns DATA ONLY — no styling. The client derives all tone/color
+    from drift/age/status.
     """
     fm = program.get("frontmatter", {}) or {}
     body = program.get("body", "") or ""
@@ -487,6 +490,8 @@ def render_view(program, registry):
         "cadence": fm.get("cadence", type_entry.get("cadence")),
         "last_cycle": fm.get("last_cycle"),
         "last_run": fm.get("last_run"),
+        # Count of open Now cards linked to this program (supplied by the caller).
+        "needs_you": needs_you,
     }
 
     if state_model == "pipeline":
@@ -558,7 +563,31 @@ def build_cadence_payload(root=None):
     """
     registry = load_registry()
     programs = list_programs(status="active", root=root)
-    rendered = [render_view(p, registry) for p in programs]
+
+    # Count open Now (human-queue) cards per program: a single pass over open
+    # human tasks, tallying any tag shaped like a program id (PROG-XXXX). The
+    # emitter tags an escalate card [program_id, "cadence"], so each card counts
+    # once toward its program. task_lib is imported lazily (like cron_lib) to
+    # avoid a hard coupling at module load, and the whole listing is wrapped in
+    # try/except so a task-system failure NEVER breaks the payload (counts -> 0).
+    counts = {}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import task_lib
+        prog_id_re = re.compile(r"^PROG-\d{4}$")
+        for t in task_lib.list_tasks(queue="human", status="open"):
+            seen = set()
+            for tag in (t.get("tags") or []):
+                if prog_id_re.match(str(tag)) and tag not in seen:
+                    counts[tag] = counts.get(tag, 0) + 1
+                    seen.add(tag)
+    except Exception:
+        counts = {}  # task system unavailable — every needs_you defaults to 0
+
+    rendered = []
+    for p in programs:
+        program_id = (p.get("frontmatter") or {}).get("program_id") or p.get("program_id")
+        rendered.append(render_view(p, registry, needs_you=counts.get(program_id, 0)))
 
     families = []
     for fam in sorted(
