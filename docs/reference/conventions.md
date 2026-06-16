@@ -10,7 +10,7 @@ Git mechanics: branch off `main` (never commit to `main`). Set the git author lo
 
 ## 2. The green gates — when to run them
 
-Run the four gates **before every commit that touches code**. Three are invariant #2 in [`invariants.md`](./invariants.md) (`python3 -m pytest` · `python3 scripts/card_schema.py` · `python3 -m pytest tests/test_engine_no_jay.py`); the fourth is `python3 scripts/portability_gate.py` (→ `portability OK`), enforcing invariant #8 — the OS/shell seam stays unbroken. Don't restate them; run them. Doc-only changes under `docs/` are not scanned by the denylist or portability gates, but they still must not break the other gates.
+Run the five gates **before every commit that touches code**. Three are invariant #2 in [`invariants.md`](./invariants.md) (`python3 -m pytest` · `python3 scripts/card_schema.py` · `python3 -m pytest tests/test_engine_no_jay.py`); the fourth is `python3 scripts/portability_gate.py` (→ `portability OK`), enforcing invariant #8 — the OS/shell seam stays unbroken; the fifth is `python3 scripts/program_schema.py` (→ `programtypes OK`), enforcing invariant #9 — the Cadence program-type registry stays well-formed. Don't restate them; run them. Doc-only changes under `docs/` are not scanned by the denylist or portability gates, but they still must not break the other gates.
 
 ## 3. Capture-to-profile, not the artifact
 
