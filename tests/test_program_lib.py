@@ -272,6 +272,29 @@ def test_build_payload_groups_by_family_and_drops_empty(tmp_path):
     assert roadmap["programs"][0]["name"] == "Roadmap one"
 
 
+def test_cadence_payload_is_json_clean():
+    # ruamel parses UNQUOTED ISO dates in program frontmatter (checkpoint `due`,
+    # `phase_entered`, binding `last`) into datetime.date objects. The payload
+    # must be strictly JSON-clean so a future caller can json.dumps() it with
+    # the DEFAULT encoder (no default=str crutch) without raising.
+    import json
+    payload = pl.build_cadence_payload()  # real datasets root (seeds carry date objects)
+    # Must succeed WITHOUT a default= argument. RED before the fix (TypeError).
+    json.dumps(payload)
+
+    # Values are preserved as ISO strings, not mangled. PROG-0001's seed has an
+    # unquoted checkpoint due of 2026-05-19; it must surface as that exact string.
+    reg = pl.load_registry()
+    prog = pl.read_program("PROG-0001")
+    vm = pl.render_view(prog, reg)
+    # render_view itself must be json.dumps-clean on its own.
+    json.dumps(vm)
+    dues = [cp["due"] for cp in vm["checkpoints"]]
+    assert "2026-05-19" in dues
+    for d in dues:
+        assert isinstance(d, str)
+
+
 def test_all_seed_programs_render():
     reg = pl.load_registry()
     progs = pl.list_programs()  # real datasets root

@@ -14,7 +14,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from io import StringIO
 
 from ruamel.yaml import YAML
@@ -413,6 +413,28 @@ def _build_series(series):
     }
 
 
+def _jsonable(obj):
+    """Recursively coerce date/datetime values to ISO-8601 strings.
+
+    ruamel parses UNQUOTED ISO dates in program frontmatter (checkpoint `due`,
+    `phase_entered`, binding `last`) into datetime.date objects, which the
+    stdlib json encoder cannot serialize without a `default=` hook. Walk dicts
+    and lists, converting any date/datetime to `.isoformat()` (datetime is a
+    subclass of date, so both are caught and isoformat works on both), leaving
+    everything else untouched. This makes the output strictly JSON-clean and
+    encoder-independent. Note: the isoformat string is byte-identical to what
+    json.dumps(..., default=str) already produces on the wire, so wire values
+    are unchanged — this just makes the cleanliness explicit.
+    """
+    if isinstance(obj, dict):
+        return {k: _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_jsonable(v) for v in obj]
+    if isinstance(obj, date):  # covers datetime (subclass of date)
+        return obj.isoformat()
+    return obj
+
+
 def render_view(program, registry):
     """Map a program dict (frontmatter + body) into the render contract.
 
@@ -521,7 +543,9 @@ def render_view(program, registry):
         ]
         vm["policy"] = fm.get("policy")
 
-    return vm
+    # Coerce any date/datetime values (from unquoted YAML dates) to ISO strings
+    # so the contract is strictly JSON-clean for any encoder (see _jsonable).
+    return _jsonable(vm)
 
 
 def build_cadence_payload(root=None):
