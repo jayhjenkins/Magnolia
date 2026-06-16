@@ -17,7 +17,12 @@ All runtime-produced strings are ASCII-safe (hyphen, never em-dash) per
 invariant #8.
 """
 
-from datetime import date, datetime, timedelta
+import os
+import sys
+from datetime import date, datetime, timedelta, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import program_lib
 
 # Worst-signal-wins ordering: broken beats drifting beats holding.
 _VERDICTS = ("holding", "drifting", "broken")
@@ -256,3 +261,124 @@ def _verdict_cycle(fm):
     if latest == "late":
         return "drifting", {"reason": f"{week} late", "next": "send on time"}
     return "holding", {"reason": f"{week} sent", "next": "none"}
+
+
+# ─── Stateful one-program cycle (Task 2) ─────────────────────────────────────
+#
+# reconcile_program runs ONE program's cycle: compute the verdict, guard it to
+# once-per-cadence-period, and on a fresh cycle write the verdict back into the
+# frontmatter (drift/last_cycle/last_run) and append a `## Cycles` log entry to
+# the body. Writes go through program_lib._write_program_file (its YAML
+# validation + revert gate). Append-only: prior `## Cycles` entries and the
+# `## Observations` section are never rewritten (invariant #6). The cycle header
+# uses an ASCII hyphen, never an em-dash (invariant #8). Emitters land in Task 3
+# — `emitted` stays empty here.
+
+_CYCLES_HEADING = "## Cycles"
+
+
+def _now_iso():
+    """Return current UTC time as an ISO-8601 string (mirrors program_lib)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _resolve_cadence(fm, registry):
+    """Resolve a program's cadence: frontmatter -> registry type -> 'weekly'."""
+    cadence = fm.get("cadence")
+    if cadence:
+        return cadence
+    type_id = fm.get("type")
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == type_id), {}
+    )
+    return type_entry.get("cadence") or "weekly"
+
+
+def _append_cycle_entry(body, period, verdict, facts):
+    """Return `body` with a new cycle-log entry appended to `## Cycles`.
+
+    The entry is two lines (ASCII hyphen separators, invariant #8):
+
+        ### <period> - <verdict>
+        checks: <reason> - emitted: none - next: <next>
+
+    Append-only: an existing `## Cycles` section keeps every prior entry; the
+    new block is added at the end of the body's Cycles section (which, by the
+    create_program layout, is the last section). If `## Cycles` is absent it is
+    created at the end of the body. A blank line separates entries so the
+    markdown stays clean and re-readable.
+    """
+    reason = (facts or {}).get("reason", "none")
+    nxt = (facts or {}).get("next", "none")
+    entry = (
+        f"### {period} - {verdict}\n"
+        f"checks: {reason} - emitted: none - next: {nxt}\n"
+    )
+
+    body = body or ""
+    if _CYCLES_HEADING not in body:
+        # Create the section at the end of the body.
+        base = body.rstrip("\n")
+        if base:
+            return f"{base}\n\n{_CYCLES_HEADING}\n\n{entry}"
+        return f"{_CYCLES_HEADING}\n\n{entry}"
+
+    # Append to the existing section. `## Cycles` is the final section in the
+    # create_program layout, so appending to the end of the body keeps prior
+    # entries intact (append-only) and keeps the new entry under the heading.
+    base = body.rstrip("\n")
+    return f"{base}\n\n{entry}"
+
+
+def reconcile_program(program, registry, now=None, force=False, root=None):
+    """Run one program's reconcile cycle. Returns a result dict.
+
+    `program` is the read_program shape ({"frontmatter", "body", "filepath"}).
+    Computes the verdict, then guards to once-per-cadence-period: if this
+    program already ran this period (and not `force`), returns without touching
+    the file. On a fresh cycle, writes drift/last_cycle/last_run back into the
+    frontmatter and appends a `## Cycles` log entry, via
+    program_lib._write_program_file.
+
+    Returns {"program_id", "verdict", "new_cycle": bool, "emitted": []}.
+    Emitters arrive in Task 3 — `emitted` is always [] here. May raise on a
+    genuinely unwritable file; reconcile_all (Task 4) wraps it.
+    """
+    now = now or datetime.now(timezone.utc)
+    fm = program["frontmatter"]
+    body = program["body"]
+
+    verdict, facts = compute_verdict(program, registry, now)
+
+    cadence = _resolve_cadence(fm, registry)
+    period = current_period(cadence, now)
+
+    is_new_cycle = force or fm.get("last_cycle") != period
+
+    if not is_new_cycle:
+        return {
+            "program_id": fm.get("program_id"),
+            "verdict": verdict,
+            "new_cycle": False,
+            "emitted": [],
+        }
+
+    # Fresh cycle: write verdict back + append the cycle log.
+    fm["drift"] = verdict
+    fm["last_cycle"] = period
+    fm["last_run"] = _now_iso()
+    body = _append_cycle_entry(body, period, verdict, facts)
+
+    filepath = program.get("filepath")
+    if not filepath:
+        filepath = os.path.join(
+            program_lib._program_dir(root), f"{fm['program_id']}.md"
+        )
+    program_lib._write_program_file(filepath, fm, body)
+
+    return {
+        "program_id": fm.get("program_id"),
+        "verdict": verdict,
+        "new_cycle": True,
+        "emitted": [],
+    }
