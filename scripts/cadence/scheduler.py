@@ -82,10 +82,13 @@ class CadenceScheduler:
         emitted = sum(len(r.get("emitted") or []) for r in results)
         broke = sum(1 for r in results if r.get("verdict") == "broken")
         errored = sum(1 for r in results if "error" in r)
-        _log(
-            f"Tick complete: {total} program(s) reconciled, "
-            f"{broke} broken, {emitted} card(s) emitted, {errored} error(s)"
-        )
+        # Only log when something actually happened (mirrors cron_scheduler's
+        # `if executed > 0` guard) so an idle board stays quiet hour to hour.
+        if emitted or errored:
+            _log(
+                f"Tick complete: {total} program(s) reconciled, "
+                f"{broke} broken, {emitted} card(s) emitted, {errored} error(s)"
+            )
 
 
 # ─── Standalone testing ──────────────────────────────────────────────────────
