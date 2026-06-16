@@ -497,6 +497,31 @@ def test_reconcile_program_appends_without_losing_prior_entry(tmp_path):
     assert body.index("### 2026-W24 - holding") < body.index(f"### {PERIOD} - broken")
 
 
+def test_reconcile_program_inserts_under_cycles_before_following_section(tmp_path):
+    # A program body with a section AFTER `## Cycles` (a trailing `## Footnotes`).
+    # The new entry must land UNDER `## Cycles` and BEFORE `## Footnotes`, and
+    # the Footnotes content must be preserved verbatim.
+    root = str(tmp_path)
+    program_id = _seed_broken_pipeline(root)
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    # Append a Footnotes section after the seed's trailing `## Cycles`.
+    seeded_body = program["body"].rstrip("\n") + "\n\n## Footnotes\n\nload-bearing footnote.\n"
+    pl._write_program_file(program["filepath"], fm, seeded_body)
+
+    program = pl.read_program(program_id, root=root)
+    reconcile.reconcile_program(program, _registry(), now=NOW)
+
+    body = pl.read_program(program_id, root=root)["body"]
+    cycles_idx = body.index("## Cycles")
+    entry_idx = body.index(f"### {PERIOD} - broken")
+    footnotes_idx = body.index("## Footnotes")
+    # New entry sits under `## Cycles` and before `## Footnotes`.
+    assert cycles_idx < entry_idx < footnotes_idx
+    # Footnotes content survives unchanged, after the heading.
+    assert "## Footnotes\n\nload-bearing footnote." in body
+
+
 def test_reconcile_program_cycle_header_is_ascii(tmp_path):
     root = str(tmp_path)
     program_id = _seed_broken_pipeline(root)

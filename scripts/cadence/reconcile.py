@@ -314,13 +314,13 @@ def _append_cycle_entry(body, period, verdict, facts, emitted=None):
         ### <period> - <verdict>
         checks: <reason> - emitted: <TASK-xxxx | none> - next: <next>
 
-    Heading-anchored append: the new block is inserted into the trailing
-    `## Cycles` segment (split on the LAST occurrence of the heading), so a
-    future program type that adds a section AFTER `## Cycles` would still place
-    entries under the heading rather than at the very end of the body.
-    Append-only: an existing `## Cycles` section keeps every prior entry, in
-    order (invariant #6). If `## Cycles` is absent it is created at the end of
-    the body. A blank line separates entries so the markdown stays re-readable.
+    Heading-anchored insert: the new block is placed UNDER the `## Cycles`
+    heading and BEFORE the next top-level `## ` heading (if any), else at the
+    end of the section. A section that follows `## Cycles` is preserved verbatim
+    and stays after the cycle entries. Append-only: an existing `## Cycles`
+    section keeps every prior entry, in order (invariant #6). If `## Cycles` is
+    absent it is created at the end of the body. A blank line separates entries
+    so the markdown stays re-readable.
     """
     reason = (facts or {}).get("reason", "none")
     nxt = (facts or {}).get("next", "none")
@@ -337,13 +337,31 @@ def _append_cycle_entry(body, period, verdict, facts, emitted=None):
             return f"{base}\n\n{_CYCLES_HEADING}\n\n{entry}"
         return f"{_CYCLES_HEADING}\n\n{entry}"
 
-    # Anchor on the LAST `## Cycles` heading: everything before it is preserved
-    # verbatim; the new entry is appended to the end of the trailing segment
-    # (which holds the heading + all prior cycle entries). This keeps the entry
-    # under the heading even if a later section is ever added past it.
+    # Anchor on the LAST `## Cycles` heading. The head (everything up to and
+    # including the heading) is preserved verbatim. The trailing text is split
+    # at the next top-level `## ` heading: `section` holds the Cycles content
+    # (all prior entries), `rest` holds any following section(s) preserved as-is.
+    # The new entry lands at the end of `section`, before `rest`.
     head, sep, tail = body.rpartition(_CYCLES_HEADING)
-    tail = tail.rstrip("\n")
-    return f"{head}{sep}{tail}\n\n{entry}"
+    section, rest = _split_at_next_section(tail)
+    section = section.rstrip("\n")
+    if rest:
+        return f"{head}{sep}{section}\n\n{entry}\n{rest}"
+    return f"{head}{sep}{section}\n\n{entry}"
+
+
+def _split_at_next_section(text):
+    """Split `text` at the next top-level `## ` heading.
+
+    Returns (section, rest): `section` is the Cycles content up to the next
+    top-level heading line; `rest` is that heading and everything after it (or
+    "" when no following section exists). The Cycles heading's own `### ` entry
+    sub-headers are NOT top-level, so they stay in `section`.
+    """
+    idx = text.find("\n## ")
+    if idx == -1:
+        return text, ""
+    return text[:idx], text[idx + 1:]
 
 
 def _build_card_description(facts, program_id):
@@ -357,15 +375,8 @@ def _build_card_description(facts, program_id):
     return f"Cadence flagged {program_id} as broken: {reason}. Next: {nxt}."
 
 
-def _open_human_tags(root=None):
-    """Return the set of tags carried by OPEN human-queue tasks.
-
-    Used as the escalate dedupe / rate fence. Lazily imports task_lib (mirrors
-    cron_lib's lazy import). task_lib resolves its queue dirs from module
-    constants, NOT from `root`; the arg is accepted for call-site symmetry and
-    so tests that monkeypatch those constants stay faithful.
-    """
-    import task_lib
+def _open_human_tags(task_lib):
+    """Return the set of tags carried by OPEN human-queue tasks (escalate fence)."""
     tags = set()
     for t in task_lib.list_tasks(queue="human", status="open"):
         for tag in t.get("tags", []) or []:
@@ -398,11 +409,13 @@ def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
             continue
         action = em.get("action")
         if action == "escalate":
+            # Lazy import on the escalate path only - the pure-verdict path
+            # never imports task_lib. Imported once here, not again per card.
+            import task_lib
             if open_tags is None:
-                open_tags = _open_human_tags(root)
+                open_tags = _open_human_tags(task_lib)
             if program_id in open_tags:
                 continue  # an open card already covers this program -> dedupe
-            import task_lib
             task_id, _ = task_lib.create_task(
                 title=f"{title} needs attention",
                 queue="human",
