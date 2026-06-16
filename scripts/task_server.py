@@ -49,6 +49,7 @@ import adapters
 from adapters.project_management._contract import NotConfigured
 from adapters import NeedsConfirmation
 from cron_scheduler import CronScheduler
+from cadence.scheduler import CadenceScheduler
 import shipper
 from shipper import (
     _message_draft_from_task, _attempt_send_message, _record_manual_send,
@@ -2814,6 +2815,11 @@ def main():
     scheduler = CronScheduler()
     scheduler.start()
 
+    # Start the deterministic Cadence reconcile scheduler (separate from cron:
+    # in-process, never spawns an agent).
+    cadence_scheduler = CadenceScheduler()
+    cadence_scheduler.start()
+
     server = ReusableHTTPServer(("127.0.0.1", PORT), TaskServerHandler)
     print(f"PM-OS Task Server running at http://127.0.0.1:{PORT}")
     print(f"  API:    http://127.0.0.1:{PORT}/api/tasks")
@@ -2827,6 +2833,7 @@ def main():
     except KeyboardInterrupt:
         print("\nShutting down.")
         scheduler.stop()
+        cadence_scheduler.stop()
         server.server_close()
 
 
