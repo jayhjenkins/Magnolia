@@ -29,8 +29,13 @@ def _isolated_task_queues(tmp_path_factory, monkeypatch):
         (tasks_dir / q).mkdir(parents=True, exist_ok=True)
     counter = tasks_dir / "_counter"
     counter.write_text("1")
+    archive = tasks_dir / "_archive"
+    archive.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(task_lib, "TASKS_DIR", str(tasks_dir))
     monkeypatch.setattr(task_lib, "COUNTER_FILE", str(counter))
+    # ARCHIVE_DIR is computed at import from the ORIGINAL TASKS_DIR, so patch it
+    # too -- otherwise any completed card would leak into the real archive.
+    monkeypatch.setattr(task_lib, "ARCHIVE_DIR", str(archive))
 
 
 # A fixed "now" used everywhere so verdicts are deterministic.

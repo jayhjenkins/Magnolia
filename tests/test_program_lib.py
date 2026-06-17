@@ -330,8 +330,14 @@ def _seed_isolated_queues(tmp_path, monkeypatch):
         (tasks_dir / q).mkdir(parents=True, exist_ok=True)
     counter = tasks_dir / "_counter"
     counter.write_text("1")
+    archive = tasks_dir / "_archive"
+    archive.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(task_lib, "TASKS_DIR", str(tasks_dir))
     monkeypatch.setattr(task_lib, "COUNTER_FILE", str(counter))
+    # ARCHIVE_DIR is a module constant computed at import from the ORIGINAL
+    # TASKS_DIR, so it must be patched too -- else complete_task writes (and
+    # list_archived reads) the real datasets/tasks/_archive, breaking isolation.
+    monkeypatch.setattr(task_lib, "ARCHIVE_DIR", str(archive))
     return tasks_dir
 
 
@@ -382,6 +388,136 @@ def test_build_payload_needs_you_resilient_when_task_lib_raises(tmp_path, monkey
     monkeypatch.setattr(task_lib, "list_tasks", _boom)
     payload = pl.build_cadence_payload(root=root)  # must not raise
     prog = payload["families"][0]["programs"][0]
+    assert prog["needs_you"] == 0
+
+
+# ─── observation ledger (Task 8) ────────────────────────────────────────────────
+
+
+def test_render_view_projects_observations_with_source():
+    # The richer `observations` list exposes the source line that `activity`
+    # drops, plus the sentinel and kind off the header.
+    reg = pl.load_registry()
+    program = {
+        "frontmatter": {
+            "program_id": "PROG-9010",
+            "type": "roadmap-initiative",
+            "title": "Ledger",
+            "phase": "discovery",
+            "drift": "holding",
+        },
+        "body": (
+            "## Intent\nA stated intent.\n\n"
+            "## Observations\n"
+            "### 2026-06-11 - sentinel:movement-watch [status-signal]\n"
+            "source: datasets/meetings/2026-06-11_x.md (#Action Items)\n"
+            "claim: Closed 4 of 9 stories.\n\n"
+            "## Cycles\n"
+        ),
+    }
+    vm = pl.render_view(program, reg)
+    assert len(vm["observations"]) == 1
+    obs = vm["observations"][0]
+    assert obs["date"] == "2026-06-11"
+    assert obs["kind"] == "status-signal"
+    assert obs["sentinel"] == "movement-watch"
+    assert obs["source"] == "datasets/meetings/2026-06-11_x.md (#Action Items)"
+    assert obs["claim"] == "Closed 4 of 9 stories."
+    # The existing activity field is preserved (other code reads it).
+    assert len(vm["activity"]) == 1
+
+
+def test_render_view_observations_empty_when_absent():
+    reg = pl.load_registry()
+    program = {
+        "frontmatter": {"type": "weekly-priorities", "title": "No obs", "drift": "holding"},
+        "body": "## Intent\nJust intent.\n",
+    }
+    vm = pl.render_view(program, reg)
+    assert vm["observations"] == []
+
+
+def test_render_view_emissions_pass_through():
+    # render_view accepts an `emissions` arg and passes it into the view model.
+    reg = pl.load_registry()
+    program = {
+        "frontmatter": {
+            "program_id": "PROG-9011", "type": "roadmap-initiative",
+            "title": "Emits", "phase": "discovery", "drift": "holding",
+        },
+        "body": "## Intent\nIntent.\n",
+    }
+    ems = [{"id": "TASK-0001", "kind": "escalate", "title": "Needs attention",
+            "status": "pending", "created": "2026-06-11T09:00:00"}]
+    vm = pl.render_view(program, reg, emissions=ems)
+    assert vm["emissions"] == ems
+    import json
+    json.dumps(vm)  # stays JSON-clean
+
+
+def test_render_view_emissions_default_empty(tmp_path):
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="No emits", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["emissions"] == []
+
+
+def test_build_payload_joins_emissions_per_program(tmp_path, monkeypatch):
+    _seed_isolated_queues(tmp_path, monkeypatch)
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Emitting program", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "broken"})
+
+    # An open escalate card: creator=cadence, tagged [pid, "cadence"].
+    task_lib.create_task(
+        title="Emitting program needs attention", queue="human", priority="high",
+        creator="cadence", tags=[pid, "cadence"], description="Flagged.")
+    # An open propose-update card carrying the program tag + a proposal.
+    task_lib.create_task(
+        title="Emitting program: advance to verified?", queue="human", priority="high",
+        creator="cadence", card_type="recommendation", task_type="cadence-propose-update",
+        tags=[pid, "cadence"], proposal={"op": "advance-phase", "to": "verified"},
+        description="Proposed advance.")
+    # A completed receipt carrying the program_id field (how the accept handler tags it).
+    rid, _ = task_lib.create_task(
+        title="Applied: advance", queue="human", creator="agent", card_type="receipt",
+        description="Applied a program update.")
+    task_lib.update_task(rid, changes={
+        "receipt_kind": "cadence-apply", "source_recommendation": "TASK-0002",
+        "program_id": pid})
+    task_lib.complete_task(rid, actor="human")
+
+    payload = pl.build_cadence_payload(root=root)
+    prog = payload["families"][0]["programs"][0]
+    assert prog["id"] == pid
+    kinds = sorted(e["kind"] for e in prog["emissions"])
+    assert kinds == ["escalate", "propose-update", "receipt"]
+    by_kind = {e["kind"]: e for e in prog["emissions"]}
+    assert by_kind["escalate"]["status"] == "pending"
+    assert by_kind["propose-update"]["status"] == "pending"
+    assert by_kind["receipt"]["status"] == "sent"  # done receipt -> sent
+    import json
+    json.dumps(payload)  # the joined payload stays JSON-clean
+
+
+def test_build_payload_emissions_resilient_when_task_lib_raises(tmp_path, monkeypatch):
+    # A task-system failure must NEVER break the payload: emissions -> [], needs_you -> 0.
+    root = str(tmp_path)
+    pl.create_program(
+        type="roadmap-initiative", title="Resilient emits", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+
+    def _boom(*a, **k):
+        raise RuntimeError("task system down")
+
+    monkeypatch.setattr(task_lib, "list_tasks", _boom)
+    payload = pl.build_cadence_payload(root=root)  # must not raise
+    prog = payload["families"][0]["programs"][0]
+    assert prog["emissions"] == []
     assert prog["needs_you"] == 0
 
 

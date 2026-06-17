@@ -417,6 +417,54 @@ def _parse_observations(body):
     return entries
 
 
+def iter_observations(body):
+    """Yield (date, kind, sentinel, source, claim) for each `## Observations` entry.
+
+    The source-exposing reader: it surfaces the header date, sentinel, and kind
+    (via _OBS_HEADER_RE) plus the source and claim lines (the source is the line
+    _parse_observations drops). reconcile imports this (it is the lower layer);
+    program_lib never imports reconcile, so this lives here for DRY. Missing
+    fields default to "". Never raises.
+    """
+    if not body:
+        return
+    lines = body.splitlines()
+    section = []
+    in_section = False
+    for line in lines:
+        if line.strip().startswith("## "):
+            if in_section:
+                break
+            in_section = line.strip()[3:].strip().lower() == "observations"
+            continue
+        if in_section:
+            section.append(line)
+
+    pending = None
+    for line in section:
+        m = _OBS_HEADER_RE.match(line.strip())
+        if m:
+            if pending is not None:
+                yield pending
+            date = (m.group("date") or "").strip()
+            kind = (m.group("kind") or "").strip()
+            sentinel = (m.group("sentinel") or "").strip()
+            pending = (date, kind, sentinel, "", "")
+            continue
+        if pending is None:
+            continue
+        stripped = line.strip()
+        low = stripped.lower()
+        if low.startswith("source:") and not pending[3]:
+            source = stripped[len("source:"):].strip()
+            pending = (pending[0], pending[1], pending[2], source, pending[4])
+        elif low.startswith("claim:") and not pending[4]:
+            claim = stripped[len("claim:"):].strip()
+            pending = (pending[0], pending[1], pending[2], pending[3], claim)
+    if pending is not None:
+        yield pending
+
+
 def _split_at_next_section(text):
     """Split `text` at the next top-level `## ` heading.
 
@@ -879,15 +927,35 @@ def _jsonable(obj):
     return obj
 
 
-def render_view(program, registry, needs_you=0):
+def _project_observations(body):
+    """Project the body's `## Observations` into the richer ledger shape.
+
+    A list of {date, kind, sentinel, source, claim} dicts, most-recent-first
+    (newest entries are appended, so reverse), built from the source-exposing
+    iter_observations. Unlike `activity` this keeps the source citation. DATA
+    ONLY (no styling); ASCII/token-agnostic. Degrades to [] when the section is
+    absent. Entries without a claim are dropped (mirrors _parse_observations).
+    """
+    entries = [
+        {"date": date, "kind": kind, "sentinel": sentinel,
+         "source": source, "claim": claim}
+        for date, kind, sentinel, source, claim in iter_observations(body)
+        if claim
+    ]
+    entries.reverse()  # most-recent-first
+    return entries
+
+
+def render_view(program, registry, needs_you=0, emissions=None):
     """Map a program dict (frontmatter + body) into the render contract.
 
     `program` is the shape returned by read_program (keys: frontmatter, body).
     `registry` is the parsed registry dict (from load_registry). `needs_you` is
-    the count of open Now (human-queue) cards linked to this program; the caller
-    (build_cadence_payload) supplies it, defaulting to 0 for unit-test/call-site
-    simplicity. Returns DATA ONLY — no styling. The client derives all tone/color
-    from drift/age/status.
+    the count of open Now (human-queue) cards linked to this program; `emissions`
+    is the program's emission history (escalate/propose-update/receipt cards with
+    their outcomes), both supplied by the caller (build_cadence_payload) and
+    defaulting (0 / []) for unit-test/call-site simplicity. Returns DATA ONLY —
+    no styling. The client derives all tone/color from drift/age/status.
     """
     fm = program.get("frontmatter", {}) or {}
     body = program.get("body", "") or ""
@@ -912,6 +980,10 @@ def render_view(program, registry, needs_you=0):
         "family": family,
         "type_label": type_label,
         "activity": _parse_observations(body),
+        # The richer ledger: same entries as `activity` but keeping the source
+        # citation + sentinel/kind that `activity` drops. `activity` stays for
+        # existing readers; `observations` is the additive, source-cited view.
+        "observations": _project_observations(body),
         # Canonical checkpoint keys are {id, label, due, instrument, status}.
         "checkpoints": [
             {
@@ -936,6 +1008,9 @@ def render_view(program, registry, needs_you=0):
         "last_run": fm.get("last_run"),
         # Count of open Now cards linked to this program (supplied by the caller).
         "needs_you": needs_you,
+        # Emission history (escalate/propose-update/receipt cards + outcomes),
+        # supplied by the caller; the client owns the outcome-word coloring.
+        "emissions": emissions or [],
     }
 
     if state_model == "pipeline":
@@ -997,6 +1072,118 @@ def render_view(program, registry, needs_you=0):
     return _jsonable(vm)
 
 
+# The closed set of emission kinds surfaced in the row expansion + the
+# status-word normalization. A card's raw queue status (open/done/cancelled)
+# becomes a UI outcome word; done means different things by kind (a proposal is
+# approved, an escalate/receipt is sent). All ASCII (invariant #8).
+_EMISSION_STATUS = {
+    "open": {"_default": "pending"},
+    "done": {"propose-update": "approved", "_default": "sent"},
+    "completed": {"propose-update": "approved", "_default": "sent"},
+    "cancelled": {"_default": "declined"},
+}
+
+
+def _normalize_emission_status(raw_status, kind):
+    """Map a card's queue status + emission kind to a UI outcome word.
+
+    open -> pending; done/completed -> approved (proposals) / sent (escalate,
+    receipt); cancelled -> declined. An unknown status passes through as-is so
+    the row can still show something legible. ASCII only.
+    """
+    by_kind = _EMISSION_STATUS.get(raw_status)
+    if not by_kind:
+        return raw_status or "pending"
+    return by_kind.get(kind, by_kind["_default"])
+
+
+def _classify_emission(t, prog_id_re):
+    """Classify a task dict into (program_id, kind) or (None, None).
+
+    Derivation (closed kind set {escalate, propose-update, receipt}):
+      - task_type == cadence-propose-update -> propose-update (program_id = its
+        PROG-XXXX tag);
+      - card_type == receipt AND receipt_kind == cadence-apply -> receipt
+        (program_id = its `program_id` field; the accept handler stamps that,
+        not a tag);
+      - else a cadence-tagged card carrying a PROG-XXXX tag -> escalate.
+    Anything else -> (None, None). Tolerant of missing fields; never raises.
+    """
+    tags = [str(x) for x in (t.get("tags") or [])]
+    prog_tag = next((x for x in tags if prog_id_re.match(x)), None)
+
+    if t.get("task_type") == "cadence-propose-update" and prog_tag:
+        return prog_tag, "propose-update"
+    if t.get("card_type") == "receipt" and t.get("receipt_kind") == "cadence-apply":
+        pid = t.get("program_id")
+        if pid and prog_id_re.match(str(pid)):
+            return str(pid), "receipt"
+        return None, None
+    if "cadence" in tags and prog_tag:
+        return prog_tag, "escalate"
+    return None, None
+
+
+def _collect_emissions(task_lib, prog_id_re):
+    """Build {program_id: [emission entries]} across open + closed cadence cards.
+
+    One scan of open human cards (escalate + propose-update, tagged) plus the
+    archived/closed cards (completed receipts, cancelled/approved proposals) via
+    list_archived. Each entry is {id, kind, title, status, created}: `kind` in
+    {escalate, propose-update, receipt}, `status` normalized to a UI outcome
+    word. The receipt's program_id lives in a card FIELD (not a tag) and is not
+    projected by the light listings, so closed/receipt cards are re-read for it.
+    Newest-first per program. Caller wraps this in try/except (a task failure ->
+    {}); this never raises on a single unreadable card.
+    """
+    by_program = {}
+
+    def _add(pid, entry):
+        by_program.setdefault(pid, []).append(entry)
+
+    # Open human cards: escalate + propose-update carry their program_id as a tag,
+    # so the light list_tasks projection is enough to classify them.
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        pid, kind = _classify_emission(t, prog_id_re)
+        if not pid:
+            continue
+        _add(pid, {
+            "id": t.get("id"), "kind": kind, "title": t.get("title") or "",
+            "status": _normalize_emission_status(t.get("status") or "open", kind),
+            "created": t.get("created"),
+        })
+
+    # Closed cards (completed receipts, accepted/declined proposals) live in the
+    # archive. list_archived's light projection lacks tags/card_type/program_id,
+    # so re-read each candidate's frontmatter to classify it (the same re-read
+    # pattern the reconciler's propose-update dedupe uses).
+    for a in task_lib.list_archived():
+        try:
+            fm = task_lib.read_task(a["id"])["frontmatter"]
+        except Exception:
+            continue
+        cand = {
+            "id": fm.get("id"), "title": fm.get("title") or "",
+            "status": fm.get("status"), "created": fm.get("created"),
+            "tags": fm.get("tags") or [], "task_type": fm.get("task_type"),
+            "card_type": fm.get("card_type"), "receipt_kind": fm.get("receipt_kind"),
+            "program_id": fm.get("program_id"),
+        }
+        pid, kind = _classify_emission(cand, prog_id_re)
+        if not pid:
+            continue
+        _add(pid, {
+            "id": cand["id"], "kind": kind, "title": cand["title"],
+            "status": _normalize_emission_status(cand["status"] or "done", kind),
+            "created": cand["created"],
+        })
+
+    # Newest-first per program (created descending; missing dates sort last).
+    for pid in by_program:
+        by_program[pid].sort(key=lambda e: e.get("created") or "", reverse=True)
+    return by_program
+
+
 def build_cadence_payload(root=None):
     """Assemble the Cadence tab payload: active programs grouped by family.
 
@@ -1008,13 +1195,13 @@ def build_cadence_payload(root=None):
     registry = load_registry()
     programs = list_programs(status="active", root=root)
 
-    # Count open Now (human-queue) cards per program: a single pass over open
-    # human tasks, tallying any tag shaped like a program id (PROG-XXXX). The
-    # emitter tags an escalate card [program_id, "cadence"], so each card counts
-    # once toward its program. task_lib is imported lazily (like cron_lib) to
-    # avoid a hard coupling at module load, and the whole listing is wrapped in
-    # try/except so a task-system failure NEVER breaks the payload (counts -> 0).
+    # ONE pass over the task system per program-row build computes BOTH the open
+    # needs_you count AND the per-program emission history. task_lib is imported
+    # lazily (like cron_lib) to avoid a hard coupling at module load; the whole
+    # block is wrapped in try/except so a task-system failure NEVER breaks the
+    # payload (counts -> 0, emissions -> []).
     counts = {}
+    emissions = {}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import task_lib
@@ -1027,13 +1214,19 @@ def build_cadence_payload(root=None):
                 if prog_id_re.match(str(tag)) and tag not in seen:
                     counts[tag] = counts.get(tag, 0) + 1
                     seen.add(tag)
+        emissions = _collect_emissions(task_lib, prog_id_re)
     except Exception:
-        counts = {}  # task system unavailable — every needs_you defaults to 0
+        counts = {}        # task system unavailable — every needs_you defaults to 0
+        emissions = {}     # ...and every emission list defaults to []
 
     rendered = []
     for p in programs:
         program_id = (p.get("frontmatter") or {}).get("program_id") or p.get("program_id")
-        rendered.append(render_view(p, registry, needs_you=counts.get(program_id, 0)))
+        rendered.append(render_view(
+            p, registry,
+            needs_you=counts.get(program_id, 0),
+            emissions=emissions.get(program_id, []),
+        ))
 
     families = []
     for fam in sorted(

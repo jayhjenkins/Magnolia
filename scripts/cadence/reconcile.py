@@ -678,47 +678,14 @@ def _has_adapter_completion(body, anchor=None, since=None):
 def _iter_observations(body):
     """Yield (date, kind, source, claim) for each observation in `body`.
 
-    A thin reader over the `## Observations` section that exposes the header date
-    and source line (both of which program_lib._parse_observations drops). Mirrors
-    program_lib's header/source/claim line shapes; missing fields default to "".
-    Never raises.
+    A thin adapter over program_lib.iter_observations (the canonical, source-
+    exposing reader that now lives in the lower layer for DRY - program_lib never
+    imports reconcile, so the reader had to move down, not up). reconcile's
+    callers only need the 4-tuple, so this drops the `sentinel` field that the
+    program_lib reader also yields. Never raises.
     """
-    if not body:
-        return
-    lines = body.splitlines()
-    section = []
-    in_section = False
-    for line in lines:
-        if line.strip().startswith("## "):
-            if in_section:
-                break
-            in_section = line.strip()[3:].strip().lower() == "observations"
-            continue
-        if in_section:
-            section.append(line)
-
-    pending = None
-    for line in section:
-        m = program_lib._OBS_HEADER_RE.match(line.strip())
-        if m:
-            if pending is not None:
-                yield pending
-            date = (m.group("date") or "").strip()
-            kind = (m.group("kind") or "").strip()
-            pending = (date, kind, "", "")
-            continue
-        if pending is None:
-            continue
-        stripped = line.strip()
-        low = stripped.lower()
-        if low.startswith("source:") and not pending[2]:
-            source = stripped[len("source:"):].strip()
-            pending = (pending[0], pending[1], source, pending[3])
-        elif low.startswith("claim:") and not pending[3]:
-            claim = stripped[len("claim:"):].strip()
-            pending = (pending[0], pending[1], pending[2], claim)
-    if pending is not None:
-        yield pending
+    for date, kind, _sentinel, source, claim in program_lib.iter_observations(body):
+        yield (date, kind, source, claim)
 
 
 # _next_phase_id moved to program_lib (the lower layer) so the fact door and the
