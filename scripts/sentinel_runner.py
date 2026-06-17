@@ -21,12 +21,14 @@ SECOND fence (a ValueError or a False return is counted, never crashes the run).
 A malformed dispatch (bad JSON, claude error) yields zero observations, is logged
 once, and never raises - a bad sentinel run never corrupts a program.
 
-The tracker-truth path is grounded in the project_management adapter. When that
-adapter is NOT configured (the current state on this box) the run is a clean
-no-op: it logs once and returns the empty summary without dispatching. Task 4
-supplies the real adapter read op + fetch_status; here the adapter-configured
-check lives behind the small _adapter_configured seam so both branches are
-exercisable, and no fetch_status is implemented yet.
+The tracker-truth path is MECHANICAL - it does NOT use the LLM. It reads tracker
+facts through the project_management adapter's free read op (adapters.fetch_status,
+not Tier-2 gated - a read of the team's system of record is free) and maps them
+deterministically to observations: a done/closed status -> completion, otherwise
+-> status-signal. When that adapter is NOT configured (the current state on this
+box) the run is a clean no-op: it logs once and returns the empty summary without
+dispatching. movement-watch (transcripts) is unaffected - it still dispatches the
+LLM, which only RETURNS records the runner records.
 
 Identity is read ONLY via profile_lib (invariant #1). All runtime strings are
 ASCII (invariant #8). The claude subprocess is built with platform_lib so the
@@ -44,6 +46,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PM_OS_DIR = os.path.dirname(SCRIPT_DIR)
 
 sys.path.insert(0, SCRIPT_DIR)
+import adapters  # noqa: E402
 import platform_lib  # noqa: E402
 import profile_lib  # noqa: E402
 import program_lib  # noqa: E402
@@ -57,10 +60,16 @@ SENTINEL_MODEL_TIER = "standard"
 # How long a single sentinel dispatch may run before we give up (seconds).
 CLAUDE_TIMEOUT = 300
 
-# The source kind that is grounded in the project-management adapter. A sentinel
-# whose sources are ALL this kind degrades to a clean no-op when the adapter is
-# unconfigured (tracker-truth today).
+# The source kind that is grounded in the project-management adapter, and the
+# adapter family it resolves to. A sentinel whose sources are ALL this kind runs
+# the mechanical (adapter-read) path, NOT the LLM dispatch path; it degrades to a
+# clean no-op when the adapter is unconfigured (tracker-truth today).
 _ADAPTER_SOURCE_KIND = "project_management"
+_ADAPTER_FAMILY = "project_management"
+
+# Tracker statuses (lower-cased) that mechanically support a `completion`
+# observation. Anything else maps to `status-signal`. No interpretation.
+_DONE_STATUSES = {"done", "closed", "complete", "completed", "resolved", "shipped"}
 
 
 def log(msg):
@@ -121,15 +130,17 @@ def _dispatch(prompt, tier=None):
 
 # --- The adapter-config seam (Task 4 wires the real check) -------------------
 
-def _adapter_configured(name):
+def _adapter_configured(name, root=None):
     """Whether the project-management adapter backing this sentinel is configured.
 
-    Stubbed to False for now: the PM adapter read op (fetch_status) and its real
-    is_configured check land in Task 4. Kept as a small module-level seam so the
-    tracker-truth no-op branch and the configured branch are both testable today.
-    `name` is the sentinel name (room for per-sentinel adapter routing later).
+    Real check (Task 4): resolve the family's provider via adapters.get (which is
+    None when no provider / the adaptation is off) and confirm its is_configured.
+    Kept as a small module-level seam so the no-op branch and the mechanical branch
+    are both monkeypatchable in tests. `name` is the sentinel name (room for
+    per-sentinel adapter routing later).
     """
-    return False
+    mod = adapters.get(_ADAPTER_FAMILY, root)
+    return bool(mod and mod.is_configured(root))
 
 
 # --- Source gathering (thin, mockable; heavy qmd wiring deferred) ------------
@@ -230,6 +241,92 @@ def _parse_records(text):
     return [r for r in obj if isinstance(r, dict)]
 
 
+# --- The mechanical (adapter-grounded) path ----------------------------------
+
+def _program_tracker_epic(program):
+    """The program's tracker epic key from links.tracker_epic, or None.
+
+    The contract field (per the tracker-truth def + design): frontmatter
+    `links.tracker_epic` names the epic that mirrors this program in the tracker.
+    A program with no such link is skipped (returns None).
+    """
+    links = program.get("frontmatter", {}).get("links") or {}
+    if not isinstance(links, dict):
+        return None
+    epic = links.get("tracker_epic")
+    return str(epic) if epic else None
+
+
+def _map_tracker_fact(fact):
+    """Map a tracker fact dict mechanically to (kind, claim). No interpretation.
+
+    A done/closed status -> completion; anything else -> status-signal. The claim
+    is a short ASCII restatement of the reported status. (date-change is left to a
+    later pass - comparing the fetched due to a checkpoint due cleanly needs the
+    checkpoint match, and emitting it speculatively would not be mechanical.)
+    """
+    status = str(fact.get("status") or "").strip()
+    if status.lower() in _DONE_STATUSES:
+        kind = "completion"
+    else:
+        kind = "status-signal"
+    title = str(fact.get("title") or "").strip()
+    claim = f"Tracker reports status '{status}'"
+    if title:
+        claim += f" for '{title}'"
+    claim += "."
+    return kind, claim
+
+
+def _run_tracker_truth(name, programs, root=None, now=None):
+    """Mechanical tracker-truth: read adapter facts, map deterministically, append.
+
+    Does NOT call the LLM. For each active program carrying links.tracker_epic,
+    read the epic via the FREE adapters.fetch_status (a read of the system of
+    record - never Tier-2). None (not found / unconfigured / off) -> skip. Map the
+    fact to a kind, cite the epic as the source, append via the validated writer
+    (its dedupe is the second fence). Returns the summary.
+    """
+    summary = {"sentinel": name, "appended": 0, "dropped": 0}
+    obs_date = now or program_lib._now_iso()[:10]
+    any_fact = False
+    for prog in programs:
+        pid = prog.get("program_id")
+        epic = _program_tracker_epic(prog)
+        if not pid or not epic:
+            continue
+        try:
+            fact = adapters.fetch_status(_ADAPTER_FAMILY, epic, root=root)
+        except Exception as exc:  # one misbehaving epic must not abort the run
+            log(f"sentinel '{name}': adapter read for {epic} failed: {exc}")
+            continue
+        if not fact:
+            continue
+        any_fact = True
+        kind, claim = _map_tracker_fact(fact)
+        try:
+            appended = program_lib.append_observation(
+                pid, kind=kind, sentinel=name,
+                source=f"adapter:{_ADAPTER_FAMILY}:{epic}",
+                claim=claim, date=obs_date, root=root,
+            )
+        except (ValueError, TypeError, FileNotFoundError) as exc:
+            log(f"sentinel '{name}': adapter record for {pid} rejected: {exc}")
+            summary["dropped"] += 1
+            continue
+        if appended:
+            summary["appended"] += 1
+        else:
+            summary["dropped"] += 1
+    if not any_fact:
+        log(f"sentinel '{name}': project_management adapter returned no facts - "
+            "clean no-op (0 observations)")
+    else:
+        log(f"sentinel '{name}': appended {summary['appended']}, "
+            f"dropped {summary['dropped']} (mechanical)")
+    return summary
+
+
 # --- The run -----------------------------------------------------------------
 
 def run_sentinel(name, root=None, now=None):
@@ -245,9 +342,11 @@ def run_sentinel(name, root=None, now=None):
 
     Flow:
       - load the def; resolve active programs + their Intent as the scope.
-      - if the sentinel is adapter-grounded (all sources are project_management)
-        and the adapter is unconfigured -> clean no-op (log once, empty summary).
-      - build the prompt, dispatch via _dispatch, parse records defensively.
+      - if the sentinel is adapter-grounded (all sources are project_management):
+        run the MECHANICAL path (_run_tracker_truth) - no LLM dispatch. An
+        unconfigured adapter is a clean no-op (log once, empty summary).
+      - otherwise (transcript sentinels like movement-watch):
+        build the prompt, dispatch via _dispatch, parse records defensively.
       - for each record: DROP (count, do not append) when program_id is empty or
         is not an active program id (never force-attribute). Otherwise call
         append_observation; its validation + dedupe is the second fence - a
@@ -269,18 +368,21 @@ def run_sentinel(name, root=None, now=None):
     programs = program_lib.list_programs(status="active", root=root)
     active_ids = {p.get("program_id") for p in programs}
 
-    # Adapter-grounded sentinel (e.g. tracker-truth) with the adapter unconfigured:
-    # clean no-op. A sentinel counts as adapter-grounded only when EVERY source it
-    # declares is the project_management kind (a mixed sentinel still dispatches).
+    # Adapter-grounded sentinel (e.g. tracker-truth) runs the MECHANICAL path, not
+    # the LLM dispatch path: it reads tracker facts and maps them deterministically.
+    # A sentinel counts as adapter-grounded only when EVERY source it declares is
+    # the project_management kind (a mixed sentinel still dispatches). Unconfigured
+    # adapter -> clean no-op (log once, empty summary), never a dispatch.
     sources = definition.get("sources") or []
     source_kinds = {
         src.get("kind") for src in sources if isinstance(src, dict)
     }
     if source_kinds and source_kinds == {_ADAPTER_SOURCE_KIND}:
-        if not _adapter_configured(name):
+        if not _adapter_configured(name, root):
             log(f"sentinel '{name}': project_management adapter unconfigured - "
                 "clean no-op (0 observations)")
             return summary
+        return _run_tracker_truth(name, programs, root=root, now=now)
 
     source_digest = _gather_sources(definition, programs, now=now)
     prompt = _build_prompt(definition, programs, source_digest)

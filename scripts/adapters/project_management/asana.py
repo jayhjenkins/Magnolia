@@ -15,3 +15,11 @@ def is_configured(root=None) -> bool:
 def publish(draft, root=None):
     raise NotConfigured(
         "Asana adapter is a stub — implement publish() against the Asana MCP")
+
+
+def fetch_status(issue_key, root=None):
+    """READ op stub (mirrors publish). A read is free (never Tier-2), but this
+    backend is not wired, so it raises NotConfigured rather than fabricate facts.
+    adapters.fetch_status turns that into a clean None (graceful degrade)."""
+    raise NotConfigured(
+        "Asana adapter is a stub — implement fetch_status() against the Asana MCP")

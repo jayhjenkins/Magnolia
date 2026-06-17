@@ -69,3 +69,29 @@ def publish(family, draft, root=None):
     if not _is_confirmed(family, mod, root):
         raise NeedsConfirmation(family)
     return mod.publish(draft, root)
+
+
+def fetch_status(family, issue_key, root=None):
+    """FREE read of the family's system of record. Returns the provider's facts
+    dict, or None.
+
+    A read of the team's tracker is NOT an external write - reading the system of
+    record is free - so this DELIBERATELY bypasses the Tier-2 NeedsConfirmation
+    gate that publish() enforces. (Tier-2 governs writes to the outside world;
+    invariant #5.) Graceful degrade is uniform None: no provider / adaptation off
+    (get -> None), unconfigured backend (is_configured False), or the provider's
+    own NotConfigured signal all collapse to None so callers (e.g. tracker-truth)
+    no-op cleanly without ever fabricating data."""
+    mod = get(family, root)
+    if mod is None:
+        return None
+    if not mod.is_configured(root):
+        return None
+    try:
+        return mod.fetch_status(issue_key, root)
+    except RuntimeError:
+        # A provider that is_configured-True yet cannot serve the read (e.g. the
+        # read path is not wired and raises NotConfigured, a RuntimeError) must
+        # degrade to None per this function's contract - a free read NEVER crashes
+        # its caller. Writes are different: publish() lets such errors surface.
+        return None
