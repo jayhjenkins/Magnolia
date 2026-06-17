@@ -785,10 +785,19 @@ def _apply_advance_phase(program_id, mutation, fm, type_entry, filepath, body, r
     target = to or next_phase
 
     today = _now_iso()[:10]
+    # Accepting an advance past this phase IS the human attesting its exit
+    # checkpoint -> mark the carried checkpoint met, mirroring the fact door (which
+    # only advances once the checkpoint is met). Keeps a program from sitting in
+    # `planning` with `discovery-exit` still pending.
+    checkpoint = mutation.get("checkpoint")
+    if checkpoint:
+        for c in (fm.get("checkpoints") or []):
+            if isinstance(c, dict) and c.get("id") == checkpoint:
+                c["status"] = "met"
+                break
     _advance_phase_fm(fm, target, today)
     _write_program_file(filepath, fm, body)
 
-    checkpoint = mutation.get("checkpoint")
     source = f"checkpoint:{checkpoint}" if checkpoint else "proposal"
     append_observation(
         program_id, kind="completion", sentinel="reconciler", source=source,

@@ -128,6 +128,21 @@ def test_advance_phase_terminal_is_refused(tmp_path, monkeypatch):
     assert fm["phase"] == "verified"  # unchanged
 
 
+def test_advance_phase_marks_carried_checkpoint_met(tmp_path, monkeypatch):
+    # Accepting an advance attests the exit checkpoint -> it flips to met, so the
+    # program never sits in `planning` with `discovery-exit` still pending (mirrors
+    # the fact door). Surfaced by the live e2e.
+    _seed_program(tmp_path, monkeypatch, phase="discovery")
+    program_lib.apply_mutation(
+        "PROG-0001",
+        {"op": "advance-phase", "to": "planning", "checkpoint": "discovery-exit"},
+        root=str(tmp_path))
+    fm = program_lib.read_program("PROG-0001", root=str(tmp_path))["frontmatter"]
+    assert fm["phase"] == "planning"
+    cp = next(c for c in fm["checkpoints"] if c["id"] == "discovery-exit")
+    assert cp["status"] == "met"
+
+
 def test_advance_phase_already_at_target_is_noop(tmp_path, monkeypatch):
     # Idempotent: a retried accept whose program is already at `to` must NOT
     # advance a second time (the accept-after-partial-failure double-advance fence).

@@ -256,23 +256,33 @@ documented).
   `phase-complete-signal` on `roadmap-initiative`)
 - Test: extend `tests/test_cadence_reconcile.py`
 
-**Step 1 — Failing tests.** A `human-attested` exit checkpoint with a high-confidence
-`movement-watch` `completion`/`status-signal` observation citing it → `_evaluate_emitters` produces
-a `propose-update` recommendation card (mutation = `advance-phase`) tagged `[program_id, "cadence"]`,
-deduped (no second card while one is open for the same program+mutation). A phase in overage (inc2's
-existing signal) → `propose-update` (phase-stall) rather than only `escalate`. Below the confidence
-threshold → no proposal. The card carries a structured mutation spec the applier (Task 7) reads.
+**Step 1 — Failing tests.** A `human-attested` (or unclear-instrument) exit checkpoint with a fresh
+interpretive `movement-watch` `completion` observation (non-`adapter:` source, dated on/after the
+current phase's entry) → produces a `propose-update` recommendation card (mutation =
+`{op: advance-phase, to: <next>}`) tagged `[program_id, "cadence"]`, deduped (no second card while one
+is open for the same program+op). No such observation → no proposal. The card carries a structured
+mutation spec the applier (Task 7) reads.
+
+**Scope note (trim):** 3a's propose-update producer is the **advance-phase interpretation door only**
+— the direct human-side counterpart to Task 5's fact door. **Phase-stall and date-change
+(`adjust-checkpoint`) proposals are DEFERRED** (a stall/date proposal needs a target-date heuristic
+that pairs with inc4 lifecycle); the existing `escalate` on `drift:broken` continues to cover stalls.
+The `adjust-checkpoint` op is still fully built + tested in the Task 7 applier (closed set), just not
+emitted by an automated producer in 3a.
 
 **Step 2 — Run, verify fail.**
 
 **Step 3 — Implement.** Extend `_evaluate_emitters` to handle `action == "propose-update"`: build a
-recommendation card (find the existing recommendation-card creation path — `grep -rn
-"recommendation" scripts/`; reuse it, no new card type) whose body is the proposed diff + citations
-and whose frontmatter carries `program_id`, `mutation` (`{op, ...}` from the closed set), and tags.
-Dedupe against open cards already carrying `(program_id, mutation-op)`. Add a
-`_propose_phase_advance(...)` producing the `advance-phase` mutation when interpretation-door
-conditions hold (read the program's observations via `program_lib._parse_observations` or a richer
-accessor). Keep `escalate` behavior intact.
+recommendation card via `task_lib.create_task(card_type="recommendation",
+task_type="cadence-propose-update", queue="human", tags=[program_id, "cadence"], ...)`, carrying the
+structured mutation spec (extend `create_task` with a small `proposal=None` passthrough →
+`frontmatter["proposal"]`, mirroring `card_type`/`patch_path`; Task 7's accept reads it). The
+description is the proposed change + the citing observation. Dedupe against open cards already
+carrying `(program_id + same op)` — reuse/extend the existing `_open_human_tags` dedupe. Add
+`_propose_phase_advance(fm, type_entry, body)` returning an `advance-phase` mutation when the current
+phase's exit checkpoint is NON-mechanical (human/unclear) AND a fresh interpretive `completion`
+observation is present (use `_iter_observations`; non-`adapter:` source, date >= current
+`phase_entered`). Keep `escalate` behavior intact.
 
 **Step 4 — Run, verify pass.**
 
