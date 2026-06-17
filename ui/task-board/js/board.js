@@ -48,7 +48,7 @@ function renderBoard() {
     } else {
       // Group by status — include 'done' for agent and collab lanes (awaiting review/action)
       const statusOrder = (queueName === 'agent' || queueName === 'collab')
-        ? ['done', 'in-progress', 'open', 'blocked']
+        ? ['done', 'in-review', 'in-progress', 'open', 'blocked']
         : ['open', 'in-progress', 'blocked'];
       const grouped = {};
       lane.tasks.forEach(t => {
@@ -63,6 +63,7 @@ function renderBoard() {
         let label = status;
         if (status === 'done' && queueName === 'agent') label = 'Ready for Review';
         if (status === 'done' && queueName === 'collab') label = 'Needs Your Action';
+        if (status === 'in-review') label = 'In Review';
         html += `<div class="status-label">${label}</div>`;
         grouped[status].forEach(t => {
           html += renderCard(t, queueName);

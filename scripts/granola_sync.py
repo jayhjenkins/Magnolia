@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import platform_lib           # noqa: E402
 import profile_lib            # noqa: E402
 import transcript_post        # noqa: E402
 
@@ -133,7 +134,7 @@ def _fetch_new_meetings(state_or_ids, root=None):
     `seen` (the FULL set) is the authoritative local dedup; the prompt only
     carries a bounded recent slice."""
     seen = set(state_or_ids)
-    cmd = ["claude", "-p", _fetch_prompt(_prompt_ids(state_or_ids)),
+    cmd = [platform_lib.resolve_claude(), "-p", _fetch_prompt(_prompt_ids(state_or_ids)),
            "--model", _model(root), "--output-format", "json",
            "--allowedTools", GRANOLA_TOOLS,
            "--permission-mode", "bypassPermissions", "--max-turns", "30"]

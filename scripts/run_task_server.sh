@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ─── macOS only ──────────────────────────────────────────────────────────────
+# This script uses macOS LaunchAgents (launchd/launchctl) and Homebrew.
+# On Windows, the board auto-starts via Task Scheduler (configured during
+# onboarding — see docs/INSTALL-windows.md). Do not run this on Windows.
+# ─────────────────────────────────────────────────────────────────────────────
 # run_task_server.sh — launchd entrypoint for the PM-OS task board + cron scheduler.
 #
 # Wraps `python3 scripts/task_server.py` so it runs with:

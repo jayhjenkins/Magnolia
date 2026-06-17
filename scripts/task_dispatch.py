@@ -829,18 +829,19 @@ def dispatch_task(task, dry_run=False, rerun=False, workers=None):
     claude_cmd, claude_session_id = build_claude_cmd(prompt, model, tools_str, max_turns)
     claude_cmd[0] = platform_lib.resolve_claude()
 
-    if platform_lib.os_kind() == "windows":
-        # No `script` (pty) on Windows: run claude directly and tee stdout to the
-        # output_file ourselves (the pty is what wrote it on POSIX).
-        cmd = claude_cmd
-        stdout_target = open(output_file, "wb")
-    else:
+    stdout_target = subprocess.DEVNULL
+    cmd = claude_cmd
+
+    if platform_lib.os_kind() != "windows":
         cmd = ["script", "-q", output_file] + claude_cmd
-        stdout_target = subprocess.DEVNULL
 
     env = platform_lib.headless_claude_env()
 
     try:
+        if platform_lib.os_kind() == "windows":
+            # No `script` (pty) on Windows: run claude directly and tee stdout to the
+            # output_file ourselves (the pty is what wrote it on POSIX).
+            stdout_target = open(output_file, "wb")
         proc = subprocess.Popen(
             cmd,
             stdout=stdout_target,
@@ -850,6 +851,8 @@ def dispatch_task(task, dry_run=False, rerun=False, workers=None):
             **platform_lib.process_group_kwargs(),
         )
     except FileNotFoundError:
+        if stdout_target is not subprocess.DEVNULL:
+            stdout_target.close()
         log("ERROR: 'claude' (or 'script' on POSIX) not found in PATH", task_id=task_id)
         return {"task_id": task_id, "success": False, "output": None, "error": "claude not found"}
 

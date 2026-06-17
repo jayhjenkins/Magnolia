@@ -4,7 +4,8 @@ description: Jira issue drafting — Features, Units, Bugs, Regression Defects, 
 priority: 15
 tier: standard
 match:
-  task_type: []
+  task_type:
+    - create-ticket
   domains: []
   title_patterns:
     - "(?i)\\bjira\\b"
@@ -96,42 +97,57 @@ Task {task_id}. Follow these steps:
    - **Story / Epic** — only when the task explicitly asks for legacy hierarchy.
 
 7. Draft the issue:
-   Compose all fields. The task body you read in step 1 is your *source material*, not your output — translate it into a Jira-native description that stands on its own for an external reader. **Strip every PM-OS reference (see the Description hygiene rule below) before writing into `### Description`.** Write the draft to the task body using this EXACT format:
+   Compose all fields. The task body you read in step 1 is your *source material*, not your output — translate it into a Jira-native description that stands on its own for an external reader. **Strip every PM-OS reference (see the Description hygiene rule below) before writing into `### Description`.**
 
-   Run: ./scripts/task.sh update {task_id} --description "$(cat <<'DRAFT'
-   <original description text>
+   Write the draft directly into the task file using the Edit tool (do NOT use
+   `task.sh update --description` with a heredoc — use Edit for reliability):
 
-   ## Jira Draft
+   a. The task file path is: datasets/tasks/<QUEUE>/<TASK_ID>.md
+      where <QUEUE> is the queue field from the frontmatter (e.g., "collab").
 
-   <!-- JIRA_DRAFT -->
-   <!-- JIRA_TYPE:Unit -->
-   <!-- JIRA_SUMMARY:Short summary here -->
-   <!-- JIRA_PRIORITY:High -->
-   <!-- JIRA_LABELS: -->
-   <!-- JIRA_RELEASE_NOTES:Internal Only -->
-   <!-- JIRA_PARENT:<PROJECT>-12345 -->
-   <!-- JIRA_FEATURE_NAME: -->
-   <!-- JIRA_GTM_DATE: -->
-   <!-- JIRA_CLIENT_COMMITMENT: -->
-   <!-- JIRA_ASSIGNEE: -->
+   b. Use Edit to find the `\n\n## Activity Log` line and insert the Jira Draft
+      section immediately before it. For example, if the body ends with:
+        ...existing description text...
 
-   ### Summary
-   Short summary here
 
-   ### Description
-   Full description with context, steps to reproduce (for bugs / regression
-   defects), acceptance criteria (for units / stories), or outcome detail
-   (for features / epics).
+        ## Activity Log
+      replace that with:
+        ...existing description text...
 
-   ### Fields
-   - **Type:** Unit
-   - **Priority:** High
-   - **Labels:** **Features/Epics:** set the configured `product_area` swim-lane label from profile (if set). **Bugs, Units, Regression Defects, everything else:** leave empty.
-   - **Release Notes:** Internal Only
-   - **Parent:** <PROJECT>-12345
-   <!-- /JIRA_DRAFT -->
-   DRAFT
-   )"
+        ## Jira Draft
+
+        <!-- JIRA_DRAFT -->
+        <!-- JIRA_TYPE:Unit -->
+        <!-- JIRA_SUMMARY:Short summary here -->
+        <!-- JIRA_PRIORITY:High -->
+        <!-- JIRA_LABELS: -->
+        <!-- JIRA_RELEASE_NOTES:Internal Only -->
+        <!-- JIRA_SEVERITY: -->
+        <!-- JIRA_COMPONENT_ID: -->
+        <!-- JIRA_PARENT:<PROJECT>-12345 -->
+        <!-- JIRA_FEATURE_NAME: -->
+        <!-- JIRA_GTM_DATE: -->
+        <!-- JIRA_CLIENT_COMMITMENT: -->
+        <!-- JIRA_ASSIGNEE: -->
+
+        ### Summary
+        Short summary here
+
+        ### Description
+        Full description with context, steps to reproduce (for bugs / regression
+        defects), acceptance criteria (for units / stories), or outcome detail
+        (for features / epics).
+
+        ### Fields
+        - **Type:** Unit
+        - **Priority:** High
+        - **Labels:** (none)
+        - **Release Notes:** Internal Only
+        - **Parent:** <PROJECT>-12345
+        <!-- /JIRA_DRAFT -->
+
+
+        ## Activity Log
 
    IMPORTANT FORMAT RULES:
    - The <!-- JIRA_DRAFT --> and <!-- /JIRA_DRAFT --> markers MUST be present
@@ -149,6 +165,8 @@ Task {task_id}. Follow these steps:
      `mobile-only`"). When in doubt, omit. The publish script submits labels as-is —
      no auto-prepend.
    - JIRA_RELEASE_NOTES: None, Internal Only, or External (or leave empty)
+   - JIRA_SEVERITY: **Required for Bug, Regression Defect, and Work Item Defect.** Use `Severity 1` (critical) through `Severity 4` (minor). Leave empty for all other types.
+   - JIRA_COMPONENT_ID: Jira component ID number (e.g. `10048`). Leave empty to use the profile default. Override when the task is explicitly associated with a specific component (e.g., Apollo Action Items = 10048).
    - JIRA_PARENT: parent issue key (e.g., `<PROJECT>-42920`) for Units linking to a
      Feature or Epic. Leave empty if you don't know the parent — Jira will create
      the Unit unparented and the human can wire it later.

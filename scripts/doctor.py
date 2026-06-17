@@ -52,6 +52,17 @@ def probe_python_deps(modules):
 # won't BLOCK onboarding (required stays False), but its absence degrades real
 # capability, so the Doctor pushes it with a plain-language `rationale`.
 _LOCAL_TOOLS = {
+    "python_interpreter": {
+        "required": True,
+        "detail": "Python runtime — required for all agent scripts (task.sh, task_cli.py, etc.)",
+        "rationale": "without it, every background agent fails silently on start",
+        "remedy": (
+            "Windows: ensure Python is on Git Bash PATH — test with: python --version "
+            "in the Claude Code terminal. If missing, rerun: "
+            "winget install --id Python.Python.3.12 -e  then fully restart Claude Code. "
+            "macOS: python3 should be on PATH; if not: brew install python3"
+        ),
+    },
     "qmd":        {"required": False, "recommended": True,
                    "detail": "semantic search across all your meetings, notes, and docs",
                    "rationale": "the killer feature — without it, search falls back to "
@@ -143,6 +154,16 @@ def detect(root=None):
             if key in spec:
                 c[key] = spec[key]
         caps[name] = c
+    # python_interpreter: prefer python3, fall back to python
+    _py = shutil.which("python3") or shutil.which("python")
+    from datetime import date as _date
+    def _today(): return _date.today().isoformat()
+    caps["python_interpreter"] = {
+        **_LOCAL_TOOLS.get("python_interpreter", {}),
+        "status": "ok" if _py else "missing",
+        "binary": _py or "",
+        "last_seen": _today() if _py else None,
+    }
     caps["python_deps"] = probe_python_deps(_PYTHON_DEPS)
     caps["server"] = probe_server(profile_lib.server_port(root))
     caps["transcript"] = probe_transcript(root)

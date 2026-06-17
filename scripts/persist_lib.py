@@ -56,12 +56,12 @@ def render_scheduled_task(name, program, args, working_dir):
     user's context (can read their files/creds).
     """
     return (
-        f'$action = New-ScheduledTaskAction -Execute "{program}" '
-        f'-Argument "{args}" -WorkingDirectory "{working_dir}"\n'
-        f'$trigger = New-ScheduledTaskTrigger -AtLogOn\n'
-        f'$settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)\n'
-        f'Register-ScheduledTask -TaskName "{name}" -Action $action '
-        f'-Trigger $trigger -Settings $settings -Force\n'
+        f"$action = New-ScheduledTaskAction -Execute '{program}' "
+        f"-Argument '{args}' -WorkingDirectory '{working_dir}'\n"
+        f"$trigger = New-ScheduledTaskTrigger -AtLogOn\n"
+        f"$settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)\n"
+        f"Register-ScheduledTask -TaskName '{name}' -Action $action "
+        f"-Trigger $trigger -Settings $settings -Force\n"
     )
 
 

@@ -35,11 +35,13 @@ def _run_qmd_index(env, log_dir, log):
         log.info("  qmd not found — skipping index update (semantic search optional)")
         return
     try:
+        _qmd_log = open(log_dir / "qmd-index.log", "a")
         subprocess.Popen([qmd, "update", "-c", "meetings_product"],
                          cwd=str(profile_lib.PM_OS_DIR), env=env,
-                         stdout=open(log_dir / "qmd-index.log", "a"),
+                         stdout=_qmd_log,
                          stderr=subprocess.STDOUT,
                          **platform_lib.process_group_kwargs())
+        _qmd_log.close()
         log.info("  Triggered qmd index update (meetings_product)")
     except Exception as exc:
         log.warning("  QMD index update hook failed: %s", exc)
@@ -71,11 +73,13 @@ def run_downstream(txt_path, item_id, state, log):
     env = _hook_env()
     task_extract = str(SCRIPT_DIR / "task_extract_meetings.py")
     try:
+        _extract_log = open(log_dir / "task-extract.log", "a")
         subprocess.Popen([sys.executable, task_extract, final_path],
                          cwd=str(profile_lib.PM_OS_DIR), env=env,
-                         stdout=open(log_dir / "task-extract.log", "a"),
+                         stdout=_extract_log,
                          stderr=subprocess.STDOUT,
                          **platform_lib.process_group_kwargs())
+        _extract_log.close()
         log.info("  Triggered task extraction for %s", final_path)
     except Exception as exc:
         log.warning("  Task extraction hook failed: %s", exc)

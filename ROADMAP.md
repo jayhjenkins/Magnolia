@@ -2,7 +2,7 @@
 
 > Living document. Anchored to what's actually on disk (skills, the task/cron/dispatch engine, the eval substrate, MCP connectors). This describes where the **system** goes — not the product data, which is gitignored. Companion to [`UX_VISION.md`](./UX_VISION.md) (the design philosophy) and [`README.md`](./README.md) (how it works for a new user).
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-16
 
 **Status legend:** ✅ shipped · 🟡 partial · ⬜ planned
 
@@ -27,6 +27,9 @@ The arc: **report → scored report → autonomous action → product-area squad
 - ✅ **Message draft + send** — `message-writer` worker drafts in your voice, judge scores it, you review + send through the Tier-2 gate.
 - ✅ **Cron substrate** — `datasets/cron/jobs.json` + daemon tick in `task_server.py`; three jobs seeded (doctor self-heal, weekly self-improvement, graduation ladder).
 - ✅ **De-personalization + docs consolidation** — engine reads identity only through `profile/`; the `docs/reference/` layer is the canonical map.
+- ✅ **Windows compatibility sweep** — `platform_lib` seam enforced across all dispatch paths; `doctor.py` detects Python reachability; macOS-only scripts labeled; `persist_lib` PowerShell quoting fixed; `task_cli.py --description` + `task_lib` body-replacement unblock ticket-creator agents on Windows.
+- ✅ **Jira Severity field** — `JIRA_SEVERITY` drafts and publishes to `customfield_10269`; required for Bug/Regression Defect/Work Item Defect.
+- ✅ **Board cancel action + In Review column** — `POST /api/tasks/{id}/cancel`, confirm-dialog textarea, `in-review` status group in agent/collab lanes.
 
 ---
 

@@ -10,7 +10,8 @@ using_skills_content=$(cat "${SKILL_ROOT}/meta-using-skills/SKILL.md" 2>&1 || ec
 using_skills_escaped=$(echo "$using_skills_content" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')
 
 # Resolve the operator's display name from the active profile (robust relative path)
-OPERATOR=$(python3 "$REPO_ROOT/scripts/profile_lib.py" --display-name 2>/dev/null || echo "the operator")
+_PY=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "")
+OPERATOR=$([ -n "$_PY" ] && "$_PY" "$REPO_ROOT/scripts/profile_lib.py" --display-name 2>/dev/null || echo "the operator")
 
 cat <<EOF
 {

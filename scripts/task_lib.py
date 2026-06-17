@@ -557,7 +557,10 @@ def list_archived(limit=200):
 def update_task(task_id, changes=None, comment=None, actor="human"):
     """Update a task's frontmatter fields and/or append an activity log entry.
 
-    changes: dict of frontmatter fields to update
+    changes: dict of frontmatter fields to update. The special key "description"
+      replaces the content of the ## Description section in the body (the text
+      between ## Description and the next ## heading or end of body). Any existing
+      ## Jira Draft block is preserved and placed after the new description text.
     comment: string to append as activity log entry
     actor: 'human' or 'agent'
 
@@ -583,11 +586,30 @@ def update_task(task_id, changes=None, comment=None, actor="human"):
 
     new_queue = changes.pop("queue", None)
     comment_type = changes.pop("_comment_type", "comment")
+    new_description = changes.pop("description", None)
 
     # Apply frontmatter changes
     for key, value in changes.items():
         fm[key] = value
     fm["updated"] = now
+
+    # Replace the ## Description section content when description is provided.
+    # The body structure is: \n## Description\n\n<text>\n\n## Jira Draft\n...\n## Activity Log\n...
+    # We replace everything between ## Description and the next ## heading with the new text,
+    # then re-attach the ## Jira Draft block (if present) and ## Activity Log section.
+    if new_description is not None:
+        import re as _re
+        # Extract the ## Jira Draft block if it exists (preserve it)
+        jira_draft_match = _re.search(
+            r'(\n## Jira Draft\n.*?(?=\n## |\Z))', body, _re.DOTALL
+        )
+        jira_draft_block = jira_draft_match.group(1) if jira_draft_match else ""
+        # Extract the ## Activity Log section (preserve it)
+        activity_match = _re.search(r'(\n## Activity Log\b.*)', body, _re.DOTALL)
+        activity_block = activity_match.group(1) if activity_match else ""
+        # Rebuild the description portion
+        desc_text = new_description.strip()
+        body = f"\n## Description\n\n{desc_text}\n" + jira_draft_block + activity_block
 
     # Append activity log entry if comment provided
     if comment:

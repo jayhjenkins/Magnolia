@@ -847,6 +847,23 @@ def handle_set_priority(handler, task_id):
         _error_response(handler, f"Failed to update priority: {e}", status=500)
 
 
+def handle_cancel_task(handler, task_id):
+    """POST /api/tasks/{id}/cancel — archive the task with status=cancelled."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    reason = (body.get("reason") or "").strip()
+    try:
+        task_lib.cancel_task(task_id, reason=reason, actor="human")
+        _json_response(handler, {"ok": True})
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+    except Exception as e:
+        _error_response(handler, f"Failed to cancel task: {e}", status=500)
+
+
 def handle_set_due_date(handler, task_id):
     """POST /api/tasks/{id}/set-due — update or clear the due field (YYYY-MM-DD)."""
     try:
@@ -1591,6 +1608,8 @@ def handle_schedule_meeting(handler, task_id):
 
 def handle_publish_jira(handler, task_id):
     """POST /api/tasks/{id}/publish-jira — publish a Jira draft (Tier-2 gated)."""
+    import importlib
+    importlib.reload(jira_publish)
     try:
         task_data = task_lib.read_task(task_id)
     except FileNotFoundError:
@@ -2311,6 +2330,16 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
                 _error_response(self, "Invalid task ID format", status=400)
             else:
                 handle_set_due_date(self, task_id)
+            return True
+
+        # Match /api/tasks/{id}/cancel
+        match = re.match(r"^/api/tasks/([^/]+)/cancel$", path)
+        if match and method == "POST":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_cancel_task(self, task_id)
             return True
 
         # Match /api/tasks/{id}/chat — POST runs a turn (SSE), GET reloads history.

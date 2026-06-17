@@ -68,6 +68,8 @@ Recurring jobs live in `datasets/cron/jobs.json` with an atomic counter at `data
 
 ## 9. Task system (quick reference)
 
-A unified task system with four queues. Route work by who acts and whether approval is needed: **human** (decisions, meetings, approvals), **agent** (autonomous research, drafting, analysis), **collab** (an agent acts on an external system but needs human approval first), **waiting** (owed by another person or team). CLI: `./scripts/task.sh add|list|show|update|done|inbox`. Agent-queue subcommands: `agent:start`, `agent:complete --output`, `agent:fail --error`, `agent:ask`. Web UI: `python3 scripts/task_server.py`.
+A unified task system with four queues. Route work by who acts and whether approval is needed: **human** (decisions, meetings, approvals), **agent** (autonomous research, drafting, analysis), **collab** (an agent acts on an external system but needs human approval first), **waiting** (owed by another person or team). CLI: `./scripts/task.sh add|list|show|update|done|inbox`. Agent-queue subcommands: `agent:start`, `agent:complete [--output]`, `agent:fail --error`, `agent:ask`. Web UI: `python3 scripts/task_server.py`.
+
+Task statuses: `open` → `in-progress` → `done` (normal path); `blocked` (waiting on something); `cancelled` (archived via cancel action — `POST /api/tasks/{id}/cancel`); `in-review` (agent/collab task manually promoted to the Now → Review surface for human sign-off).
 
 **Canonical source:** `scripts/task.sh`.

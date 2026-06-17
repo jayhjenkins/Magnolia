@@ -351,6 +351,7 @@ async function openTask(taskId, keepChat) {
     const canSendMessage = task.task_type === 'send-message' && (task.agent_status === 'complete' || task.agent_status === 'needs-human');
 
     let leftHtml = `<button class="btn btn-quiet" onclick="closeModal()">Close</button>`;
+    leftHtml += `<button class="btn btn-quiet" onclick="notMineTask('${task.id}')">Not mine</button>`;
     if (canRerun) leftHtml += `<button class="btn btn-quiet" id="btn-rerun-agent" onclick="rerunAgent('${task.id}')">Rerun agent</button>`;
 
     let rightHtml = '';
@@ -1190,5 +1191,27 @@ async function setDueDate(taskId, due, inputEl) {
     fetchTasks();
   } catch (err) {
     toast(`Could not update due date: ${err.message}`);
+  }
+}
+
+async function notMineTask(taskId) {
+  const { confirmed, value: reason } = await confirmAction({
+    title: 'Not yours to do?',
+    message: 'This will archive the task. Add a note so the agent learns what to route differently next time.',
+    confirmLabel: 'Archive it',
+    inputPrompt: 'Why isn\'t this yours? (optional but helpful)',
+  });
+  if (!confirmed) return;
+  try {
+    const res = await fetch(`${API}/tasks/${taskId}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    closeModal();
+    fetchTasks();
+  } catch (err) {
+    toast(`Could not archive task: ${err.message}`);
   }
 }

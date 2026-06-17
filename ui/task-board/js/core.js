@@ -25,12 +25,16 @@ function toast(msg, type = 'error', duration = 4000) {
 // that resolves true (confirmed) / false (cancelled). Enter confirms, Esc or
 // a backdrop click cancels, and focus is trapped between the two buttons and
 // restored to the trigger on close.
-function confirmAction({ title = 'Are you sure?', message = '', confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false } = {}) {
+// confirmAction — pass inputPrompt (string) to add an optional textarea.
+// Without inputPrompt: resolves bool (backward-compatible).
+// With inputPrompt: resolves { confirmed: bool, value: string }.
+function confirmAction({ title = 'Are you sure?', message = '', confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, inputPrompt = '' } = {}) {
   return new Promise(resolve => {
     const overlay = document.getElementById('confirm-overlay');
-    if (!overlay) { resolve(window.confirm(message || title)); return; }
+    if (!overlay) { resolve(inputPrompt ? { confirmed: window.confirm(message || title), value: '' } : window.confirm(message || title)); return; }
     const titleEl = document.getElementById('confirm-title');
     const msgEl = document.getElementById('confirm-msg');
+    const inputEl = document.getElementById('confirm-input');
     const okBtn = document.getElementById('confirm-ok');
     const cancelBtn = document.getElementById('confirm-cancel');
 
@@ -41,28 +45,39 @@ function confirmAction({ title = 'Are you sure?', message = '', confirmLabel = '
     cancelBtn.textContent = cancelLabel;
     okBtn.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
 
+    if (inputEl) {
+      inputEl.placeholder = inputPrompt || '';
+      inputEl.value = '';
+      inputEl.classList.toggle('visible', !!inputPrompt);
+    }
+
     const prevFocus = document.activeElement;
     overlay.classList.add('active');
-    okBtn.focus();
+    // Focus the textarea when present so the user can type immediately.
+    if (inputPrompt && inputEl) inputEl.focus(); else okBtn.focus();
 
-    function cleanup(result) {
+    function cleanup(confirmed) {
+      const value = (inputEl && inputPrompt) ? inputEl.value.trim() : '';
+      if (inputEl) inputEl.classList.remove('visible');
       overlay.classList.remove('active');
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
       overlay.removeEventListener('mousedown', onBackdrop);
       document.removeEventListener('keydown', onKey, true);
       if (prevFocus && prevFocus.focus) prevFocus.focus();
-      resolve(result);
+      resolve(inputPrompt ? { confirmed, value } : confirmed);
     }
     function onOk() { cleanup(true); }
     function onCancel() { cleanup(false); }
     function onBackdrop(e) { if (e.target === overlay) cleanup(false); }
     function onKey(e) {
-      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); cleanup(true); }
+      // Don't intercept Enter when the user is typing in the textarea.
+      const inTextarea = inputEl && document.activeElement === inputEl;
+      if (e.key === 'Enter' && !inTextarea) { e.preventDefault(); e.stopPropagation(); cleanup(true); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cleanup(false); }
       else if (e.key === 'Tab') {
         e.preventDefault();
-        const order = [cancelBtn, okBtn];
+        const order = inputPrompt && inputEl ? [inputEl, cancelBtn, okBtn] : [cancelBtn, okBtn];
         const i = order.indexOf(document.activeElement);
         order[(i + (e.shiftKey ? -1 : 1) + order.length) % order.length].focus();
       }

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ─── macOS only ──────────────────────────────────────────────────────────────
+# This script uses macOS LaunchAgents (launchd/launchctl) and Homebrew.
+# On Windows, the board auto-starts via Task Scheduler (configured during
+# onboarding — see docs/INSTALL-windows.md). Do not run this on Windows.
+# ─────────────────────────────────────────────────────────────────────────────
 # qmd-setup.sh — Register all PM-OS collections in qmd
 # Run this after a fresh install or if collections need to be recreated.
 # Usage: bash scripts/qmd-setup.sh

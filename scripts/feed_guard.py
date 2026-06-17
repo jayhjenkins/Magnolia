@@ -8,12 +8,15 @@ import glob
 import os
 import re
 import subprocess
+import platform_lib
 
 # Signals that a LaunchAgent is a transcript downloader.
 _SIGNAL_RE = re.compile(r"otter|granola|transcript|meeting[-_]?sync", re.IGNORECASE)
 
 
 def detect_competing(launch_agents_dir=None, own_labels=None):
+    if platform_lib.os_kind() != "darwin":
+        return []
     own = set(own_labels or [])
     d = launch_agents_dir or os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents")
     found = []
@@ -40,7 +43,7 @@ def disable(path, activate=True):
     a nonzero return code) when ``activate=True``, and None when not attempted.
     """
     unloaded = None
-    if activate:
+    if activate and platform_lib.os_kind() == "darwin":
         result = subprocess.run(["launchctl", "unload", path], capture_output=True)
         unloaded = result.returncode == 0
 

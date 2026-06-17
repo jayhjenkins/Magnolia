@@ -107,6 +107,8 @@ def parse_jira_draft(body):
         "client_commitment": _field("JIRA_CLIENT_COMMITMENT") or "",
         "parent": _field("JIRA_PARENT") or "",
         "assignee": _field("JIRA_ASSIGNEE") or "",
+        "severity": _field("JIRA_SEVERITY") or "",
+        "component_id": _field("JIRA_COMPONENT_ID") or "",
     }
 
     # Extract the description from the ### Description section
@@ -141,8 +143,9 @@ def build_claude_prompt(draft):
             labels.append(l)
 
     # Build additional_fields
+    component_id = draft.get("component_id") or JIRA_COMPONENT_ID
     additional_fields = {
-        "components": [{"id": JIRA_COMPONENT_ID}],
+        "components": [{"id": component_id}],
         "labels": labels,
     }
 
@@ -151,6 +154,9 @@ def build_claude_prompt(draft):
 
     if draft.get("release_notes"):
         additional_fields["customfield_10499"] = {"value": draft["release_notes"]}
+
+    if draft.get("severity"):
+        additional_fields["customfield_10269"] = {"value": draft["severity"]}
 
     # Feature / Epic — use customfield_10011 for the short name.
     if issue_type in NAMED_PARENT_TYPES:

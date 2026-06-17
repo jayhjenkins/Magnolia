@@ -174,7 +174,7 @@ Write the assembled JSON to `landing-page.json` in the output folder.
 **Validate** — one combined Python invocation. All assertions in one script. Exit code 0 means everything passed.
 
 ```bash
-python3 - <<'PY'
+cat > /tmp/_lp_validate.py <<'PYEOF'
 import json, sys
 path = 'landing-page.json'
 ok = True
@@ -200,7 +200,9 @@ if ok:
     print(f'OK: schemaVersion=12, rows={len(d["body"]["rows"])}, all cells sum to 12, no banned tags')
     sys.exit(0)
 sys.exit(1)
-PY
+PYEOF
+python3 /tmp/_lp_validate.py 2>/dev/null || python /tmp/_lp_validate.py
+rm -f /tmp/_lp_validate.py
 ```
 
 If it exits non-zero, fix the JSON and re-run.

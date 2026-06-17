@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ─── macOS only ──────────────────────────────────────────────────────────────
+# This script uses macOS LaunchAgents (launchd/launchctl) and Homebrew.
+# On Windows, the board auto-starts via Task Scheduler (configured during
+# onboarding — see docs/INSTALL-windows.md). Do not run this on Windows.
+# ─────────────────────────────────────────────────────────────────────────────
 # setup_doc_sync.sh — One-time setup for bidirectional MD <-> Word sync.
 #
 # Installs dependencies, detects OneDrive path, creates config,

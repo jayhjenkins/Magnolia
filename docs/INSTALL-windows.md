@@ -93,6 +93,40 @@ to re-authorize anything; these are account-level connectors.
 
 ---
 
+## ⚠️ Critical Windows gotcha: Python must be reachable from Git Bash
+
+Magnolia's background agents (the "Start Agent" button on the board) run Python scripts through
+Git Bash — **not** PowerShell. Windows installs Python on the PowerShell/CMD PATH, but Git Bash
+uses its own view of the PATH and **will not see Python until you restart after installation**.
+
+**The symptom:** agents silently exit with "exit code 1" the moment they start, nothing gets
+drafted, and the task card shows a failure with no helpful message.
+
+**The fix:** after installing Python (Prompt 1, step 3), the restart in step 8 is what makes
+Python visible to Git Bash. Don't skip it. If agents still fail after restarting, run this
+inside Claude Code to verify:
+
+```
+! python --version
+```
+
+If that returns `Python 3.x.x`, Git Bash can see Python and agents will work.
+If it returns "command not found", Python is installed but not yet on Git Bash's PATH.
+
+**Common causes and remedies:**
+
+| Cause | Fix |
+|---|---|
+| Installed Python but haven't restarted Claude Code | Fully quit and reopen Claude Code |
+| Python installed as a "Store app alias" (Microsoft App Store stub) | Re-install via winget: `winget install --id Python.Python.3.12 -e --override "/quiet InstallAllUsers=1 PrependPath=1"` |
+| Python not added to system PATH during install | Rerun Python installer → "Modify" → check "Add Python to PATH" |
+| Git Bash reads a stale PATH cache | Restart your machine once after the full install sequence |
+
+The test is always the same: `! python --version` inside Claude Code. Green → agents work.
+Red → one of the remedies above will fix it.
+
+---
+
 ## What to expect
 - **Permission prompts** for winget/npm/downloads/clone — approve them or Prompt 1 stalls.
 - **`mgc login` (during onboarding) may need admin consent** — the scope set includes

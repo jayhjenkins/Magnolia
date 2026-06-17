@@ -46,6 +46,7 @@ When invoked **interactively** via `/jira:create` (human is in the CLI session),
 <!-- JIRA_PRIORITY:High -->
 <!-- JIRA_LABELS: -->
 <!-- JIRA_RELEASE_NOTES:Internal Only -->
+<!-- JIRA_SEVERITY: -->
 <!-- JIRA_PARENT:VNT-12345 -->
 <!-- JIRA_FEATURE_NAME: -->
 <!-- JIRA_GTM_DATE: -->
@@ -74,6 +75,7 @@ Full description with context...
 - `JIRA_PRIORITY`: `Highest`, `High`, `Medium`, `Low`, `Lowest` (or empty for default)
 - `JIRA_LABELS`: usually empty. The only label PM-OS applies is `home_aidlc`, and only on Features/Epics (see Swim Lane Rule below). For Bugs, Units, Regression Defects, Spikes, Hotfixes — leave this empty. Never invent topical labels (`calendar`, `compliance`, `resident-portal`, etc.) from the ticket subject — those create permanent noise in a taxonomy you don't own. Add a non-default label only when the user explicitly types it in their prompt.
 - `JIRA_RELEASE_NOTES`: `None`, `Internal Only`, or `External` (or empty)
+- `JIRA_SEVERITY`: `Severity 1` (critical) / `Severity 2` / `Severity 3` / `Severity 4` (minor). **Required for `Bug`, `Regression Defect`, and `Work Item Defect`** — leave empty for all other types. See [Ticket Impact & Severity](https://app.getguru.com/card/TzpEdnxc/Ticket-Impact-Severity).
 - `JIRA_PARENT`: parent issue key (e.g., `VNT-12345`) — typically for `Unit` linking to a `Feature` or `Epic`. Optional; leave empty to create unparented.
 - `JIRA_FEATURE_NAME`: short label for the Feature (Feature only — also accepted as the legacy `JIRA_EPIC_NAME` for compatibility)
 - `JIRA_GTM_DATE`: `YYYY-MM-DD`, or empty / `TBD` to leave blank (Feature / Epic only)
@@ -135,6 +137,7 @@ All values below are hardcoded from the Vantaca Jira instance. The migration to 
 | Spec Reference | `customfield_10783` | URL string | Canonical home for the PRD's Word/SharePoint URL (Feature / Epic only). Sam's process refresh: downstream Teams comms and other automation read this field, so populate it whenever a published PRD URL exists. |
 | Client Commitment | `customfield_10298` | labels array | `CAI`, `Vision`, or custom (Feature / Epic only) |
 | Release Notes | `customfield_10499` | select | `None` / `Internal Only` / `External` |
+| Severity | `customfield_10269` | select | **Required for Bug, Regression Defect, and Work Item Defect.** Values: `Severity 1` (critical) → `Severity 4` (minor). Populated from `JIRA_SEVERITY`. |
 | Regression Area | `customfield_10293` | multiselect | 260+ product area options — set in Jira UI, not in PM-OS drafts |
 | Priority | `priority` | priority | Standard Jira priorities |
 | Labels | `labels` | array of string | Swim lane assignment. `home_aidlc` → AI DLC automated lane (Features/Epics only). Empty → "everything else" column (bugs, ad-hoc work). No auto-prepend; the draft's labels are submitted as-is. |
@@ -211,6 +214,7 @@ Ask for (skip any already provided via arguments):
 1. **Summary** (required): One-line title
 2. **Description** (recommended): What's the issue? Provide context, steps to reproduce, expected vs actual behavior.
 3. **Source** (only if type unknown): Was this reported by a client (→ `Bug`) or found internally by QA / product team (→ `Regression Defect`)?
+4. **Severity** (**required for Bug, Regression Defect, and Work Item Defect**): `Severity 1` (critical) / `Severity 2` / `Severity 3` / `Severity 4` (minor). Jira rejects these types without this field. See [Ticket Impact & Severity](https://app.getguru.com/card/TzpEdnxc/Ticket-Impact-Severity).
 
 ### Step 2.2: Gather Optional Info
 
@@ -235,6 +239,8 @@ mcp__claude_ai_Jira__createJiraIssue(
   additional_fields: {
     "components": [{"id": "10011"}],
     "labels": [],  // bugs default to no labels — "everything else" lane. Only populate if user explicitly named a label.
+    // Required for Bug, Regression Defect, and Work Item Defect — must be one of: "Severity 1", "Severity 2", "Severity 3", "Severity 4"
+    "customfield_10269": {"value": "<Severity N>"},
     // Include only if user provided values:
     "priority": {"name": "<priority>"},
     "customfield_10499": {"value": "<release notes choice>"}

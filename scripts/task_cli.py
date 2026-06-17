@@ -175,12 +175,14 @@ def cmd_update(args):
         changes["message_subject"] = args.message_subject
     if getattr(args, "message_body", None):
         changes["message_body"] = args.message_body
+    if getattr(args, "description", None) is not None:
+        changes["description"] = args.description
 
     comment = args.comment
     actor = args.actor or "human"
 
     if not changes and not comment:
-        print("No changes specified. Use --status, --priority, --queue, --comment, etc.")
+        print("No changes specified. Use --status, --priority, --queue, --description, --comment, etc.")
         sys.exit(1)
 
     filepath = task_lib.update_task(args.task_id, changes=changes, comment=comment, actor=actor)
@@ -461,6 +463,7 @@ def main():
     p_update.add_argument("--message-to", default=None, help="Message recipient (send-message)")
     p_update.add_argument("--message-subject", default=None, help="Message subject (send-message)")
     p_update.add_argument("--message-body", default=None, help="Message body draft (send-message)")
+    p_update.add_argument("--description", default=None, help="Replace the ## Description section body")
     p_update.set_defaults(func=cmd_update)
 
     # ─── done ────────────────────────────────────────────────────────────
