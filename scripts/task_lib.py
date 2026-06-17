@@ -225,7 +225,7 @@ def create_task(title, queue="human", priority="medium", domain=None,
                 meeting_duration=None, meeting_title=None,
                 meeting_description=None, message_channel=None,
                 message_to=None, message_subject=None, message_body=None,
-                card_type=None, patch_path=None):
+                card_type=None, patch_path=None, proposal=None):
     """Create a new task file in the appropriate queue directory.
 
     Returns (task_id, filepath).
@@ -279,6 +279,10 @@ def create_task(title, queue="human", priority="medium", domain=None,
         frontmatter["card_type"] = card_type
     if patch_path:
         frontmatter["patch_path"] = patch_path
+    if proposal is not None:
+        # A structured mutation spec carried on a recommendation card; the accept
+        # handler (cadence-propose-update) reads fm["proposal"] to apply it.
+        frontmatter["proposal"] = proposal
 
     # Add waiting metadata if applicable
     if queue == "waiting":

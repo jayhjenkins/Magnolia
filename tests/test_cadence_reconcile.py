@@ -1078,3 +1078,109 @@ def test_fact_door_idempotent_within_period(tmp_path):
     reconcile.reconcile_program(program3, _registry(), now=NOW, force=True)
     fm3 = pl.read_program(pid, root=root)["frontmatter"]
     assert fm3["phase"] == "planning"
+
+
+# ─── propose-update emitter (Task 6, the interpretation door) ────────────────
+#
+# A HUMAN-ATTESTED exit checkpoint cannot auto-flip (Task 5's fact door declines
+# it). When a fresh INTERPRETIVE completion observation (a movement-watch obs
+# whose source is NOT adapter:-prefixed, dated on/after phase entry) says the
+# phase looks done, the reconciler emits a propose-update recommendation card a
+# human accepts (Task 7). The program is NOT mutated by the proposal.
+
+def _open_human_cards():
+    """Read OPEN human-queue cards' (task_type, proposal) for assertion."""
+    cards = []
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        fm = task_lib.read_task(t["id"])["frontmatter"]
+        cards.append(fm)
+    return cards
+
+
+def test_propose_update_emits_card_for_human_attested_with_interpretive_obs(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(
+        root, instrument="human attestation", status="pending",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-11_x.md (#Action Items)",
+                       claim="Discovery spike reported complete in standup."),
+    )
+
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    # The program is NOT mutated -- proposal only (Task 7/accept applies it).
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "discovery"
+
+    # Exactly one cadence-propose-update recommendation card was created.
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["card_type"] == "recommendation"
+    assert pid in card["tags"]
+    assert "cadence" in card["tags"]
+    assert card["proposal"] == {
+        "op": "advance-phase", "to": "planning",
+        "checkpoint": "discovery-exit", "from": "discovery"}
+    assert card["id"] in result["emitted"]
+
+
+def test_propose_update_dedupes_within_open_card(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(
+        root, instrument="human attestation", status="pending",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
+                       source="datasets/meetings/x.md",
+                       claim="Looks done."),
+    )
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    # A second forced reconcile while the proposal card is still open -> no dup.
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW, force=True)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert len(cards) == 1
+
+
+def test_propose_update_no_interpretive_obs_no_card(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(root, instrument="human attestation", status="pending")
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert cards == []
+
+
+def test_propose_update_not_emitted_when_fact_door_advances(tmp_path):
+    root = str(tmp_path)
+    # Mechanical + met -> the fact door advances; the proposal door must NOT also
+    # fire (the checkpoint is no longer the current phase's exit after advancing,
+    # and the instrument is mechanical anyway).
+    pid = _seed_discovery_program(root, instrument="the PM tracker", status="met")
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "planning"   # advanced by the fact door
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert cards == []
+
+
+def test_propose_update_ignores_adapter_completion(tmp_path):
+    root = str(tmp_path)
+    # An adapter-sourced completion is the fact door's domain, not the proposal
+    # door's. With a human-attested checkpoint and ONLY an adapter completion, no
+    # interpretive signal exists -> no proposal.
+    pid = _seed_discovery_program(
+        root, instrument="human attestation", status="pending",
+        extra_obs=dict(kind="completion", sentinel="tracker-truth",
+                       source="adapter:project_management:EPIC-204",
+                       claim="Tracker reports done."),
+    )
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert cards == []
+    # And it did not auto-advance either (human-attested instrument).
+    assert pl.read_program(pid, root=root)["frontmatter"]["phase"] == "discovery"

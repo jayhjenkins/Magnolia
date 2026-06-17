@@ -17,7 +17,7 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" }, { "kind": "project_management", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" } ],
       "presentation": { "chip_tokens": { "discovery": "--text-dim", "execution": "--accent" } } },
 
     { "id": "weekly-priorities", "label": "Weekly priorities", "family": "weekly",

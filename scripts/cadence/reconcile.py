@@ -421,15 +421,160 @@ def _open_human_tags(task_lib):
     return tags
 
 
-def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
-    """Evaluate the type's declarative emitters for `verdict`. Returns task ids.
+def _open_propose_update_ops(task_lib, program_id):
+    """Return the set of mutation `op`s already covered by an OPEN cadence
+    propose-update card for `program_id` (the proposal dedupe fence).
 
-    For each emitter whose `on` matches `drift:<verdict>`:
-      - `escalate`: dedupe against open human cards already tagged with this
-        program_id; if none, create one high-priority human card tagged
-        [program_id, "cadence"] and collect its id. (Tier-1: a LOCAL card, no
-        external writes, no judge/ladder.)
-      - any other (recognized) action: no-op this increment (logged to stderr).
+    Mirrors _open_human_tags but reads two more fields off each open human card:
+    its `task_type` (must be `cadence-propose-update`) and its `proposal` op. A
+    card matches when it is a cadence-propose-update tagged with this program_id;
+    we collect its `proposal.op` so a second reconcile cannot stack a duplicate
+    advance-phase proposal while one is still open. Defensive: list_tasks only
+    projects light fields, so we re-read the card frontmatter for `proposal`.
+    Never raises - an unreadable card is simply skipped.
+    """
+    ops = set()
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        if t.get("task_type") != "cadence-propose-update":
+            continue
+        if program_id not in (t.get("tags") or []):
+            continue
+        try:
+            fm = task_lib.read_task(t["id"])["frontmatter"]
+        except Exception:
+            continue
+        proposal = fm.get("proposal") or {}
+        op = proposal.get("op") if isinstance(proposal, dict) else None
+        if op:
+            ops.add(op)
+    return ops
+
+
+def _propose_phase_advance(fm, type_entry, body):
+    """The INTERPRETATION door's gate. Returns an advance-phase mutation or None.
+
+    Returns {"op": "advance-phase", "to": <next>, "checkpoint": <cp_id>,
+    "from": <current>} only when ALL hold:
+      - the current phase has an `exit_checkpoint`, is not terminal, and that
+        checkpoint exists in fm["checkpoints"];
+      - that checkpoint's instrument is NOT mechanical (human-attested / unclear -
+        the mechanical case is Task 5's fact door);
+      - a fresh INTERPRETIVE `completion` observation is present: a kind=completion
+        observation whose `source` does NOT start with `adapter:` (interpretive =
+        movement-watch, not the tracker) and dated on/after the current phase's
+        `phase_entered` (you cannot complete a phase's exit before entering it);
+      - there is a real next phase.
+    Else None. Proposal only - never mutates the program (Task 7's accept applies
+    it). ASCII-safe; tolerant of missing shapes (never raises).
+    """
+    phase = fm.get("phase")
+    phases = type_entry.get("phases") or []
+    phase_def = next(
+        (p for p in phases if isinstance(p, dict) and p.get("id") == phase), {}
+    )
+    if phase_def.get("terminal"):
+        return None
+    cp_id = phase_def.get("exit_checkpoint")
+    if not cp_id:
+        return None
+
+    cp = next(
+        (c for c in (fm.get("checkpoints") or [])
+         if isinstance(c, dict) and c.get("id") == cp_id),
+        None,
+    )
+    if cp is None:
+        return None
+
+    # Mechanical instruments belong to the fact door, not the proposal door.
+    if _instrument_is_mechanical(cp.get("instrument")):
+        return None
+
+    next_phase = _next_phase_id(type_entry, phase)
+    if not next_phase:
+        return None
+
+    since = _phase_entered_date(fm, phase)
+    since_iso = since.isoformat() if since else None
+    if not _has_interpretive_completion(body, since=since_iso):
+        return None
+
+    return {
+        "op": "advance-phase",
+        "to": next_phase,
+        "checkpoint": cp_id,
+        "from": phase,
+    }
+
+
+def _has_interpretive_completion(body, since=None):
+    """True when the body carries a FRESH, INTERPRETIVE `completion` observation.
+
+    Interpretive = a kind=completion observation whose `source` does NOT start
+    with `adapter:` (the tracker grounding shape). Such an observation is a
+    movement-watch read of a meeting/thread, not a deterministic tracker fact -
+    enough to PROPOSE (not auto-apply) a human-attested phase advance. When
+    `since` (an ISO date) is given, the observation must be dated on/after it -
+    the current phase's entry date. Tolerant: an unparseable body yields no match.
+    """
+    for date_str, kind, source, _claim in _iter_observations(body):
+        if kind != "completion" or source.startswith("adapter:"):
+            continue
+        if since and (not date_str or date_str < since):
+            continue
+        return True
+    return False
+
+
+def _build_proposal_description(mutation, body, program_id):
+    """Build a <=2-sentence ASCII proposal card body (invariant #8).
+
+    States the proposed change (advance from -> to on which checkpoint) and the
+    interpretive observation's claim that earned it, so the human accepting the
+    card sees both the diff and its citation. ASCII arrows, no em-dash.
+    """
+    frm = mutation.get("from", "?")
+    to = mutation.get("to", "?")
+    cp = mutation.get("checkpoint", "?")
+    claim = _latest_interpretive_claim(body) or "a phase-complete signal"
+    return (
+        f"Cadence proposes advancing {program_id}: phase {frm} -> {to} "
+        f"on checkpoint {cp}. Signal: {claim}"
+    )
+
+
+def _latest_interpretive_claim(body):
+    """Return the last interpretive completion observation's claim, or None.
+
+    Interpretive = kind=completion with a non-adapter source (movement-watch's
+    read of a meeting/thread). Used only to cite the proposal in the card body.
+    """
+    claim = None
+    for _date, kind, source, c in _iter_observations(body):
+        if kind == "completion" and not source.startswith("adapter:"):
+            claim = c
+    return claim
+
+
+def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None):
+    """Evaluate the type's declarative emitters. Returns created task ids.
+
+    Two emitter families fire here, both Tier-1 (LOCAL cards, no external writes,
+    no judge/ladder):
+
+      - `escalate` (on `drift:<verdict>`): dedupe against open human cards already
+        tagged with this program_id; if none, create one high-priority human card
+        tagged [program_id, "cadence"].
+      - `propose-update` (on `phase-advance-proposable`): the interpretation door.
+        The `on` string is just the trigger NAME; the real gate is
+        `_propose_phase_advance`, which returns an advance-phase mutation only when
+        a human-attested exit checkpoint has a fresh interpretive completion
+        observation. When it fires, create a `recommendation` card
+        (task_type=cadence-propose-update) carrying the mutation as `proposal`,
+        tagged [program_id, "cadence"]. Deduped against any OPEN propose-update
+        card already carrying this program_id AND the same op.
+
+    Any other recognized action no-ops this increment (logged to stderr).
     """
     emitters = type_entry.get("emitters") or []
     if not emitters:
@@ -439,15 +584,18 @@ def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
     program_id = fm.get("program_id")
     title = fm.get("title") or program_id or "Program"
     emitted = []
-    open_tags = None  # lazily computed only when an escalate emitter fires
+    open_tags = None       # lazily computed on the first escalate fire
+    open_prop_ops = None   # lazily computed on the first propose-update fire
 
     for em in emitters:
-        if em.get("on") != f"drift:{verdict}":
-            continue
         action = em.get("action")
+        on = em.get("on")
+
         if action == "escalate":
-            # Lazy import on the escalate path only - the pure-verdict path
-            # never imports task_lib. Imported once here, not again per card.
+            if on != f"drift:{verdict}":
+                continue
+            # Lazy import on the emitting path only - the pure-verdict path never
+            # imports task_lib. Imported once here, not again per card.
             import task_lib
             if open_tags is None:
                 open_tags = _open_human_tags(task_lib)
@@ -465,6 +613,32 @@ def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
             # Reflect the just-created card so a second escalate emitter in the
             # same evaluation cannot double-fire for this program.
             open_tags.add(program_id)
+
+        elif action == "propose-update":
+            # The mutation function is the real gate (the `on` string is only a
+            # trigger name). Only advance-phase proposals are produced in 3a.
+            mutation = _propose_phase_advance(fm, type_entry, body or "")
+            if not mutation:
+                continue
+            import task_lib
+            if open_prop_ops is None:
+                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+            if mutation["op"] in open_prop_ops:
+                continue  # an open proposal for the same op already exists -> dedupe
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: advance to {mutation['to']}?",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                card_type="recommendation",
+                task_type="cadence-propose-update",
+                tags=[program_id, "cadence"],
+                proposal=mutation,
+                description=_build_proposal_description(mutation, body or "", program_id),
+            )
+            emitted.append(task_id)
+            open_prop_ops.add(mutation["op"])
+
         elif action:
             sys.stderr.write(
                 f"[cadence] emitter action '{action}' not acted on this "
@@ -677,7 +851,9 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     type_entry = next(
         (t for t in registry.get("types", []) if t.get("id") == type_id), {}
     )
-    emitted = _evaluate_emitters(program, type_entry, verdict, facts, root=root)
+    emitted = _evaluate_emitters(
+        program, type_entry, verdict, facts, body=body, root=root
+    )
 
     # The FACT door: mutate `fm` in place (phase + checkpoint) when the current
     # phase's mechanical exit checkpoint is confirmed done. The mutation and its
