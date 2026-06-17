@@ -227,8 +227,14 @@ function cadenceExpandedPanel(p, tone) {
         </div>
       </div>
       <div class="cadence-body-right">
-        <div class="cadence-eyebrow">Activity</div>
-        ${activity}
+        <div class="cadence-block">
+          <div class="cadence-eyebrow">Activity</div>
+          ${activity}
+        </div>
+        <div class="cadence-block">
+          <div class="cadence-eyebrow">Emissions</div>
+          ${cadenceEmissions(p)}
+        </div>
       </div>
     </div>
     ${footer}
@@ -345,6 +351,12 @@ function cadenceCheckpoints(p) {
 }
 
 function cadenceActivity(p) {
+  // Prefer the richer observation ledger (date · kind chip · claim + a subtle
+  // source citation line); fall back to the leaner `activity` feed when a
+  // payload predates `observations`. Tokens only.
+  const observations = p.observations;
+  if (observations && observations.length) return cadenceObservations(observations);
+
   const activity = p.activity || [];
   let rows = '';
   for (const a of activity) {
@@ -355,6 +367,53 @@ function cadenceActivity(p) {
     </div>`;
   }
   return `<div class="cadence-activity">${rows}</div>`;
+}
+
+function cadenceObservations(observations) {
+  let rows = '';
+  for (const o of observations) {
+    const kindChip = o.kind ? `<span class="cadence-obs-kind">${escapeHtml(o.kind)}</span>` : '';
+    const who = o.sentinel ? `<span class="cadence-obs-by"> · ${escapeHtml(o.sentinel)}</span>` : '';
+    const cite = o.source
+      ? `<span class="cadence-obs-source">source: ${escapeHtml(o.source)}</span>`
+      : '';
+    rows += `<div class="cadence-activity-row cadence-obs-row">
+      <span class="cadence-activity-date">${escapeHtml(cadenceDate(o.date))}</span>
+      <span class="cadence-activity-text">
+        ${kindChip}<span class="cadence-obs-claim">${escapeHtml(o.claim || '')}</span>${who}
+        ${cite}
+      </span>
+    </div>`;
+  }
+  return `<div class="cadence-activity">${rows}</div>`;
+}
+
+// Emission history: each escalate/propose-update/receipt card with its outcome
+// word, colored via the SAME tone palette cadenceTone/checkpoints use (success/
+// warning/danger/text-dim). Steady-state (no emissions) stays legible with a
+// quiet line. Tokens only; rendered purely from the payload (no extra fetch).
+function cadenceEmissionTone(status) {
+  if (status === 'approved' || status === 'sent') return 'var(--success)';
+  if (status === 'pending') return 'var(--warning)';
+  if (status === 'declined') return 'var(--danger)';
+  return 'var(--text-dim)';
+}
+
+function cadenceEmissions(p) {
+  const emissions = p.emissions || [];
+  if (!emissions.length) {
+    return `<div class="cadence-emissions"><span class="cadence-emissions-empty">No emissions yet</span></div>`;
+  }
+  let rows = '';
+  for (const e of emissions) {
+    const outcomeColor = cadenceEmissionTone(e.status);
+    rows += `<div class="cadence-emission">
+      <span class="cadence-emission-kind">${escapeHtml(e.kind || '')}</span>
+      <span class="cadence-emission-title">${escapeHtml(e.title || '')}</span>
+      <span class="cadence-emission-outcome" style="color:${outcomeColor};">${escapeHtml(e.status || '')}</span>
+    </div>`;
+  }
+  return `<div class="cadence-emissions">${rows}</div>`;
 }
 
 function cadenceFooter(p) {

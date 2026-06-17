@@ -657,7 +657,7 @@
   .cadence-intent { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; max-width: 80ch; text-wrap: pretty; margin: 15px 0 20px; }
   .cadence-body { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
   .cadence-body-left { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-  .cadence-body-right { min-width: 0; }
+  .cadence-body-right { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
   .cadence-eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 11px; }
 
   /* phase history */
@@ -701,6 +701,21 @@
   .cadence-activity-date { font-size: 12px; color: var(--text-dim); width: 50px; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
   .cadence-activity-text { font-size: 13px; color: var(--text-muted); line-height: 1.5; text-wrap: pretty; flex: 1 1 auto; min-width: 0; }
   .cadence-activity-tag { color: var(--text-dim); }
+
+  /* observation ledger (the richer activity rows) */
+  .cadence-obs-row .cadence-activity-text { display: flex; flex-direction: column; gap: 3px; }
+  .cadence-obs-kind { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); background: color-mix(in oklab, var(--surface-hover) 60%, transparent); border: 1px solid var(--border-soft); border-radius: 4px; padding: 1px 6px; margin-right: 7px; }
+  .cadence-obs-claim { color: var(--text-muted); }
+  .cadence-obs-by { color: var(--text-dim); }
+  .cadence-obs-source { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; word-break: break-word; }
+
+  /* emission history */
+  .cadence-emissions { display: flex; flex-direction: column; gap: 9px; }
+  .cadence-emissions-empty { font-size: 12px; color: var(--text-dim); }
+  .cadence-emission { display: flex; align-items: baseline; gap: 10px; }
+  .cadence-emission-kind { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); background: color-mix(in oklab, var(--surface-hover) 60%, transparent); border: 1px solid var(--border-soft); border-radius: 4px; padding: 1px 6px; flex: 0 0 auto; white-space: nowrap; }
+  .cadence-emission-title { font-size: 13px; color: var(--text); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cadence-emission-outcome { font-size: 11px; font-weight: 600; white-space: nowrap; flex: 0 0 auto; text-align: right; min-width: 56px; }
 
   /* footer */
   .cadence-footer { margin-top: 20px; padding-top: 13px; border-top: 1px solid var(--border-soft); display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }

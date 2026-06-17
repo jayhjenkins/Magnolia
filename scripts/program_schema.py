@@ -15,6 +15,7 @@ sentinel tool-lists, and the intake block. This is the gate the read-only
 Cadence tab and the reconciler both rely on so every row layout and emitter
 rule is well-formed.
 """
+import glob
 import json
 import os
 import re
@@ -22,6 +23,7 @@ import re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(ROOT, "cadence", "programtypes", "registry.json")
 TEMPLATE_CSS = os.path.join(ROOT, "ui", "task-board", "themes", "_TEMPLATE.css")
+SENTINEL_DIR = os.path.join(ROOT, "scripts", "sentinels")
 STATE_MODELS = {"pipeline", "cycle", "target", "register"}
 # Brief §3 closed action set — the only actions an emitter may declare.
 CLOSED_ACTIONS = {"escalate", "draft-message", "produce-artifact",
@@ -64,6 +66,18 @@ def validate_doc(reg, tokens):
         if state_model == "pipeline":
             if not has_phases:
                 errors.append(f"type '{tid}': pipeline state_model requires phases")
+            else:
+                # An optional exit_checkpoint names a per-instance checkpoint id
+                # (the fact/proposal door). It is statically a string here; the
+                # cross-check against an instance's checkpoints is runtime.
+                for p in t.get("phases") or []:
+                    if not isinstance(p, dict):
+                        continue
+                    if "exit_checkpoint" in p and not isinstance(
+                            p["exit_checkpoint"], str):
+                        errors.append(
+                            f"type '{tid}': phase '{p.get('id', '?')}' "
+                            f"exit_checkpoint must be a string")
         elif has_phases:
             errors.append(
                 f"type '{tid}': phases are only allowed on pipeline state_model")
@@ -109,10 +123,40 @@ def validate_doc(reg, tokens):
     return errors
 
 
+def validate_sentinels(sentinel_dir=None):
+    """Validate every sentinel definition in a sentinels dir ([] = all valid).
+
+    Mirrors the registry validation style: load each scripts/sentinels/*.md,
+    run sentinel_lib.validate_sentinel, and prefix each error with the file so
+    a malformed sentinel fails the gate with an ASCII-safe, actionable message.
+    A read-mode-only contract is structural here (a mode: write source is an
+    error), matching the brief's sentinel invariant.
+    """
+    # Deferred import: sentinel_lib imports program_lib, and importing it at
+    # module top would widen this gate's import surface for no benefit.
+    import sentinel_lib
+    sd = sentinel_dir or SENTINEL_DIR
+    errors = []
+    if not os.path.isdir(sd):
+        return errors
+    for path in sorted(glob.glob(os.path.join(sd, "*.md"))):
+        name = os.path.splitext(os.path.basename(path))[0]
+        try:
+            # Load by absolute path so the gate never reconstructs a root from
+            # the dir shape (the dir need not be <root>/scripts/sentinels).
+            definition = sentinel_lib.load_sentinel_file(path)
+        except Exception as e:
+            errors.append(f"sentinel '{name}': could not load: {e}")
+            continue
+        for e in sentinel_lib.validate_sentinel(definition):
+            errors.append(f"sentinel '{name}': {e}")
+    return errors
+
+
 def validate():
     with open(REGISTRY, encoding="utf-8") as f:
         reg = json.load(f)
-    return validate_doc(reg, _theme_tokens())
+    return validate_doc(reg, _theme_tokens()) + validate_sentinels()
 
 
 if __name__ == "__main__":

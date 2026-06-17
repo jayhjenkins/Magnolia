@@ -42,6 +42,35 @@ def _worse(a, b):
     return a if _RANK.get(a, 0) >= _RANK.get(b, 0) else b
 
 
+# Instrument normalization (I2). Seed checkpoint `instrument` fields are PROSE
+# ("the PM tracker", "human attestation", "a deterministic check", "Pendo"), not
+# tokens. The fact door may only auto-mutate state on a MECHANICAL instrument
+# (an adapter/deterministic/metric source). A human-attestation or empty/unclear
+# instrument is treated as human (return False) -- the conservative default, so
+# the reconciler never auto-advances a phase on an instrument it cannot classify.
+# Both sets are ASCII, matched case-insensitively. Human wins on conflict.
+_HUMAN_INSTRUMENT_HINTS = ("human", "attest", "manual")
+_MECHANICAL_INSTRUMENT_HINTS = (
+    "tracker", "adapter", "pendo", "metric", "deterministic", "automated", "check",
+)
+
+
+def _instrument_is_mechanical(instrument):
+    """Classify a prose `instrument` as mechanical (True) or human (False).
+
+    Mechanical when it names an adapter/deterministic/metric source. Human when
+    it names attestation OR is empty/ambiguous (CONSERVATIVE DEFAULT: unclear ->
+    human, so the fact door never auto-mutates state on an instrument it cannot
+    confidently read as mechanical). ASCII, case-insensitive; human hints win.
+    """
+    if not instrument or not isinstance(instrument, str):
+        return False
+    low = instrument.lower()
+    if any(h in low for h in _HUMAN_INSTRUMENT_HINTS):
+        return False
+    return any(h in low for h in _MECHANICAL_INSTRUMENT_HINTS)
+
+
 # ─── Pure time helpers ─────────────────────────────────────────────────────────
 
 def current_period(cadence, now):
@@ -307,13 +336,15 @@ def _format_emitted(emitted):
     return ", ".join(ids)
 
 
-def _append_cycle_entry(body, period, verdict, facts, emitted=None):
+def _append_cycle_entry(body, period, verdict, facts, emitted=None, advanced=None):
     """Return `body` with a new cycle-log entry appended to `## Cycles`.
 
-    The entry is two lines (ASCII hyphen separators, invariant #8):
+    The entry is two lines (ASCII hyphen separators, invariant #8), plus an
+    optional third line when the fact door advanced a phase this cycle:
 
         ### <period> - <verdict>
         checks: <reason> - emitted: <TASK-xxxx | none> - next: <next>
+        advanced: <from> -> <to> on checkpoint <id>
 
     Heading-anchored insert: the new block is placed UNDER the `## Cycles`
     heading and BEFORE the next top-level `## ` heading (if any), else at the
@@ -329,6 +360,11 @@ def _append_cycle_entry(body, period, verdict, facts, emitted=None):
         f"### {period} - {verdict}\n"
         f"checks: {reason} - emitted: {_format_emitted(emitted)} - next: {nxt}\n"
     )
+    if advanced:
+        entry += (
+            f"advanced: {advanced['from']} -> {advanced['to']} "
+            f"on checkpoint {advanced['checkpoint']}\n"
+        )
 
     body = body or ""
     if _CYCLES_HEADING not in body:
@@ -385,15 +421,160 @@ def _open_human_tags(task_lib):
     return tags
 
 
-def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
-    """Evaluate the type's declarative emitters for `verdict`. Returns task ids.
+def _open_propose_update_ops(task_lib, program_id):
+    """Return the set of mutation `op`s already covered by an OPEN cadence
+    propose-update card for `program_id` (the proposal dedupe fence).
 
-    For each emitter whose `on` matches `drift:<verdict>`:
-      - `escalate`: dedupe against open human cards already tagged with this
-        program_id; if none, create one high-priority human card tagged
-        [program_id, "cadence"] and collect its id. (Tier-1: a LOCAL card, no
-        external writes, no judge/ladder.)
-      - any other (recognized) action: no-op this increment (logged to stderr).
+    Mirrors _open_human_tags but reads two more fields off each open human card:
+    its `task_type` (must be `cadence-propose-update`) and its `proposal` op. A
+    card matches when it is a cadence-propose-update tagged with this program_id;
+    we collect its `proposal.op` so a second reconcile cannot stack a duplicate
+    advance-phase proposal while one is still open. Defensive: list_tasks only
+    projects light fields, so we re-read the card frontmatter for `proposal`.
+    Never raises - an unreadable card is simply skipped.
+    """
+    ops = set()
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        if t.get("task_type") != "cadence-propose-update":
+            continue
+        if program_id not in (t.get("tags") or []):
+            continue
+        try:
+            fm = task_lib.read_task(t["id"])["frontmatter"]
+        except Exception:
+            continue
+        proposal = fm.get("proposal") or {}
+        op = proposal.get("op") if isinstance(proposal, dict) else None
+        if op:
+            ops.add(op)
+    return ops
+
+
+def _propose_phase_advance(fm, type_entry, body):
+    """The INTERPRETATION door's gate. Returns an advance-phase mutation or None.
+
+    Returns {"op": "advance-phase", "to": <next>, "checkpoint": <cp_id>,
+    "from": <current>} only when ALL hold:
+      - the current phase has an `exit_checkpoint`, is not terminal, and that
+        checkpoint exists in fm["checkpoints"];
+      - that checkpoint's instrument is NOT mechanical (human-attested / unclear -
+        the mechanical case is Task 5's fact door);
+      - a fresh INTERPRETIVE `completion` observation is present: a kind=completion
+        observation whose `source` does NOT start with `adapter:` (interpretive =
+        movement-watch, not the tracker) and dated on/after the current phase's
+        `phase_entered` (you cannot complete a phase's exit before entering it);
+      - there is a real next phase.
+    Else None. Proposal only - never mutates the program (Task 7's accept applies
+    it). ASCII-safe; tolerant of missing shapes (never raises).
+    """
+    phase = fm.get("phase")
+    phases = type_entry.get("phases") or []
+    phase_def = next(
+        (p for p in phases if isinstance(p, dict) and p.get("id") == phase), {}
+    )
+    if phase_def.get("terminal"):
+        return None
+    cp_id = phase_def.get("exit_checkpoint")
+    if not cp_id:
+        return None
+
+    cp = next(
+        (c for c in (fm.get("checkpoints") or [])
+         if isinstance(c, dict) and c.get("id") == cp_id),
+        None,
+    )
+    if cp is None:
+        return None
+
+    # Mechanical instruments belong to the fact door, not the proposal door.
+    if _instrument_is_mechanical(cp.get("instrument")):
+        return None
+
+    next_phase = _next_phase_id(type_entry, phase)
+    if not next_phase:
+        return None
+
+    since = _phase_entered_date(fm, phase)
+    since_iso = since.isoformat() if since else None
+    if not _has_interpretive_completion(body, since=since_iso):
+        return None
+
+    return {
+        "op": "advance-phase",
+        "to": next_phase,
+        "checkpoint": cp_id,
+        "from": phase,
+    }
+
+
+def _has_interpretive_completion(body, since=None):
+    """True when the body carries a FRESH, INTERPRETIVE `completion` observation.
+
+    Interpretive = a kind=completion observation whose `source` does NOT start
+    with `adapter:` (the tracker grounding shape). Such an observation is a
+    movement-watch read of a meeting/thread, not a deterministic tracker fact -
+    enough to PROPOSE (not auto-apply) a human-attested phase advance. When
+    `since` (an ISO date) is given, the observation must be dated on/after it -
+    the current phase's entry date. Tolerant: an unparseable body yields no match.
+    """
+    for date_str, kind, source, _claim in _iter_observations(body):
+        if kind != "completion" or source.startswith("adapter:"):
+            continue
+        if since and (not date_str or date_str < since):
+            continue
+        return True
+    return False
+
+
+def _build_proposal_description(mutation, body, program_id):
+    """Build a <=2-sentence ASCII proposal card body (invariant #8).
+
+    States the proposed change (advance from -> to on which checkpoint) and the
+    interpretive observation's claim that earned it, so the human accepting the
+    card sees both the diff and its citation. ASCII arrows, no em-dash.
+    """
+    frm = mutation.get("from", "?")
+    to = mutation.get("to", "?")
+    cp = mutation.get("checkpoint", "?")
+    claim = _latest_interpretive_claim(body) or "a phase-complete signal"
+    return (
+        f"Cadence proposes advancing {program_id}: phase {frm} -> {to} "
+        f"on checkpoint {cp}. Signal: {claim}"
+    )
+
+
+def _latest_interpretive_claim(body):
+    """Return the last interpretive completion observation's claim, or None.
+
+    Interpretive = kind=completion with a non-adapter source (movement-watch's
+    read of a meeting/thread). Used only to cite the proposal in the card body.
+    """
+    claim = None
+    for _date, kind, source, c in _iter_observations(body):
+        if kind == "completion" and not source.startswith("adapter:"):
+            claim = c
+    return claim
+
+
+def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None):
+    """Evaluate the type's declarative emitters. Returns created task ids.
+
+    Two emitter families fire here, both Tier-1 (LOCAL cards, no external writes,
+    no judge/ladder):
+
+      - `escalate` (on `drift:<verdict>`): dedupe against open human cards already
+        tagged with this program_id; if none, create one high-priority human card
+        tagged [program_id, "cadence"].
+      - `propose-update` (on `phase-advance-proposable`): the interpretation door.
+        The `on` string is just the trigger NAME; the real gate is
+        `_propose_phase_advance`, which returns an advance-phase mutation only when
+        a human-attested exit checkpoint has a fresh interpretive completion
+        observation. When it fires, create a `recommendation` card
+        (task_type=cadence-propose-update) carrying the mutation as `proposal`,
+        tagged [program_id, "cadence"]. Deduped against any OPEN propose-update
+        card already carrying this program_id AND the same op.
+
+    Any other recognized action no-ops this increment (logged to stderr).
     """
     emitters = type_entry.get("emitters") or []
     if not emitters:
@@ -403,15 +584,18 @@ def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
     program_id = fm.get("program_id")
     title = fm.get("title") or program_id or "Program"
     emitted = []
-    open_tags = None  # lazily computed only when an escalate emitter fires
+    open_tags = None       # lazily computed on the first escalate fire
+    open_prop_ops = None   # lazily computed on the first propose-update fire
 
     for em in emitters:
-        if em.get("on") != f"drift:{verdict}":
-            continue
         action = em.get("action")
+        on = em.get("on")
+
         if action == "escalate":
-            # Lazy import on the escalate path only - the pure-verdict path
-            # never imports task_lib. Imported once here, not again per card.
+            if on != f"drift:{verdict}":
+                continue
+            # Lazy import on the emitting path only - the pure-verdict path never
+            # imports task_lib. Imported once here, not again per card.
             import task_lib
             if open_tags is None:
                 open_tags = _open_human_tags(task_lib)
@@ -429,6 +613,32 @@ def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
             # Reflect the just-created card so a second escalate emitter in the
             # same evaluation cannot double-fire for this program.
             open_tags.add(program_id)
+
+        elif action == "propose-update":
+            # The mutation function is the real gate (the `on` string is only a
+            # trigger name). Only advance-phase proposals are produced in 3a.
+            mutation = _propose_phase_advance(fm, type_entry, body or "")
+            if not mutation:
+                continue
+            import task_lib
+            if open_prop_ops is None:
+                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+            if mutation["op"] in open_prop_ops:
+                continue  # an open proposal for the same op already exists -> dedupe
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: advance to {mutation['to']}?",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                card_type="recommendation",
+                task_type="cadence-propose-update",
+                tags=[program_id, "cadence"],
+                proposal=mutation,
+                description=_build_proposal_description(mutation, body or "", program_id),
+            )
+            emitted.append(task_id)
+            open_prop_ops.add(mutation["op"])
+
         elif action:
             sys.stderr.write(
                 f"[cadence] emitter action '{action}' not acted on this "
@@ -438,6 +648,118 @@ def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
     return emitted
 
 
+def _has_adapter_completion(body, anchor=None, since=None):
+    """True when the body carries a RELEVANT, FRESH adapter `completion`.
+
+    A match requires a kind=`completion` observation whose `source` starts with
+    `adapter:` (the tracker-truth grounding shape, e.g.
+    `adapter:project_management:EPIC-204`) AND, when scoping args are given:
+      - `anchor`: the source must reference THIS program's tracker anchor, so an
+        unrelated adapter completion can never advance this program; and
+      - `since` (an ISO date): the observation must be dated on/after it -- the
+        current phase's entry date. You cannot complete a phase's exit before
+        entering the phase, so a stale completion recorded in an earlier phase
+        must not flip a later phase's checkpoint.
+    Such an observation is the deterministic signal the tracker confirms done --
+    enough to flip a still-pending MECHANICAL checkpoint to met and advance.
+    Tolerant: an unparseable body simply yields no match (never raises).
+    """
+    for date, kind, source, _claim in _iter_observations(body):
+        if kind != "completion" or not source.startswith("adapter:"):
+            continue
+        if anchor and anchor not in source:
+            continue
+        if since and (not date or date < since):
+            continue
+        return True
+    return False
+
+
+def _iter_observations(body):
+    """Yield (date, kind, source, claim) for each observation in `body`.
+
+    A thin adapter over program_lib.iter_observations (the canonical, source-
+    exposing reader that now lives in the lower layer for DRY - program_lib never
+    imports reconcile, so the reader had to move down, not up). reconcile's
+    callers only need the 4-tuple, so this drops the `sentinel` field that the
+    program_lib reader also yields. Never raises.
+    """
+    for date, kind, _sentinel, source, claim in program_lib.iter_observations(body):
+        yield (date, kind, source, claim)
+
+
+# _next_phase_id moved to program_lib (the lower layer) so the fact door and the
+# proposal applier share ONE next-phase lookup. reconcile calls program_lib's.
+_next_phase_id = program_lib._next_phase_id
+
+
+def _maybe_advance_phase(fm, type_entry, body, now):
+    """The FACT door: auto-advance a pipeline phase on a mechanically-confirmed
+    exit checkpoint. Returns (body, advanced_record | None).
+
+    Eligibility (all must hold):
+      - the current phase has an `exit_checkpoint` in the type and is not terminal,
+      - that checkpoint exists in `fm["checkpoints"]`,
+      - its `instrument` is mechanical (_instrument_is_mechanical),
+      - AND it is already `status == met` OR a fresh adapter-grounded `completion`
+        observation is present (the tracker confirms done).
+
+    On advance it mutates `fm` in place (flips the checkpoint to met if needed;
+    sets `phase` to the next phase; stamps `phase_entered` for the new phase to
+    today, respecting the existing dict-vs-scalar form) and returns
+    {"from", "to", "checkpoint"}. Human-attested / unclear instruments, terminal
+    phases, and unconfirmed checkpoints return (body, None) -- Task 6 will propose
+    those. Idempotent: after advancing, the new phase's own exit_checkpoint is
+    still pending, so it cannot chain-advance in the same tick.
+    """
+    phase = fm.get("phase")
+    phases = type_entry.get("phases") or []
+    phase_def = next(
+        (p for p in phases if isinstance(p, dict) and p.get("id") == phase), {}
+    )
+    if phase_def.get("terminal"):
+        return body, None
+    cp_id = phase_def.get("exit_checkpoint")
+    if not cp_id:
+        return body, None
+
+    checkpoints = fm.get("checkpoints") or []
+    cp = next(
+        (c for c in checkpoints if isinstance(c, dict) and c.get("id") == cp_id),
+        None,
+    )
+    if cp is None:
+        return body, None
+
+    if not _instrument_is_mechanical(cp.get("instrument")):
+        return body, None  # human-attested / unclear -> Task 6's proposal door
+
+    # An adapter completion only counts when it cites THIS program's tracker anchor
+    # and post-dates entry into the current phase (you cannot complete a phase's
+    # exit before entering it) -- so a stale or unrelated completion never advances.
+    anchor = program_lib.tracker_anchor(fm)
+    since = _phase_entered_date(fm, phase)
+    confirmed = cp.get("status") == "met" or _has_adapter_completion(
+        body, anchor=anchor, since=since.isoformat() if since else None)
+    if not confirmed:
+        return body, None
+
+    next_phase = _next_phase_id(type_entry, phase)
+    if not next_phase:
+        return body, None  # no successor (already the last/terminal phase)
+
+    # The fact, grounded in the adapter observation: the checkpoint is met.
+    if cp.get("status") != "met":
+        cp["status"] = "met"
+
+    # Advance through the SHARED stamp (program_lib._advance_phase_fm) so the
+    # fact door and the proposal applier touch phase/phase_entered identically.
+    today = _to_date(now).isoformat()
+    program_lib._advance_phase_fm(fm, next_phase, today)
+
+    return body, {"from": phase, "to": next_phase, "checkpoint": cp_id}
+
+
 def reconcile_program(program, registry, now=None, force=False, root=None):
     """Run one program's reconcile cycle. Returns a result dict.
 
@@ -445,11 +767,16 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     Computes the verdict, then guards to once-per-cadence-period: if this
     program already ran this period (and not `force`), returns without touching
     the file. On a fresh cycle, evaluates the type's declarative emitters
-    (the escalate card fires here, deduped), writes drift/last_cycle/last_run
-    back into the frontmatter, appends a `## Cycles` log entry recording any
-    emitted card ids, and writes the file ONCE via _write_program_file.
+    (the escalate card fires here, deduped), runs the FACT-door phase advancement
+    (_maybe_advance_phase), writes drift/last_cycle/last_run + any phase change
+    back into the frontmatter, and appends a `## Cycles` log entry (recording any
+    emitted card ids and any advancement) via _write_program_file. When a phase
+    advanced, a second write follows: program_lib.append_observation stamps the
+    source-cited `completion` fact observation (it re-reads + rewrites the file,
+    so it must run AFTER the frontmatter write).
 
-    Returns {"program_id", "verdict", "new_cycle": bool, "emitted": [ids]}.
+    Returns {"program_id", "verdict", "new_cycle": bool, "emitted": [ids],
+    "advanced": {from, to, checkpoint} | None}.
     May raise on a genuinely unwritable file; reconcile_all (Task 4) wraps it.
     """
     now = now or datetime.now(timezone.utc)
@@ -477,25 +804,68 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     type_entry = next(
         (t for t in registry.get("types", []) if t.get("id") == type_id), {}
     )
-    emitted = _evaluate_emitters(program, type_entry, verdict, facts, root=root)
+    emitted = _evaluate_emitters(
+        program, type_entry, verdict, facts, body=body, root=root
+    )
+
+    # The FACT door: mutate `fm` in place (phase + checkpoint) when the current
+    # phase's mechanical exit checkpoint is confirmed done. The mutation and its
+    # cycle note land in the SINGLE _write_program_file below; the grounded fact
+    # OBSERVATION is stamped AFTER that write (append_observation re-reads +
+    # rewrites the file, so it would otherwise lose this frontmatter change).
+    advanced = None
+    if type_entry.get("state_model") == "pipeline":
+        body, advanced = _maybe_advance_phase(fm, type_entry, body, now)
 
     fm["drift"] = verdict
     fm["last_cycle"] = period
     fm["last_run"] = program_lib._now_iso()
-    body = _append_cycle_entry(body, period, verdict, facts, emitted=emitted)
+    body = _append_cycle_entry(
+        body, period, verdict, facts, emitted=emitted, advanced=advanced
+    )
 
     filepath = program.get("filepath")
     if not filepath:
         filepath = os.path.join(
             program_lib._program_dir(root), f"{fm['program_id']}.md"
         )
+    # WRITE 1: phase/checkpoint mutation + verdict + cycle note, in one write.
     program_lib._write_program_file(filepath, fm, body)
+
+    # WRITE 2 (only when we advanced): the source-cited fact observation. This is
+    # a separate call deliberately - append_observation re-reads the just-written
+    # file (now carrying the new phase) and appends under ## Observations,
+    # deduped. Ordering it AFTER write 1 keeps the phase change durable; doing it
+    # before would be clobbered by write 1's frontmatter serialization.
+    if advanced:
+        # append_observation reconstructs the file path from (program_id, root)
+        # via program_lib._program_dir(root) = <root>/datasets/programs. When the
+        # caller passed no `root` but the program carries an absolute filepath
+        # (the test + reconcile_all shape), derive the matching root from that
+        # path so the observation lands on the SAME file we just wrote, never the
+        # real datasets/ dir.
+        obs_root = root
+        if obs_root is None:
+            obs_root = os.path.dirname(os.path.dirname(os.path.dirname(filepath)))
+        program_lib.append_observation(
+            fm["program_id"],
+            kind="completion",
+            sentinel="reconciler",
+            source=f"checkpoint:{advanced['checkpoint']}",
+            claim=(
+                f"Phase advanced {advanced['from']} -> {advanced['to']} "
+                f"on checkpoint {advanced['checkpoint']}."
+            ),
+            date=_to_date(now).isoformat(),
+            root=obs_root,
+        )
 
     return {
         "program_id": fm.get("program_id"),
         "verdict": verdict,
         "new_cycle": True,
         "emitted": emitted,
+        "advanced": advanced,
     }
 
 

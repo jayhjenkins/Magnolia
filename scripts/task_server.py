@@ -1085,6 +1085,77 @@ def handle_quick_add(handler):
 # These power the recommendation/receipt/graduation card types. The git path runs
 # with `git -C PM_OS_DIR`; tests monkeypatch PM_OS_DIR to a throwaway repo.
 
+def _program_id_from_tags(tags):
+    """The program id a cadence card targets: the first tag that isn't 'cadence'.
+
+    The reconciler tags every cadence card [program_id, "cadence"]; the program
+    id is the non-"cadence" tag (a PROG-xxxx). Returns None when absent.
+    """
+    for tag in (tags or []):
+        if tag and tag != "cadence":
+            return tag
+    return None
+
+
+def _apply_cadence_proposal(task_id, t):
+    """Accept a cadence propose-update card: apply the program mutation locally.
+
+    Reads the structured `proposal` mutation + the target program id (the
+    non-"cadence" tag), applies it via program_lib.apply_mutation (a working-tree
+    program-file write, NOT a git commit), completes the proposal card with a
+    comment recording the applied mutation, and spawns an INFORMATIONAL receipt.
+
+    The receipt carries NO revert_commit: a program mutation is not a git revert,
+    and these writes are not git-committed here. It documents non-revertibility
+    the way an autoship receipt does (receipt_kind tells undo_receipt to skip the
+    git path). No external write, no second shipper -- Tier-1.
+    """
+    proposal = t.get("proposal")
+    if not isinstance(proposal, dict) or not proposal.get("op"):
+        raise ValueError("This cadence card carries no applicable proposal to apply.")
+    program_id = _program_id_from_tags(t.get("tags"))
+    if not program_id:
+        raise ValueError("This cadence card names no program to update.")
+
+    try:
+        result = program_lib.apply_mutation(program_id, proposal)
+    except ValueError as e:
+        # An out-of-set / malformed mutation: surface as operator-actionable (409).
+        raise RuntimeError(f"Could not apply this change: {e}")
+    if result.get("applied") is None:
+        # The applier refused (terminal phase, unknown checkpoint, etc.) -- no
+        # mutation happened; tell the operator why rather than spawn a false receipt.
+        raise RuntimeError(
+            f"Could not apply this change: {result.get('reason', 'refused')}.")
+
+    op = result.get("applied")
+    summary = f"Applied {op} to {program_id}."
+    if op == "advance-phase":
+        summary = (f"Advanced {program_id}: phase {result.get('from')} -> "
+                   f"{result.get('to')}.")
+    elif op == "adjust-checkpoint":
+        summary = f"Adjusted checkpoint {result.get('id')} on {program_id}."
+        if result.get("advanced"):
+            summary += (f" Cascaded to advance phase to "
+                        f"{result['advanced'].get('to')}.")
+
+    # Record the applied mutation on the proposal card, then archive it.
+    task_lib.update_task(task_id, comment=f"Accepted: {summary}", actor="human")
+    task_lib.complete_task(task_id, actor="human")
+
+    receipt_id, _ = task_lib.create_task(
+        f"Applied: {t.get('title', '')}", queue="human", domain="ops",
+        creator="agent", card_type="receipt",
+        description=(f"{summary} This is a local program update, not a git change, "
+                     "so there is nothing to revert automatically."))
+    # receipt_kind marks this receipt as non-revertible (no git commit behind it),
+    # so undo_receipt never attempts a git revert on it.
+    task_lib.update_task(receipt_id, changes={
+        "receipt_kind": "cadence-apply", "source_recommendation": task_id,
+        "program_id": program_id})
+    return receipt_id
+
+
 def apply_recommendation(task_id):
     """Accept a recommendation: git apply its patch, commit, spawn a receipt card.
 
@@ -1104,6 +1175,16 @@ def apply_recommendation(task_id):
     for Phase 4 but is another reason Phase 6 should scope the commit.
     """
     t = task_lib.read_task(task_id)["frontmatter"]
+
+    # Cadence branch: a propose-update recommendation carries a structured program
+    # `proposal` mutation (emitted by the reconciler's interpretation door). Accept
+    # applies a LOCAL program-file mutation via program_lib.apply_mutation -- Tier-1,
+    # no git apply/commit, no external write, no second shipper. The action type
+    # rides the existing trust ladder at shadow (propose-only): the reconciler only
+    # ever PROPOSES; this human accept IS the apply.
+    if t.get("task_type") == "cadence-propose-update" or t.get("proposal"):
+        return _apply_cadence_proposal(task_id, t)
+
     patch_path = t.get("patch_path")
     if not patch_path:
         raise ValueError("No patch to apply automatically — apply this change by hand per the card's notes, then dismiss it.")
@@ -1161,6 +1242,16 @@ def undo_receipt(task_id):
         else:
             comment = ("Undo: the external action already happened and cannot be un-sent. "
                        "(No task type recorded on this receipt, so nothing was demoted.)")
+        task_lib.update_task(task_id, changes={"status": "done"}, comment=comment, actor="human")
+        return
+    # Cadence program-apply receipt: the mutation is a local program-file change,
+    # not a git commit, so there is no commit to revert. Undo just dismisses the
+    # receipt with a note (the program file remains; revert by editing it / a new
+    # proposal). Never attempt a git revert (there is no revert_commit).
+    if t.get("receipt_kind") == "cadence-apply":
+        comment = ("Undo: this was a local Cadence program update, not a git change, "
+                   "so there is nothing to revert automatically. The program file "
+                   "remains as applied.")
         task_lib.update_task(task_id, changes={"status": "done"}, comment=comment, actor="human")
         return
     rev = t.get("revert_commit")

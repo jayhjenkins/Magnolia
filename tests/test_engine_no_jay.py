@@ -2,6 +2,7 @@ import os, re, glob
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TARGETS = (
     glob.glob(os.path.join(ROOT, "scripts", "workers", "*.md")) +
+    glob.glob(os.path.join(ROOT, "scripts", "sentinels", "*.md")) +
     glob.glob(os.path.join(ROOT, ".claude", "skills", "**", "*.md"), recursive=True) +
     glob.glob(os.path.join(ROOT, ".claude", "commands", "*.md")) +
     glob.glob(os.path.join(ROOT, "scripts", "adapters", "**", "*.py"), recursive=True) +

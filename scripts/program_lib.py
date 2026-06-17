@@ -10,6 +10,7 @@ owns the program file format and its create/read/list operations.
 Mirrors scripts/task_lib.py - one implementation, zero drift.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -277,6 +278,57 @@ _OBS_HEADER_RE = re.compile(
     r"(?:[-–—]\s*(?:sentinel:(?P<sentinel>\S+))?\s*(?:\[(?P<kind>[^\]]+)\])?)?\s*$"
 )
 
+# The Observations section heading (the anchor append_observation inserts under).
+_OBS_HEADING = "## Observations"
+# Line-anchored match for a real `## Observations` heading (not a heading-shaped
+# substring inside prose) -- used for the presence check so the writer never
+# splices an entry into the middle of a paragraph that merely mentions the text.
+_OBS_HEADING_RE = re.compile(r"^## Observations\s*$", re.MULTILINE)
+
+# Closed observation-kind enum. Sentinels (later tasks) may only emit one of
+# these; append_observation rejects anything outside the set. Kept ASCII-safe.
+OBSERVATION_KINDS = frozenset({
+    "status-signal",
+    "date-change",
+    "completion",
+    "commitment",
+    "risk",
+    "metric",
+    "capture",
+    "blocker",
+})
+
+
+def tracker_anchor(fm):
+    """Return the project-management tracker ref for a program, or None.
+
+    The shared binding-resolution helper (the I1 seam): seed programs carry the
+    tracker ref under `bindings[]` as `{role: truth, kind: project_management,
+    anchor: "EPIC-204"}`. Reads the first such binding's `anchor`; falls back to
+    the legacy `links.tracker_epic`; else None. Defensive against missing or
+    malformed shapes (bindings not a list, entries not dicts, links not a dict) -
+    never raises. Both sentinel_runner (tracker-truth) and the reconciler (fact
+    door) resolve the tracker through here so they match the real seeds.
+    """
+    fm = fm or {}
+    if not isinstance(fm, dict):
+        return None
+    bindings = fm.get("bindings")
+    if isinstance(bindings, list):
+        for b in bindings:
+            if not isinstance(b, dict):
+                continue
+            if b.get("role") == "truth" and b.get("kind") == "project_management":
+                anchor = b.get("anchor")
+                if anchor:
+                    return str(anchor)
+    links = fm.get("links")
+    if isinstance(links, dict):
+        epic = links.get("tracker_epic")
+        if epic:
+            return str(epic)
+    return None
+
 
 def load_registry(root=None):
     """Read and parse cadence/programtypes/registry.json from the engine repo.
@@ -365,6 +417,455 @@ def _parse_observations(body):
     return entries
 
 
+def iter_observations(body):
+    """Yield (date, kind, sentinel, source, claim) for each `## Observations` entry.
+
+    The source-exposing reader: it surfaces the header date, sentinel, and kind
+    (via _OBS_HEADER_RE) plus the source and claim lines (the source is the line
+    _parse_observations drops). reconcile imports this (it is the lower layer);
+    program_lib never imports reconcile, so this lives here for DRY. Missing
+    fields default to "". Never raises.
+    """
+    if not body:
+        return
+    lines = body.splitlines()
+    section = []
+    in_section = False
+    for line in lines:
+        if line.strip().startswith("## "):
+            if in_section:
+                break
+            in_section = line.strip()[3:].strip().lower() == "observations"
+            continue
+        if in_section:
+            section.append(line)
+
+    pending = None
+    for line in section:
+        m = _OBS_HEADER_RE.match(line.strip())
+        if m:
+            if pending is not None:
+                yield pending
+            date = (m.group("date") or "").strip()
+            kind = (m.group("kind") or "").strip()
+            sentinel = (m.group("sentinel") or "").strip()
+            pending = (date, kind, sentinel, "", "")
+            continue
+        if pending is None:
+            continue
+        stripped = line.strip()
+        low = stripped.lower()
+        if low.startswith("source:") and not pending[3]:
+            source = stripped[len("source:"):].strip()
+            pending = (pending[0], pending[1], pending[2], source, pending[4])
+        elif low.startswith("claim:") and not pending[4]:
+            claim = stripped[len("claim:"):].strip()
+            pending = (pending[0], pending[1], pending[2], pending[3], claim)
+    if pending is not None:
+        yield pending
+
+
+def _split_at_next_section(text):
+    """Split `text` at the next top-level `## ` heading.
+
+    Returns (section, rest): `section` is the content up to the next top-level
+    heading line; `rest` is that heading and everything after it (or "" when no
+    following section exists). `### ` entry sub-headers are NOT top-level, so
+    they stay in `section`.
+
+    Replicated from reconcile._split_at_next_section (NOT imported): program_lib
+    is the lower layer — reconcile imports program_lib, never the reverse. The
+    two copies are deliberately identical; keep them in sync.
+    """
+    idx = text.find("\n## ")
+    if idx == -1:
+        return text, ""
+    return text[:idx], text[idx + 1:]
+
+
+def _obs_hash(kind, source, claim):
+    """Content hash over (kind, source, claim) for observation dedupe.
+
+    Sources/claims are stripped before hashing so trivial whitespace differences
+    do not defeat the dedupe. Sentinel name, date, and confidence are NOT part of
+    the identity: the same factual claim from the same source is one observation
+    no matter who saw it or when.
+    """
+    payload = "\x00".join((kind, source.strip(), claim.strip()))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _existing_obs_hashes(body):
+    """Return the set of content hashes for observations already on `body`.
+
+    Parses the `## Observations` section header-by-header, reading each entry's
+    `kind` (from the header), `source:` line, and `claim:` line, then hashing
+    them the same way _obs_hash does. Tolerant: an entry missing a source/claim
+    simply contributes no hash. Used only for dedupe, so a miss errs toward
+    appending (never toward silently dropping a real observation).
+    """
+    if not body:
+        return set()
+    lines = body.splitlines()
+    section = []
+    in_section = False
+    for line in lines:
+        if line.strip().startswith("## "):
+            if in_section:
+                break
+            in_section = line.strip()[3:].strip().lower() == "observations"
+            continue
+        if in_section:
+            section.append(line)
+
+    hashes = set()
+    kind = source = claim = None
+
+    def _flush():
+        if kind and source is not None and claim is not None:
+            hashes.add(_obs_hash(kind, source, claim))
+
+    for line in section:
+        m = _OBS_HEADER_RE.match(line.strip())
+        if m:
+            _flush()
+            kind = (m.group("kind") or "").strip() or None
+            source = claim = None
+            continue
+        stripped = line.strip()
+        low = stripped.lower()
+        if low.startswith("source:") and source is None:
+            source = stripped[len("source:"):].strip()
+        elif low.startswith("claim:") and claim is None:
+            claim = stripped[len("claim:"):].strip()
+    _flush()
+    return hashes
+
+
+def append_observation(program_id, *, kind, sentinel, source, claim,
+                       date=None, confidence=None, root=None):
+    """Append a structured observation under a program's `## Observations`.
+
+    The deterministic, validated write path for the Cadence interpretation
+    engine: sentinels (LLM agents) return observation records and this function
+    — never the LLM — appends them to the program file. Append-only (invariant
+    #6): prior observations are never rewritten or dropped.
+
+    Args (keyword-only after program_id):
+        kind: one of OBSERVATION_KINDS (else ValueError).
+        sentinel: name of the sentinel that produced the observation.
+        source: non-empty citation of where the claim came from (else ValueError).
+        claim: non-empty one-line factual claim (else ValueError).
+        date: ISO date string for the entry header; defaults to today (UTC).
+        confidence: optional numeric confidence; emitted only when provided.
+        root: PM-OS datasets root (defaults to the engine repo's datasets/).
+
+    Dedupe: identical (kind, stripped source, stripped claim) already present on
+    the program is a no-op — returns False and leaves the file untouched. On a
+    successful append returns True.
+
+    Entry format (ASCII hyphen in the header, invariant #8 — never an em-dash):
+
+        ### <date> - sentinel:<sentinel> [<kind>]
+        source: <source>
+        claim: <claim>
+        confidence: <n>      (only when confidence is provided)
+    """
+    if kind not in OBSERVATION_KINDS:
+        raise ValueError(
+            f"kind must be one of {sorted(OBSERVATION_KINDS)}, got: {kind!r}")
+    if not source or not source.strip():
+        raise ValueError("source must be non-empty")
+    if not claim or not claim.strip():
+        raise ValueError("claim must be non-empty")
+
+    prog = read_program(program_id, root=root)
+    body = prog["body"] or ""
+    filepath = prog["filepath"]
+
+    # Content-hash dedupe over (kind, source, claim).
+    if _obs_hash(kind, source, claim) in _existing_obs_hashes(body):
+        return False
+
+    entry_date = date or _now_iso()[:10]
+    entry_lines = [
+        f"### {entry_date} - sentinel:{sentinel} [{kind}]",
+        f"source: {source.strip()}",
+        f"claim: {claim.strip()}",
+    ]
+    if confidence is not None:
+        # Uniform 2-decimal rendering so the ledger stays tidy regardless of the
+        # caller's float precision; non-numeric confidence falls back to str().
+        try:
+            entry_lines.append(f"confidence: {float(confidence):.2f}")
+        except (TypeError, ValueError):
+            entry_lines.append(f"confidence: {confidence}")
+    entry = "\n".join(entry_lines) + "\n"
+
+    # Both this insert and _existing_obs_hashes assume a single `## Observations`
+    # section (the canonical program format); the heading-anchored splice below
+    # uses the last heading and dedupe reads the first -- aligned only when there
+    # is one, which the format guarantees.
+    if not _OBS_HEADING_RE.search(body):
+        # No Observations section: create one at the end of the body.
+        base = body.rstrip("\n")
+        new_body = (f"{base}\n\n{_OBS_HEADING}\n\n{entry}"
+                    if base else f"{_OBS_HEADING}\n\n{entry}")
+    else:
+        # Anchor on the LAST Observations heading. The head (everything up to and
+        # including the heading) is preserved verbatim; the trailing text is split
+        # at the next top-level `## ` heading so a following `## Cycles` (and its
+        # entries) is preserved verbatim. The new entry lands at the end of the
+        # Observations content, before that following section. Mirrors
+        # reconcile._append_cycle_entry.
+        head, sep, tail = body.rpartition(_OBS_HEADING)
+        section, rest = _split_at_next_section(tail)
+        section = section.rstrip("\n")
+        if rest:
+            new_body = f"{head}{sep}{section}\n\n{entry}\n{rest}"
+        else:
+            new_body = f"{head}{sep}{section}\n\n{entry}"
+
+    _write_program_file(filepath, prog["frontmatter"], new_body)
+    return True
+
+
+# ─── Phase advancement core (shared by the fact door + the proposal applier) ──
+#
+# _next_phase_id + _advance_phase_fm are the ONE place the engine advances a
+# pipeline phase. Both the reconciler's FACT door (reconcile._maybe_advance_phase)
+# and the human-accept PROPOSAL applier (apply_mutation, below) advance through
+# here, so an auto-advance and a human-accepted advance touch the frontmatter
+# IDENTICALLY: the same next-phase lookup and the same dict-vs-scalar
+# phase_entered stamping. program_lib is the LOWER layer (reconcile imports
+# program_lib, never the reverse), so this shared logic lives here and reconcile
+# calls in.
+
+
+def _next_phase_id(type_entry, phase):
+    """Return the id of the phase AFTER `phase` in the type's order, or None.
+
+    None when `phase` is unknown, is the last phase, or has no successor. The
+    canonical next-phase lookup for BOTH advancement doors (DRY).
+    """
+    phases = (type_entry or {}).get("phases") or []
+    ids = [p.get("id") for p in phases if isinstance(p, dict)]
+    try:
+        i = ids.index(phase)
+    except ValueError:
+        return None
+    if i + 1 >= len(ids):
+        return None
+    return ids[i + 1]
+
+
+def _advance_phase_fm(fm, next_phase, today):
+    """Mutate `fm` in place to enter `next_phase` as of `today` (ISO date string).
+
+    Sets `fm["phase"]` and stamps `phase_entered` for the new phase, PRESERVING
+    the existing dict-vs-scalar form: a dict {phase_id: date} gets the new phase
+    keyed in (prior entries kept); a scalar (the brief's form = the date the
+    CURRENT phase was entered) is overwritten with the new entry date; a missing
+    value is initialized to the scalar form. The single shared stamp used by the
+    fact door and the proposal applier so they never drift.
+    """
+    fm["phase"] = next_phase
+    entered = fm.get("phase_entered")
+    if isinstance(entered, dict):
+        entered[next_phase] = today
+    else:
+        fm["phase_entered"] = today  # scalar form = the current phase's entry date
+
+
+# ─── Proposal applier (the closed mutation set behind a human accept) ─────────
+#
+# apply_mutation is the human-side counterpart to the reconciler's fact door:
+# when a human ACCEPTS a Cadence propose-update card, the program mutation rides
+# here. Tier-1: a LOCAL program-file write only -- no external write, no git
+# commit, no second shipper. Closed set: advance-phase + adjust-checkpoint;
+# anything else is refused (ValueError) with NO mutation. Append-only (invariant
+# #6): an advance appends a completion observation and never deletes. ASCII-safe
+# runtime strings (invariant #8).
+
+_MUTATION_OPS = frozenset({"advance-phase", "adjust-checkpoint"})
+
+
+def apply_mutation(program_id, mutation, root=None):
+    """Apply a closed-set program mutation. Returns a small result dict.
+
+    mutation is a dict carrying an `op`:
+      - {"op": "advance-phase", "to": <phase>, "checkpoint": <cp>?, "from": <phase>?}
+        Sets `phase` to `to` (refusing to advance past a terminal phase), stamps
+        `phase_entered` for the new phase to today (dict-vs-scalar form preserved),
+        and appends a `completion` fact observation (sentinel=reconciler;
+        source=`checkpoint:<cp>` when a checkpoint is carried, else `proposal`).
+      - {"op": "adjust-checkpoint", "id": <cp_id>, "due": <iso>?, "status": "met"?}
+        Changes that checkpoint's `due` and/or `status`. Setting the CURRENT
+        phase's exit_checkpoint to met cascades to advance the phase via the same
+        advance path.
+
+    An out-of-set or missing `op` raises ValueError with NO mutation. An
+    adjust-checkpoint naming an unknown checkpoint id is refused (no mutation,
+    returns a refused status). Append-only, ASCII-safe.
+
+    Returns one of:
+      {"applied": "advance-phase", "program_id", "from", "to", "checkpoint"}
+      {"applied": "adjust-checkpoint", "program_id", "id", "advanced": {...}|None}
+      {"applied": None, "status": "refused", "reason": <ascii>, "program_id"}
+    """
+    if not isinstance(mutation, dict):
+        raise ValueError("mutation must be a dict carrying an 'op'")
+    op = mutation.get("op")
+    if op not in _MUTATION_OPS:
+        raise ValueError(
+            f"op must be one of {sorted(_MUTATION_OPS)}, got: {op!r}")
+
+    registry = load_registry()
+    prog = read_program(program_id, root=root)
+    fm = prog["frontmatter"]
+    type_id = fm.get("type")
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == type_id), {}
+    )
+
+    if op == "advance-phase":
+        return _apply_advance_phase(program_id, mutation, fm, type_entry,
+                                    prog["filepath"], prog["body"], root)
+    return _apply_adjust_checkpoint(program_id, mutation, fm, type_entry,
+                                    prog["filepath"], prog["body"], root)
+
+
+def _terminal_phase(type_entry, phase):
+    """True when `phase` is declared terminal in the type (or has no successor)."""
+    phases = (type_entry or {}).get("phases") or []
+    phase_def = next(
+        (p for p in phases if isinstance(p, dict) and p.get("id") == phase), {}
+    )
+    return bool(phase_def.get("terminal"))
+
+
+def _apply_advance_phase(program_id, mutation, fm, type_entry, filepath, body, root):
+    """advance-phase: stamp the new phase + append a completion fact observation.
+
+    Idempotent + non-skipping. When the mutation names a target `to`:
+      - if the program is ALREADY at `to`, this is a no-op success (a retried
+        accept after a partial failure must NOT advance a second time);
+      - it advances only when the current phase is exactly the predecessor of `to`
+        (so a stale proposal -- the program moved on since it was made -- is
+        refused, never advanced to an unintended phase).
+    With no `to`, it advances to the registry's next phase. Refuses (no mutation)
+    when the current phase is terminal or has no successor. The completion
+    observation cites the carried checkpoint or, absent one, `proposal`. Writes the
+    frontmatter change FIRST, then appends the observation (append_observation
+    re-reads + rewrites the file, so it must run after the frontmatter write,
+    mirroring reconcile_program's two-write order).
+    """
+    current = fm.get("phase")
+    to = mutation.get("to")
+    # Idempotent: already at the proposed target -> the mutation was already
+    # applied (e.g. a retried accept). No second advance.
+    if to and current == to:
+        return {"applied": None, "status": "noop",
+                "reason": f"already at {to}", "program_id": program_id,
+                "from": current, "to": to}
+    if _terminal_phase(type_entry, current):
+        return {"applied": None, "status": "refused",
+                "reason": "phase is terminal", "program_id": program_id}
+    next_phase = _next_phase_id(type_entry, current)
+    if not next_phase:
+        return {"applied": None, "status": "refused",
+                "reason": "no successor phase", "program_id": program_id}
+    # A `to` must be the immediate successor of the current phase; if it is not,
+    # the proposal is stale (the program advanced since it was made) -> refuse
+    # rather than advance to an unintended phase.
+    if to and to != next_phase:
+        return {"applied": None, "status": "refused",
+                "reason": f"proposal target {to} is not the phase after {current}",
+                "program_id": program_id}
+    target = to or next_phase
+
+    today = _now_iso()[:10]
+    # Accepting an advance past this phase IS the human attesting its exit
+    # checkpoint -> mark the carried checkpoint met, mirroring the fact door (which
+    # only advances once the checkpoint is met). Keeps a program from sitting in
+    # `planning` with `discovery-exit` still pending.
+    checkpoint = mutation.get("checkpoint")
+    if checkpoint:
+        for c in (fm.get("checkpoints") or []):
+            if isinstance(c, dict) and c.get("id") == checkpoint:
+                c["status"] = "met"
+                break
+    _advance_phase_fm(fm, target, today)
+    _write_program_file(filepath, fm, body)
+
+    source = f"checkpoint:{checkpoint}" if checkpoint else "proposal"
+    append_observation(
+        program_id, kind="completion", sentinel="reconciler", source=source,
+        claim=f"Phase advanced {current} -> {target}.", date=today, root=root)
+
+    return {"applied": "advance-phase", "program_id": program_id,
+            "from": current, "to": target, "checkpoint": checkpoint}
+
+
+def _apply_adjust_checkpoint(program_id, mutation, fm, type_entry, filepath, body, root):
+    """adjust-checkpoint: change a checkpoint's due and/or status.
+
+    Setting the CURRENT phase's exit_checkpoint to met cascades to advance the
+    phase through the same advance path (so an accepted "mark met" and an
+    accepted "advance" land identically). An unknown checkpoint id is refused.
+    """
+    cp_id = mutation.get("id")
+    checkpoints = fm.get("checkpoints") or []
+    cp = next(
+        (c for c in checkpoints if isinstance(c, dict) and c.get("id") == cp_id),
+        None,
+    )
+    if cp is None:
+        return {"applied": None, "status": "refused",
+                "reason": f"no checkpoint {cp_id!r}", "program_id": program_id}
+
+    # Refuse a no-op adjust (neither a new due nor a met flag) rather than report a
+    # false success and needlessly rewrite the file.
+    has_due = mutation.get("due") is not None
+    if not has_due and mutation.get("status") != "met":
+        return {"applied": None, "status": "refused",
+                "reason": "adjust-checkpoint needs a due or status:met",
+                "program_id": program_id}
+
+    if "due" in mutation and mutation["due"] is not None:
+        cp["due"] = mutation["due"]
+    set_met = mutation.get("status") == "met"
+    if set_met:
+        cp["status"] = "met"
+
+    # Cascade: met on the CURRENT phase's exit checkpoint advances the phase.
+    advanced = None
+    current = fm.get("phase")
+    phases = (type_entry or {}).get("phases") or []
+    phase_def = next(
+        (p for p in phases if isinstance(p, dict) and p.get("id") == current), {}
+    )
+    cascade = (set_met and phase_def.get("exit_checkpoint") == cp_id
+               and not _terminal_phase(type_entry, current))
+    next_phase = _next_phase_id(type_entry, current) if cascade else None
+
+    today = _now_iso()[:10]
+    if next_phase:
+        _advance_phase_fm(fm, next_phase, today)
+        advanced = {"from": current, "to": next_phase, "checkpoint": cp_id}
+
+    _write_program_file(filepath, fm, body)
+    if advanced:
+        append_observation(
+            program_id, kind="completion", sentinel="reconciler",
+            source=f"checkpoint:{cp_id}",
+            claim=f"Phase advanced {current} -> {next_phase}.",
+            date=today, root=root)
+
+    return {"applied": "adjust-checkpoint", "program_id": program_id,
+            "id": cp_id, "advanced": advanced}
+
+
 def _build_series(series):
     """Port of the prototype buildSeries(p) math — geometry only, no stroke.
 
@@ -435,15 +936,35 @@ def _jsonable(obj):
     return obj
 
 
-def render_view(program, registry, needs_you=0):
+def _project_observations(body):
+    """Project the body's `## Observations` into the richer ledger shape.
+
+    A list of {date, kind, sentinel, source, claim} dicts, most-recent-first
+    (newest entries are appended, so reverse), built from the source-exposing
+    iter_observations. Unlike `activity` this keeps the source citation. DATA
+    ONLY (no styling); ASCII/token-agnostic. Degrades to [] when the section is
+    absent. Entries without a claim are dropped (mirrors _parse_observations).
+    """
+    entries = [
+        {"date": date, "kind": kind, "sentinel": sentinel,
+         "source": source, "claim": claim}
+        for date, kind, sentinel, source, claim in iter_observations(body)
+        if claim
+    ]
+    entries.reverse()  # most-recent-first
+    return entries
+
+
+def render_view(program, registry, needs_you=0, emissions=None):
     """Map a program dict (frontmatter + body) into the render contract.
 
     `program` is the shape returned by read_program (keys: frontmatter, body).
     `registry` is the parsed registry dict (from load_registry). `needs_you` is
-    the count of open Now (human-queue) cards linked to this program; the caller
-    (build_cadence_payload) supplies it, defaulting to 0 for unit-test/call-site
-    simplicity. Returns DATA ONLY — no styling. The client derives all tone/color
-    from drift/age/status.
+    the count of open Now (human-queue) cards linked to this program; `emissions`
+    is the program's emission history (escalate/propose-update/receipt cards with
+    their outcomes), both supplied by the caller (build_cadence_payload) and
+    defaulting (0 / []) for unit-test/call-site simplicity. Returns DATA ONLY —
+    no styling. The client derives all tone/color from drift/age/status.
     """
     fm = program.get("frontmatter", {}) or {}
     body = program.get("body", "") or ""
@@ -468,6 +989,10 @@ def render_view(program, registry, needs_you=0):
         "family": family,
         "type_label": type_label,
         "activity": _parse_observations(body),
+        # The richer ledger: same entries as `activity` but keeping the source
+        # citation + sentinel/kind that `activity` drops. `activity` stays for
+        # existing readers; `observations` is the additive, source-cited view.
+        "observations": _project_observations(body),
         # Canonical checkpoint keys are {id, label, due, instrument, status}.
         "checkpoints": [
             {
@@ -492,6 +1017,9 @@ def render_view(program, registry, needs_you=0):
         "last_run": fm.get("last_run"),
         # Count of open Now cards linked to this program (supplied by the caller).
         "needs_you": needs_you,
+        # Emission history (escalate/propose-update/receipt cards + outcomes),
+        # supplied by the caller; the client owns the outcome-word coloring.
+        "emissions": emissions or [],
     }
 
     if state_model == "pipeline":
@@ -553,6 +1081,118 @@ def render_view(program, registry, needs_you=0):
     return _jsonable(vm)
 
 
+# The closed set of emission kinds surfaced in the row expansion + the
+# status-word normalization. A card's raw queue status (open/done/cancelled)
+# becomes a UI outcome word; done means different things by kind (a proposal is
+# approved, an escalate/receipt is sent). All ASCII (invariant #8).
+_EMISSION_STATUS = {
+    "open": {"_default": "pending"},
+    "done": {"propose-update": "approved", "_default": "sent"},
+    "completed": {"propose-update": "approved", "_default": "sent"},
+    "cancelled": {"_default": "declined"},
+}
+
+
+def _normalize_emission_status(raw_status, kind):
+    """Map a card's queue status + emission kind to a UI outcome word.
+
+    open -> pending; done/completed -> approved (proposals) / sent (escalate,
+    receipt); cancelled -> declined. An unknown status passes through as-is so
+    the row can still show something legible. ASCII only.
+    """
+    by_kind = _EMISSION_STATUS.get(raw_status)
+    if not by_kind:
+        return raw_status or "pending"
+    return by_kind.get(kind, by_kind["_default"])
+
+
+def _classify_emission(t, prog_id_re):
+    """Classify a task dict into (program_id, kind) or (None, None).
+
+    Derivation (closed kind set {escalate, propose-update, receipt}):
+      - task_type == cadence-propose-update -> propose-update (program_id = its
+        PROG-XXXX tag);
+      - card_type == receipt AND receipt_kind == cadence-apply -> receipt
+        (program_id = its `program_id` field; the accept handler stamps that,
+        not a tag);
+      - else a cadence-tagged card carrying a PROG-XXXX tag -> escalate.
+    Anything else -> (None, None). Tolerant of missing fields; never raises.
+    """
+    tags = [str(x) for x in (t.get("tags") or [])]
+    prog_tag = next((x for x in tags if prog_id_re.match(x)), None)
+
+    if t.get("task_type") == "cadence-propose-update" and prog_tag:
+        return prog_tag, "propose-update"
+    if t.get("card_type") == "receipt" and t.get("receipt_kind") == "cadence-apply":
+        pid = t.get("program_id")
+        if pid and prog_id_re.match(str(pid)):
+            return str(pid), "receipt"
+        return None, None
+    if "cadence" in tags and prog_tag:
+        return prog_tag, "escalate"
+    return None, None
+
+
+def _collect_emissions(task_lib, prog_id_re):
+    """Build {program_id: [emission entries]} across open + closed cadence cards.
+
+    One scan of open human cards (escalate + propose-update, tagged) plus the
+    archived/closed cards (completed receipts, cancelled/approved proposals) via
+    list_archived. Each entry is {id, kind, title, status, created}: `kind` in
+    {escalate, propose-update, receipt}, `status` normalized to a UI outcome
+    word. The receipt's program_id lives in a card FIELD (not a tag) and is not
+    projected by the light listings, so closed/receipt cards are re-read for it.
+    Newest-first per program. Caller wraps this in try/except (a task failure ->
+    {}); this never raises on a single unreadable card.
+    """
+    by_program = {}
+
+    def _add(pid, entry):
+        by_program.setdefault(pid, []).append(entry)
+
+    # Open human cards: escalate + propose-update carry their program_id as a tag,
+    # so the light list_tasks projection is enough to classify them.
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        pid, kind = _classify_emission(t, prog_id_re)
+        if not pid:
+            continue
+        _add(pid, {
+            "id": t.get("id"), "kind": kind, "title": t.get("title") or "",
+            "status": _normalize_emission_status(t.get("status") or "open", kind),
+            "created": t.get("created"),
+        })
+
+    # Closed cards (completed receipts, accepted/declined proposals) live in the
+    # archive. list_archived's light projection lacks tags/card_type/program_id,
+    # so re-read each candidate's frontmatter to classify it (the same re-read
+    # pattern the reconciler's propose-update dedupe uses).
+    for a in task_lib.list_archived():
+        try:
+            fm = task_lib.read_task(a["id"])["frontmatter"]
+        except Exception:
+            continue
+        cand = {
+            "id": fm.get("id"), "title": fm.get("title") or "",
+            "status": fm.get("status"), "created": fm.get("created"),
+            "tags": fm.get("tags") or [], "task_type": fm.get("task_type"),
+            "card_type": fm.get("card_type"), "receipt_kind": fm.get("receipt_kind"),
+            "program_id": fm.get("program_id"),
+        }
+        pid, kind = _classify_emission(cand, prog_id_re)
+        if not pid:
+            continue
+        _add(pid, {
+            "id": cand["id"], "kind": kind, "title": cand["title"],
+            "status": _normalize_emission_status(cand["status"] or "done", kind),
+            "created": cand["created"],
+        })
+
+    # Newest-first per program (created descending; missing dates sort last).
+    for pid in by_program:
+        by_program[pid].sort(key=lambda e: e.get("created") or "", reverse=True)
+    return by_program
+
+
 def build_cadence_payload(root=None):
     """Assemble the Cadence tab payload: active programs grouped by family.
 
@@ -564,13 +1204,13 @@ def build_cadence_payload(root=None):
     registry = load_registry()
     programs = list_programs(status="active", root=root)
 
-    # Count open Now (human-queue) cards per program: a single pass over open
-    # human tasks, tallying any tag shaped like a program id (PROG-XXXX). The
-    # emitter tags an escalate card [program_id, "cadence"], so each card counts
-    # once toward its program. task_lib is imported lazily (like cron_lib) to
-    # avoid a hard coupling at module load, and the whole listing is wrapped in
-    # try/except so a task-system failure NEVER breaks the payload (counts -> 0).
+    # ONE pass over the task system per program-row build computes BOTH the open
+    # needs_you count AND the per-program emission history. task_lib is imported
+    # lazily (like cron_lib) to avoid a hard coupling at module load; the whole
+    # block is wrapped in try/except so a task-system failure NEVER breaks the
+    # payload (counts -> 0, emissions -> []).
     counts = {}
+    emissions = {}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import task_lib
@@ -583,13 +1223,19 @@ def build_cadence_payload(root=None):
                 if prog_id_re.match(str(tag)) and tag not in seen:
                     counts[tag] = counts.get(tag, 0) + 1
                     seen.add(tag)
+        emissions = _collect_emissions(task_lib, prog_id_re)
     except Exception:
-        counts = {}  # task system unavailable — every needs_you defaults to 0
+        counts = {}        # task system unavailable — every needs_you defaults to 0
+        emissions = {}     # ...and every emission list defaults to []
 
     rendered = []
     for p in programs:
         program_id = (p.get("frontmatter") or {}).get("program_id") or p.get("program_id")
-        rendered.append(render_view(p, registry, needs_you=counts.get(program_id, 0)))
+        rendered.append(render_view(
+            p, registry,
+            needs_you=counts.get(program_id, 0),
+            emissions=emissions.get(program_id, []),
+        ))
 
     families = []
     for fam in sorted(

@@ -29,8 +29,13 @@ def _isolated_task_queues(tmp_path_factory, monkeypatch):
         (tasks_dir / q).mkdir(parents=True, exist_ok=True)
     counter = tasks_dir / "_counter"
     counter.write_text("1")
+    archive = tasks_dir / "_archive"
+    archive.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(task_lib, "TASKS_DIR", str(tasks_dir))
     monkeypatch.setattr(task_lib, "COUNTER_FILE", str(counter))
+    # ARCHIVE_DIR is computed at import from the ORIGINAL TASKS_DIR, so patch it
+    # too -- otherwise any completed card would leak into the real archive.
+    monkeypatch.setattr(task_lib, "ARCHIVE_DIR", str(archive))
 
 
 # A fixed "now" used everywhere so verdicts are deterministic.
@@ -870,3 +875,317 @@ def test_main_accepts_trailing_z_in_now(tmp_path, monkeypatch):
 def test_main_without_all_returns_nonzero(capsys):
     rc = reconcile.main([])
     assert rc != 0
+
+
+# ─── instrument normalization (Task 5, I2) ───────────────────────────────────
+
+def test_instrument_is_mechanical_pm_tracker():
+    assert reconcile._instrument_is_mechanical("the PM tracker") is True
+
+
+def test_instrument_is_mechanical_pendo():
+    assert reconcile._instrument_is_mechanical("Pendo") is True
+
+
+def test_instrument_is_mechanical_deterministic_check():
+    assert reconcile._instrument_is_mechanical("a deterministic check") is True
+
+
+def test_instrument_is_mechanical_human_attestation_is_false():
+    assert reconcile._instrument_is_mechanical("human attestation") is False
+
+
+def test_instrument_is_mechanical_empty_is_false():
+    assert reconcile._instrument_is_mechanical("") is False
+    assert reconcile._instrument_is_mechanical(None) is False
+
+
+def test_instrument_is_mechanical_ambiguous_is_false():
+    assert reconcile._instrument_is_mechanical("weird thing") is False
+
+
+def test_instrument_is_mechanical_manual_is_false():
+    assert reconcile._instrument_is_mechanical("a manual review") is False
+
+
+# ─── checkpoint-driven phase advancement (Task 5, the fact door) ─────────────
+#
+# roadmap-initiative phases now carry exit_checkpoint: discovery -> discovery-exit,
+# execution -> ship. The fact door advances the phase when that checkpoint is
+# mechanically confirmed done.
+
+def _seed_discovery_program(root, instrument, status="met", last_cycle=OTHER_PERIOD,
+                            extra_obs=None):
+    """A roadmap-initiative parked in `discovery` with a discovery-exit checkpoint."""
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Advance me",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "discovery",
+            "phase_entered": {"discovery": "2026-05-01"},
+            "checkpoints": [
+                {"id": "discovery-exit", "label": "Discovery exit",
+                 "due": "2026-09-01", "instrument": instrument, "status": status},
+            ],
+            "last_cycle": last_cycle,
+        },
+        root=root,
+    )
+    if extra_obs:
+        pl.append_observation(program_id, root=root, **extra_obs)
+    return program_id
+
+
+def test_fact_door_advances_mechanical_met_checkpoint(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(root, instrument="the PM tracker", status="met")
+    program = pl.read_program(pid, root=root)
+
+    reconcile.reconcile_program(program, _registry(), now=NOW)
+
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "planning"          # discovery -> next
+    # phase_entered keeps the dict form and stamps the new phase with today.
+    assert isinstance(fm["phase_entered"], dict)
+    assert fm["phase_entered"]["planning"] == NOW.isoformat()
+    assert fm["phase_entered"]["discovery"] == "2026-05-01"  # prior key preserved
+
+    body = pl.read_program(pid, root=root)["body"]
+    # A completion observation citing the checkpoint was stamped.
+    assert "[completion]" in body
+    assert "discovery -> planning" in body
+    assert "discovery-exit" in body
+    # The cycle note records the advancement.
+    cycles = body.split("## Cycles", 1)[1]
+    assert "discovery -> planning" in cycles
+
+
+def test_fact_door_does_not_advance_human_attested(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(root, instrument="human attestation", status="met")
+    program = pl.read_program(pid, root=root)
+
+    reconcile.reconcile_program(program, _registry(), now=NOW)
+
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "discovery"   # NOT advanced (Task 6 will propose)
+    body = pl.read_program(pid, root=root)["body"]
+    assert "discovery -> planning" not in body
+
+
+def test_fact_door_advances_on_adapter_completion_observation(tmp_path):
+    root = str(tmp_path)
+    # Checkpoint mechanical but still PENDING; a fresh adapter-grounded completion
+    # observation flips it to met and advances.
+    pid = _seed_discovery_program(
+        root, instrument="the PM tracker", status="pending",
+        extra_obs=dict(kind="completion", sentinel="tracker-truth",
+                       source="adapter:project_management:EPIC-204",
+                       claim="Tracker reports status 'Done'."),
+    )
+    program = pl.read_program(pid, root=root)
+
+    reconcile.reconcile_program(program, _registry(), now=NOW)
+
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "planning"
+    # The checkpoint was flipped to met (the fact, grounded in the adapter obs).
+    cp = next(c for c in fm["checkpoints"] if c["id"] == "discovery-exit")
+    assert cp["status"] == "met"
+
+
+def test_fact_door_ignores_stale_adapter_completion(tmp_path):
+    root = str(tmp_path)
+    # A completion dated BEFORE the current phase was entered (2026-05-01) cannot
+    # be evidence for exiting it -> no advance.
+    pid = _seed_discovery_program(
+        root, instrument="the PM tracker", status="pending",
+        extra_obs=dict(kind="completion", sentinel="tracker-truth",
+                       source="adapter:project_management:EPIC-204",
+                       claim="Old close.", date="2026-04-01"),
+    )
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    assert pl.read_program(pid, root=root)["frontmatter"]["phase"] == "discovery"
+
+
+def test_fact_door_ignores_adapter_completion_for_other_anchor(tmp_path):
+    root = str(tmp_path)
+    # The program's tracker anchor is EPIC-999; a completion citing EPIC-204
+    # belongs to a different program -> must not advance this one.
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative", title="Anchored", owner_role="pm",
+        frontmatter_extra={
+            "phase": "discovery", "phase_entered": {"discovery": "2026-05-01"},
+            "checkpoints": [{"id": "discovery-exit", "label": "Discovery exit",
+                             "due": "2026-09-01", "instrument": "the PM tracker",
+                             "status": "pending"}],
+            "bindings": [{"id": "tracker", "role": "truth",
+                          "kind": "project_management", "anchor": "EPIC-999",
+                          "mode": "read"}],
+            "last_cycle": OTHER_PERIOD,
+        }, root=root)
+    pl.append_observation(program_id, root=root, kind="completion",
+                          sentinel="tracker-truth",
+                          source="adapter:project_management:EPIC-204",
+                          claim="Different program's epic closed.")
+    reconcile.reconcile_program(pl.read_program(program_id, root=root), _registry(), now=NOW)
+    assert pl.read_program(program_id, root=root)["frontmatter"]["phase"] == "discovery"
+
+
+def test_fact_door_pending_no_adapter_obs_does_not_advance(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(root, instrument="the PM tracker", status="pending")
+    program = pl.read_program(pid, root=root)
+
+    reconcile.reconcile_program(program, _registry(), now=NOW)
+
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "discovery"   # mechanical but no confirmation -> hold
+
+
+def test_fact_door_terminal_phase_no_op(tmp_path):
+    root = str(tmp_path)
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative", title="Terminal", owner_role="pm",
+        frontmatter_extra={
+            "phase": "verified",   # terminal in registry
+            "phase_entered": {"verified": "2026-05-01"},
+            "checkpoints": [],
+            "last_cycle": OTHER_PERIOD,
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    reconcile.reconcile_program(program, _registry(), now=NOW)
+    fm = pl.read_program(program_id, root=root)["frontmatter"]
+    assert fm["phase"] == "verified"   # never advances past terminal
+
+
+def test_fact_door_idempotent_within_period(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(root, instrument="the PM tracker", status="met")
+    program = pl.read_program(pid, root=root)
+
+    reconcile.reconcile_program(program, _registry(), now=NOW)
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "planning"
+
+    # A second reconcile, same period -> no-op (period guard) -> still planning.
+    program2 = pl.read_program(pid, root=root)
+    reconcile.reconcile_program(program2, _registry(), now=NOW)
+    fm2 = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm2["phase"] == "planning"
+
+    # And even forced same-period it does not chain past planning: planning has
+    # no exit_checkpoint, so no further advance.
+    program3 = pl.read_program(pid, root=root)
+    reconcile.reconcile_program(program3, _registry(), now=NOW, force=True)
+    fm3 = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm3["phase"] == "planning"
+
+
+# ─── propose-update emitter (Task 6, the interpretation door) ────────────────
+#
+# A HUMAN-ATTESTED exit checkpoint cannot auto-flip (Task 5's fact door declines
+# it). When a fresh INTERPRETIVE completion observation (a movement-watch obs
+# whose source is NOT adapter:-prefixed, dated on/after phase entry) says the
+# phase looks done, the reconciler emits a propose-update recommendation card a
+# human accepts (Task 7). The program is NOT mutated by the proposal.
+
+def _open_human_cards():
+    """Read OPEN human-queue cards' (task_type, proposal) for assertion."""
+    cards = []
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        fm = task_lib.read_task(t["id"])["frontmatter"]
+        cards.append(fm)
+    return cards
+
+
+def test_propose_update_emits_card_for_human_attested_with_interpretive_obs(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(
+        root, instrument="human attestation", status="pending",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-11_x.md (#Action Items)",
+                       claim="Discovery spike reported complete in standup."),
+    )
+
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    # The program is NOT mutated -- proposal only (Task 7/accept applies it).
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "discovery"
+
+    # Exactly one cadence-propose-update recommendation card was created.
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["card_type"] == "recommendation"
+    assert pid in card["tags"]
+    assert "cadence" in card["tags"]
+    assert card["proposal"] == {
+        "op": "advance-phase", "to": "planning",
+        "checkpoint": "discovery-exit", "from": "discovery"}
+    assert card["id"] in result["emitted"]
+
+
+def test_propose_update_dedupes_within_open_card(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(
+        root, instrument="human attestation", status="pending",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
+                       source="datasets/meetings/x.md",
+                       claim="Looks done."),
+    )
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    # A second forced reconcile while the proposal card is still open -> no dup.
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW, force=True)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert len(cards) == 1
+
+
+def test_propose_update_no_interpretive_obs_no_card(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_discovery_program(root, instrument="human attestation", status="pending")
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert cards == []
+
+
+def test_propose_update_not_emitted_when_fact_door_advances(tmp_path):
+    root = str(tmp_path)
+    # Mechanical + met -> the fact door advances; the proposal door must NOT also
+    # fire (the checkpoint is no longer the current phase's exit after advancing,
+    # and the instrument is mechanical anyway).
+    pid = _seed_discovery_program(root, instrument="the PM tracker", status="met")
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "planning"   # advanced by the fact door
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert cards == []
+
+
+def test_propose_update_ignores_adapter_completion(tmp_path):
+    root = str(tmp_path)
+    # An adapter-sourced completion is the fact door's domain, not the proposal
+    # door's. With a human-attested checkpoint and ONLY an adapter completion, no
+    # interpretive signal exists -> no proposal.
+    pid = _seed_discovery_program(
+        root, instrument="human attestation", status="pending",
+        extra_obs=dict(kind="completion", sentinel="tracker-truth",
+                       source="adapter:project_management:EPIC-204",
+                       claim="Tracker reports done."),
+    )
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert cards == []
+    # And it did not auto-advance either (human-attested instrument).
+    assert pl.read_program(pid, root=root)["frontmatter"]["phase"] == "discovery"
