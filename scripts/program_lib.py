@@ -582,6 +582,233 @@ def append_observation(program_id, *, kind, sentinel, source, claim,
     return True
 
 
+# ─── Phase advancement core (shared by the fact door + the proposal applier) ──
+#
+# _next_phase_id + _advance_phase_fm are the ONE place the engine advances a
+# pipeline phase. Both the reconciler's FACT door (reconcile._maybe_advance_phase)
+# and the human-accept PROPOSAL applier (apply_mutation, below) advance through
+# here, so an auto-advance and a human-accepted advance touch the frontmatter
+# IDENTICALLY: the same next-phase lookup and the same dict-vs-scalar
+# phase_entered stamping. program_lib is the LOWER layer (reconcile imports
+# program_lib, never the reverse), so this shared logic lives here and reconcile
+# calls in.
+
+
+def _next_phase_id(type_entry, phase):
+    """Return the id of the phase AFTER `phase` in the type's order, or None.
+
+    None when `phase` is unknown, is the last phase, or has no successor. The
+    canonical next-phase lookup for BOTH advancement doors (DRY).
+    """
+    phases = (type_entry or {}).get("phases") or []
+    ids = [p.get("id") for p in phases if isinstance(p, dict)]
+    try:
+        i = ids.index(phase)
+    except ValueError:
+        return None
+    if i + 1 >= len(ids):
+        return None
+    return ids[i + 1]
+
+
+def _advance_phase_fm(fm, next_phase, today):
+    """Mutate `fm` in place to enter `next_phase` as of `today` (ISO date string).
+
+    Sets `fm["phase"]` and stamps `phase_entered` for the new phase, PRESERVING
+    the existing dict-vs-scalar form: a dict {phase_id: date} gets the new phase
+    keyed in (prior entries kept); a scalar (the brief's form = the date the
+    CURRENT phase was entered) is overwritten with the new entry date; a missing
+    value is initialized to the scalar form. The single shared stamp used by the
+    fact door and the proposal applier so they never drift.
+    """
+    fm["phase"] = next_phase
+    entered = fm.get("phase_entered")
+    if isinstance(entered, dict):
+        entered[next_phase] = today
+    else:
+        fm["phase_entered"] = today  # scalar form = the current phase's entry date
+
+
+# ─── Proposal applier (the closed mutation set behind a human accept) ─────────
+#
+# apply_mutation is the human-side counterpart to the reconciler's fact door:
+# when a human ACCEPTS a Cadence propose-update card, the program mutation rides
+# here. Tier-1: a LOCAL program-file write only -- no external write, no git
+# commit, no second shipper. Closed set: advance-phase + adjust-checkpoint;
+# anything else is refused (ValueError) with NO mutation. Append-only (invariant
+# #6): an advance appends a completion observation and never deletes. ASCII-safe
+# runtime strings (invariant #8).
+
+_MUTATION_OPS = frozenset({"advance-phase", "adjust-checkpoint"})
+
+
+def apply_mutation(program_id, mutation, root=None):
+    """Apply a closed-set program mutation. Returns a small result dict.
+
+    mutation is a dict carrying an `op`:
+      - {"op": "advance-phase", "to": <phase>, "checkpoint": <cp>?, "from": <phase>?}
+        Sets `phase` to `to` (refusing to advance past a terminal phase), stamps
+        `phase_entered` for the new phase to today (dict-vs-scalar form preserved),
+        and appends a `completion` fact observation (sentinel=reconciler;
+        source=`checkpoint:<cp>` when a checkpoint is carried, else `proposal`).
+      - {"op": "adjust-checkpoint", "id": <cp_id>, "due": <iso>?, "status": "met"?}
+        Changes that checkpoint's `due` and/or `status`. Setting the CURRENT
+        phase's exit_checkpoint to met cascades to advance the phase via the same
+        advance path.
+
+    An out-of-set or missing `op` raises ValueError with NO mutation. An
+    adjust-checkpoint naming an unknown checkpoint id is refused (no mutation,
+    returns a refused status). Append-only, ASCII-safe.
+
+    Returns one of:
+      {"applied": "advance-phase", "program_id", "from", "to", "checkpoint"}
+      {"applied": "adjust-checkpoint", "program_id", "id", "advanced": {...}|None}
+      {"applied": None, "status": "refused", "reason": <ascii>, "program_id"}
+    """
+    if not isinstance(mutation, dict):
+        raise ValueError("mutation must be a dict carrying an 'op'")
+    op = mutation.get("op")
+    if op not in _MUTATION_OPS:
+        raise ValueError(
+            f"op must be one of {sorted(_MUTATION_OPS)}, got: {op!r}")
+
+    registry = load_registry()
+    prog = read_program(program_id, root=root)
+    fm = prog["frontmatter"]
+    type_id = fm.get("type")
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == type_id), {}
+    )
+
+    if op == "advance-phase":
+        return _apply_advance_phase(program_id, mutation, fm, type_entry,
+                                    prog["filepath"], prog["body"], root)
+    return _apply_adjust_checkpoint(program_id, mutation, fm, type_entry,
+                                    prog["filepath"], prog["body"], root)
+
+
+def _terminal_phase(type_entry, phase):
+    """True when `phase` is declared terminal in the type (or has no successor)."""
+    phases = (type_entry or {}).get("phases") or []
+    phase_def = next(
+        (p for p in phases if isinstance(p, dict) and p.get("id") == phase), {}
+    )
+    return bool(phase_def.get("terminal"))
+
+
+def _apply_advance_phase(program_id, mutation, fm, type_entry, filepath, body, root):
+    """advance-phase: stamp the new phase + append a completion fact observation.
+
+    Idempotent + non-skipping. When the mutation names a target `to`:
+      - if the program is ALREADY at `to`, this is a no-op success (a retried
+        accept after a partial failure must NOT advance a second time);
+      - it advances only when the current phase is exactly the predecessor of `to`
+        (so a stale proposal -- the program moved on since it was made -- is
+        refused, never advanced to an unintended phase).
+    With no `to`, it advances to the registry's next phase. Refuses (no mutation)
+    when the current phase is terminal or has no successor. The completion
+    observation cites the carried checkpoint or, absent one, `proposal`. Writes the
+    frontmatter change FIRST, then appends the observation (append_observation
+    re-reads + rewrites the file, so it must run after the frontmatter write,
+    mirroring reconcile_program's two-write order).
+    """
+    current = fm.get("phase")
+    to = mutation.get("to")
+    # Idempotent: already at the proposed target -> the mutation was already
+    # applied (e.g. a retried accept). No second advance.
+    if to and current == to:
+        return {"applied": None, "status": "noop",
+                "reason": f"already at {to}", "program_id": program_id,
+                "from": current, "to": to}
+    if _terminal_phase(type_entry, current):
+        return {"applied": None, "status": "refused",
+                "reason": "phase is terminal", "program_id": program_id}
+    next_phase = _next_phase_id(type_entry, current)
+    if not next_phase:
+        return {"applied": None, "status": "refused",
+                "reason": "no successor phase", "program_id": program_id}
+    # A `to` must be the immediate successor of the current phase; if it is not,
+    # the proposal is stale (the program advanced since it was made) -> refuse
+    # rather than advance to an unintended phase.
+    if to and to != next_phase:
+        return {"applied": None, "status": "refused",
+                "reason": f"proposal target {to} is not the phase after {current}",
+                "program_id": program_id}
+    target = to or next_phase
+
+    today = _now_iso()[:10]
+    _advance_phase_fm(fm, target, today)
+    _write_program_file(filepath, fm, body)
+
+    checkpoint = mutation.get("checkpoint")
+    source = f"checkpoint:{checkpoint}" if checkpoint else "proposal"
+    append_observation(
+        program_id, kind="completion", sentinel="reconciler", source=source,
+        claim=f"Phase advanced {current} -> {target}.", date=today, root=root)
+
+    return {"applied": "advance-phase", "program_id": program_id,
+            "from": current, "to": target, "checkpoint": checkpoint}
+
+
+def _apply_adjust_checkpoint(program_id, mutation, fm, type_entry, filepath, body, root):
+    """adjust-checkpoint: change a checkpoint's due and/or status.
+
+    Setting the CURRENT phase's exit_checkpoint to met cascades to advance the
+    phase through the same advance path (so an accepted "mark met" and an
+    accepted "advance" land identically). An unknown checkpoint id is refused.
+    """
+    cp_id = mutation.get("id")
+    checkpoints = fm.get("checkpoints") or []
+    cp = next(
+        (c for c in checkpoints if isinstance(c, dict) and c.get("id") == cp_id),
+        None,
+    )
+    if cp is None:
+        return {"applied": None, "status": "refused",
+                "reason": f"no checkpoint {cp_id!r}", "program_id": program_id}
+
+    # Refuse a no-op adjust (neither a new due nor a met flag) rather than report a
+    # false success and needlessly rewrite the file.
+    has_due = mutation.get("due") is not None
+    if not has_due and mutation.get("status") != "met":
+        return {"applied": None, "status": "refused",
+                "reason": "adjust-checkpoint needs a due or status:met",
+                "program_id": program_id}
+
+    if "due" in mutation and mutation["due"] is not None:
+        cp["due"] = mutation["due"]
+    set_met = mutation.get("status") == "met"
+    if set_met:
+        cp["status"] = "met"
+
+    # Cascade: met on the CURRENT phase's exit checkpoint advances the phase.
+    advanced = None
+    current = fm.get("phase")
+    phases = (type_entry or {}).get("phases") or []
+    phase_def = next(
+        (p for p in phases if isinstance(p, dict) and p.get("id") == current), {}
+    )
+    cascade = (set_met and phase_def.get("exit_checkpoint") == cp_id
+               and not _terminal_phase(type_entry, current))
+    next_phase = _next_phase_id(type_entry, current) if cascade else None
+
+    today = _now_iso()[:10]
+    if next_phase:
+        _advance_phase_fm(fm, next_phase, today)
+        advanced = {"from": current, "to": next_phase, "checkpoint": cp_id}
+
+    _write_program_file(filepath, fm, body)
+    if advanced:
+        append_observation(
+            program_id, kind="completion", sentinel="reconciler",
+            source=f"checkpoint:{cp_id}",
+            claim=f"Phase advanced {current} -> {next_phase}.",
+            date=today, root=root)
+
+    return {"applied": "adjust-checkpoint", "program_id": program_id,
+            "id": cp_id, "advanced": advanced}
+
+
 def _build_series(series):
     """Port of the prototype buildSeries(p) math — geometry only, no stroke.
 

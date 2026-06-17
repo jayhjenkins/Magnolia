@@ -721,20 +721,9 @@ def _iter_observations(body):
         yield pending
 
 
-def _next_phase_id(type_entry, phase):
-    """Return the id of the phase AFTER `phase` in the type's order, or None.
-
-    None when `phase` is unknown, is the last phase, or has no successor.
-    """
-    phases = type_entry.get("phases") or []
-    ids = [p.get("id") for p in phases if isinstance(p, dict)]
-    try:
-        i = ids.index(phase)
-    except ValueError:
-        return None
-    if i + 1 >= len(ids):
-        return None
-    return ids[i + 1]
+# _next_phase_id moved to program_lib (the lower layer) so the fact door and the
+# proposal applier share ONE next-phase lookup. reconcile calls program_lib's.
+_next_phase_id = program_lib._next_phase_id
 
 
 def _maybe_advance_phase(fm, type_entry, body, now):
@@ -796,13 +785,10 @@ def _maybe_advance_phase(fm, type_entry, body, now):
     if cp.get("status") != "met":
         cp["status"] = "met"
 
-    fm["phase"] = next_phase
+    # Advance through the SHARED stamp (program_lib._advance_phase_fm) so the
+    # fact door and the proposal applier touch phase/phase_entered identically.
     today = _to_date(now).isoformat()
-    entered = fm.get("phase_entered")
-    if isinstance(entered, dict):
-        entered[next_phase] = today
-    else:
-        fm["phase_entered"] = today  # scalar form = the current phase's entry date
+    program_lib._advance_phase_fm(fm, next_phase, today)
 
     return body, {"from": phase, "to": next_phase, "checkpoint": cp_id}
 
