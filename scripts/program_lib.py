@@ -10,6 +10,7 @@ owns the program file format and its create/read/list operations.
 Mirrors scripts/task_lib.py - one implementation, zero drift.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -277,6 +278,26 @@ _OBS_HEADER_RE = re.compile(
     r"(?:[-–—]\s*(?:sentinel:(?P<sentinel>\S+))?\s*(?:\[(?P<kind>[^\]]+)\])?)?\s*$"
 )
 
+# The Observations section heading (the anchor append_observation inserts under).
+_OBS_HEADING = "## Observations"
+# Line-anchored match for a real `## Observations` heading (not a heading-shaped
+# substring inside prose) -- used for the presence check so the writer never
+# splices an entry into the middle of a paragraph that merely mentions the text.
+_OBS_HEADING_RE = re.compile(r"^## Observations\s*$", re.MULTILINE)
+
+# Closed observation-kind enum. Sentinels (later tasks) may only emit one of
+# these; append_observation rejects anything outside the set. Kept ASCII-safe.
+OBSERVATION_KINDS = frozenset({
+    "status-signal",
+    "date-change",
+    "completion",
+    "commitment",
+    "risk",
+    "metric",
+    "capture",
+    "blocker",
+})
+
 
 def load_registry(root=None):
     """Read and parse cadence/programtypes/registry.json from the engine repo.
@@ -363,6 +384,171 @@ def _parse_observations(body):
     entries = [e for e in entries if e["text"]]
     entries.reverse()  # most-recent-first
     return entries
+
+
+def _split_at_next_section(text):
+    """Split `text` at the next top-level `## ` heading.
+
+    Returns (section, rest): `section` is the content up to the next top-level
+    heading line; `rest` is that heading and everything after it (or "" when no
+    following section exists). `### ` entry sub-headers are NOT top-level, so
+    they stay in `section`.
+
+    Replicated from reconcile._split_at_next_section (NOT imported): program_lib
+    is the lower layer — reconcile imports program_lib, never the reverse. The
+    two copies are deliberately identical; keep them in sync.
+    """
+    idx = text.find("\n## ")
+    if idx == -1:
+        return text, ""
+    return text[:idx], text[idx + 1:]
+
+
+def _obs_hash(kind, source, claim):
+    """Content hash over (kind, source, claim) for observation dedupe.
+
+    Sources/claims are stripped before hashing so trivial whitespace differences
+    do not defeat the dedupe. Sentinel name, date, and confidence are NOT part of
+    the identity: the same factual claim from the same source is one observation
+    no matter who saw it or when.
+    """
+    payload = "\x00".join((kind, source.strip(), claim.strip()))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _existing_obs_hashes(body):
+    """Return the set of content hashes for observations already on `body`.
+
+    Parses the `## Observations` section header-by-header, reading each entry's
+    `kind` (from the header), `source:` line, and `claim:` line, then hashing
+    them the same way _obs_hash does. Tolerant: an entry missing a source/claim
+    simply contributes no hash. Used only for dedupe, so a miss errs toward
+    appending (never toward silently dropping a real observation).
+    """
+    if not body:
+        return set()
+    lines = body.splitlines()
+    section = []
+    in_section = False
+    for line in lines:
+        if line.strip().startswith("## "):
+            if in_section:
+                break
+            in_section = line.strip()[3:].strip().lower() == "observations"
+            continue
+        if in_section:
+            section.append(line)
+
+    hashes = set()
+    kind = source = claim = None
+
+    def _flush():
+        if kind and source is not None and claim is not None:
+            hashes.add(_obs_hash(kind, source, claim))
+
+    for line in section:
+        m = _OBS_HEADER_RE.match(line.strip())
+        if m:
+            _flush()
+            kind = (m.group("kind") or "").strip() or None
+            source = claim = None
+            continue
+        stripped = line.strip()
+        low = stripped.lower()
+        if low.startswith("source:") and source is None:
+            source = stripped[len("source:"):].strip()
+        elif low.startswith("claim:") and claim is None:
+            claim = stripped[len("claim:"):].strip()
+    _flush()
+    return hashes
+
+
+def append_observation(program_id, *, kind, sentinel, source, claim,
+                       date=None, confidence=None, root=None):
+    """Append a structured observation under a program's `## Observations`.
+
+    The deterministic, validated write path for the Cadence interpretation
+    engine: sentinels (LLM agents) return observation records and this function
+    — never the LLM — appends them to the program file. Append-only (invariant
+    #6): prior observations are never rewritten or dropped.
+
+    Args (keyword-only after program_id):
+        kind: one of OBSERVATION_KINDS (else ValueError).
+        sentinel: name of the sentinel that produced the observation.
+        source: non-empty citation of where the claim came from (else ValueError).
+        claim: non-empty one-line factual claim (else ValueError).
+        date: ISO date string for the entry header; defaults to today (UTC).
+        confidence: optional numeric confidence; emitted only when provided.
+        root: PM-OS datasets root (defaults to the engine repo's datasets/).
+
+    Dedupe: identical (kind, stripped source, stripped claim) already present on
+    the program is a no-op — returns False and leaves the file untouched. On a
+    successful append returns True.
+
+    Entry format (ASCII hyphen in the header, invariant #8 — never an em-dash):
+
+        ### <date> - sentinel:<sentinel> [<kind>]
+        source: <source>
+        claim: <claim>
+        confidence: <n>      (only when confidence is provided)
+    """
+    if kind not in OBSERVATION_KINDS:
+        raise ValueError(
+            f"kind must be one of {sorted(OBSERVATION_KINDS)}, got: {kind!r}")
+    if not source or not source.strip():
+        raise ValueError("source must be non-empty")
+    if not claim or not claim.strip():
+        raise ValueError("claim must be non-empty")
+
+    prog = read_program(program_id, root=root)
+    body = prog["body"] or ""
+    filepath = prog["filepath"]
+
+    # Content-hash dedupe over (kind, source, claim).
+    if _obs_hash(kind, source, claim) in _existing_obs_hashes(body):
+        return False
+
+    entry_date = date or _now_iso()[:10]
+    entry_lines = [
+        f"### {entry_date} - sentinel:{sentinel} [{kind}]",
+        f"source: {source.strip()}",
+        f"claim: {claim.strip()}",
+    ]
+    if confidence is not None:
+        # Uniform 2-decimal rendering so the ledger stays tidy regardless of the
+        # caller's float precision; non-numeric confidence falls back to str().
+        try:
+            entry_lines.append(f"confidence: {float(confidence):.2f}")
+        except (TypeError, ValueError):
+            entry_lines.append(f"confidence: {confidence}")
+    entry = "\n".join(entry_lines) + "\n"
+
+    # Both this insert and _existing_obs_hashes assume a single `## Observations`
+    # section (the canonical program format); the heading-anchored splice below
+    # uses the last heading and dedupe reads the first -- aligned only when there
+    # is one, which the format guarantees.
+    if not _OBS_HEADING_RE.search(body):
+        # No Observations section: create one at the end of the body.
+        base = body.rstrip("\n")
+        new_body = (f"{base}\n\n{_OBS_HEADING}\n\n{entry}"
+                    if base else f"{_OBS_HEADING}\n\n{entry}")
+    else:
+        # Anchor on the LAST Observations heading. The head (everything up to and
+        # including the heading) is preserved verbatim; the trailing text is split
+        # at the next top-level `## ` heading so a following `## Cycles` (and its
+        # entries) is preserved verbatim. The new entry lands at the end of the
+        # Observations content, before that following section. Mirrors
+        # reconcile._append_cycle_entry.
+        head, sep, tail = body.rpartition(_OBS_HEADING)
+        section, rest = _split_at_next_section(tail)
+        section = section.rstrip("\n")
+        if rest:
+            new_body = f"{head}{sep}{section}\n\n{entry}\n{rest}"
+        else:
+            new_body = f"{head}{sep}{section}\n\n{entry}"
+
+    _write_program_file(filepath, prog["frontmatter"], new_body)
+    return True
 
 
 def _build_series(series):
