@@ -199,6 +199,17 @@ adapter as the cited source. No free interpretation.
 
 ---
 
+> **Real-data seams settled in Task 5 (surfaced by the Task 4 review):**
+> - **Binding resolution (I1):** seed programs carry the tracker ref under
+>   `bindings[]` (`{role: truth, kind: project_management, anchor: "EPIC-204"}`), NOT under
+>   `links.tracker_epic`. Add a shared `program_lib.tracker_anchor(fm)` that reads `bindings[]`
+>   (role=truth, kind=project_management → `anchor`), with `links.tracker_epic` as a fallback, and
+>   point BOTH `sentinel_runner` (tracker-truth) and the reconciler at it.
+> - **Instrument normalization (I2):** seed checkpoint `instrument` fields are prose ("the PM
+>   tracker", "human attestation", "a deterministic check", "Pendo"), not tokens. Add
+>   `_instrument_is_mechanical(instrument)` that classifies prose → mechanical vs human, defaulting
+>   AMBIGUOUS/empty to **human** (conservative: never auto-mutate state on an unclear instrument).
+
 ### Task 5: Checkpoint-driven phase advancement (fact door)
 
 **Files:**

@@ -397,3 +397,40 @@ def test_all_seed_programs_render():
     payload = pl.build_cadence_payload()
     fam_ids = [f["id"] for f in payload["families"]]
     assert fam_ids == ["roadmap", "weekly", "outcomes", "eos"]
+
+
+# ─── tracker_anchor (Task 5, shared binding resolution) ──────────────────────
+
+def test_tracker_anchor_reads_bindings_anchor():
+    fm = {"bindings": [
+        {"id": "tracker", "role": "truth", "kind": "project_management",
+         "anchor": "EPIC-204", "mode": "read"}]}
+    assert pl.tracker_anchor(fm) == "EPIC-204"
+
+
+def test_tracker_anchor_falls_back_to_links_tracker_epic():
+    fm = {"bindings": [{"role": "mirror", "kind": "transcripts", "anchor": "X"}],
+          "links": {"tracker_epic": "EPIC-999"}}
+    assert pl.tracker_anchor(fm) == "EPIC-999"
+
+
+def test_tracker_anchor_prefers_binding_over_links():
+    fm = {"bindings": [
+              {"role": "truth", "kind": "project_management", "anchor": "EPIC-1"}],
+          "links": {"tracker_epic": "EPIC-2"}}
+    assert pl.tracker_anchor(fm) == "EPIC-1"
+
+
+def test_tracker_anchor_none_when_neither():
+    assert pl.tracker_anchor({}) is None
+    assert pl.tracker_anchor({"bindings": [], "links": {}}) is None
+
+
+def test_tracker_anchor_robust_to_malformed():
+    # bindings not a list, entries not dicts, links not a dict -> None, no raise.
+    assert pl.tracker_anchor({"bindings": "nope"}) is None
+    assert pl.tracker_anchor({"bindings": ["str", 7, None]}) is None
+    assert pl.tracker_anchor({"bindings": [{"role": "truth",
+                                            "kind": "project_management"}]}) is None
+    assert pl.tracker_anchor({"links": "nope"}) is None
+    assert pl.tracker_anchor(None) is None

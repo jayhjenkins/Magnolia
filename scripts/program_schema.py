@@ -66,6 +66,18 @@ def validate_doc(reg, tokens):
         if state_model == "pipeline":
             if not has_phases:
                 errors.append(f"type '{tid}': pipeline state_model requires phases")
+            else:
+                # An optional exit_checkpoint names a per-instance checkpoint id
+                # (the fact/proposal door). It is statically a string here; the
+                # cross-check against an instance's checkpoints is runtime.
+                for p in t.get("phases") or []:
+                    if not isinstance(p, dict):
+                        continue
+                    if "exit_checkpoint" in p and not isinstance(
+                            p["exit_checkpoint"], str):
+                        errors.append(
+                            f"type '{tid}': phase '{p.get('id', '?')}' "
+                            f"exit_checkpoint must be a string")
         elif has_phases:
             errors.append(
                 f"type '{tid}': phases are only allowed on pipeline state_model")

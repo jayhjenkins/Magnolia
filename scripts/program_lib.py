@@ -299,6 +299,37 @@ OBSERVATION_KINDS = frozenset({
 })
 
 
+def tracker_anchor(fm):
+    """Return the project-management tracker ref for a program, or None.
+
+    The shared binding-resolution helper (the I1 seam): seed programs carry the
+    tracker ref under `bindings[]` as `{role: truth, kind: project_management,
+    anchor: "EPIC-204"}`. Reads the first such binding's `anchor`; falls back to
+    the legacy `links.tracker_epic`; else None. Defensive against missing or
+    malformed shapes (bindings not a list, entries not dicts, links not a dict) -
+    never raises. Both sentinel_runner (tracker-truth) and the reconciler (fact
+    door) resolve the tracker through here so they match the real seeds.
+    """
+    fm = fm or {}
+    if not isinstance(fm, dict):
+        return None
+    bindings = fm.get("bindings")
+    if isinstance(bindings, list):
+        for b in bindings:
+            if not isinstance(b, dict):
+                continue
+            if b.get("role") == "truth" and b.get("kind") == "project_management":
+                anchor = b.get("anchor")
+                if anchor:
+                    return str(anchor)
+    links = fm.get("links")
+    if isinstance(links, dict):
+        epic = links.get("tracker_epic")
+        if epic:
+            return str(epic)
+    return None
+
+
 def load_registry(root=None):
     """Read and parse cadence/programtypes/registry.json from the engine repo.
 

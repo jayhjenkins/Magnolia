@@ -158,3 +158,31 @@ def test_rejects_emitter_not_a_dict():
     reg = _type_with_emitters(["escalate"])
     errs = ps.validate_doc(reg, tokens={"--accent"})
     assert any("emitter" in e for e in errs)
+
+
+# ─── exit_checkpoint on pipeline phases (Task 5) ─────────────────────────────
+
+
+def _pipeline_with_phases(phases):
+    return {"families": [{"id": "x", "label": "X", "order": 1}],
+            "types": [{"id": "t", "label": "T", "family": "x", "state_model": "pipeline",
+                       "phases": phases,
+                       "sources": [], "presentation": {"chip_tokens": {}}}]}
+
+
+def test_accepts_exit_checkpoint_string_on_pipeline_phase():
+    reg = _pipeline_with_phases([
+        {"id": "discovery", "label": "D", "exit_checkpoint": "discovery-exit"},
+        {"id": "shipped", "label": "S", "terminal": True},
+    ])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_rejects_non_string_exit_checkpoint():
+    reg = _pipeline_with_phases([
+        {"id": "discovery", "label": "D", "exit_checkpoint": 42},
+        {"id": "shipped", "label": "S", "terminal": True},
+    ])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("exit_checkpoint" in e for e in errs)

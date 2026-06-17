@@ -244,17 +244,15 @@ def _parse_records(text):
 # --- The mechanical (adapter-grounded) path ----------------------------------
 
 def _program_tracker_epic(program):
-    """The program's tracker epic key from links.tracker_epic, or None.
+    """The program's tracker anchor (project-management ref), or None.
 
-    The contract field (per the tracker-truth def + design): frontmatter
-    `links.tracker_epic` names the epic that mirrors this program in the tracker.
-    A program with no such link is skipped (returns None).
+    Delegates to the shared program_lib.tracker_anchor (the I1 seam): seed
+    programs carry the tracker ref under `bindings[]` (role=truth,
+    kind=project_management -> anchor), with the legacy `links.tracker_epic` as
+    a fallback. A program with neither is skipped (returns None).
     """
-    links = program.get("frontmatter", {}).get("links") or {}
-    if not isinstance(links, dict):
-        return None
-    epic = links.get("tracker_epic")
-    return str(epic) if epic else None
+    fm = (program or {}).get("frontmatter", {}) or {}
+    return program_lib.tracker_anchor(fm)
 
 
 def _map_tracker_fact(fact):

@@ -42,6 +42,35 @@ def _worse(a, b):
     return a if _RANK.get(a, 0) >= _RANK.get(b, 0) else b
 
 
+# Instrument normalization (I2). Seed checkpoint `instrument` fields are PROSE
+# ("the PM tracker", "human attestation", "a deterministic check", "Pendo"), not
+# tokens. The fact door may only auto-mutate state on a MECHANICAL instrument
+# (an adapter/deterministic/metric source). A human-attestation or empty/unclear
+# instrument is treated as human (return False) -- the conservative default, so
+# the reconciler never auto-advances a phase on an instrument it cannot classify.
+# Both sets are ASCII, matched case-insensitively. Human wins on conflict.
+_HUMAN_INSTRUMENT_HINTS = ("human", "attest", "manual")
+_MECHANICAL_INSTRUMENT_HINTS = (
+    "tracker", "adapter", "pendo", "metric", "deterministic", "automated", "check",
+)
+
+
+def _instrument_is_mechanical(instrument):
+    """Classify a prose `instrument` as mechanical (True) or human (False).
+
+    Mechanical when it names an adapter/deterministic/metric source. Human when
+    it names attestation OR is empty/ambiguous (CONSERVATIVE DEFAULT: unclear ->
+    human, so the fact door never auto-mutates state on an instrument it cannot
+    confidently read as mechanical). ASCII, case-insensitive; human hints win.
+    """
+    if not instrument or not isinstance(instrument, str):
+        return False
+    low = instrument.lower()
+    if any(h in low for h in _HUMAN_INSTRUMENT_HINTS):
+        return False
+    return any(h in low for h in _MECHANICAL_INSTRUMENT_HINTS)
+
+
 # ─── Pure time helpers ─────────────────────────────────────────────────────────
 
 def current_period(cadence, now):
@@ -307,13 +336,15 @@ def _format_emitted(emitted):
     return ", ".join(ids)
 
 
-def _append_cycle_entry(body, period, verdict, facts, emitted=None):
+def _append_cycle_entry(body, period, verdict, facts, emitted=None, advanced=None):
     """Return `body` with a new cycle-log entry appended to `## Cycles`.
 
-    The entry is two lines (ASCII hyphen separators, invariant #8):
+    The entry is two lines (ASCII hyphen separators, invariant #8), plus an
+    optional third line when the fact door advanced a phase this cycle:
 
         ### <period> - <verdict>
         checks: <reason> - emitted: <TASK-xxxx | none> - next: <next>
+        advanced: <from> -> <to> on checkpoint <id>
 
     Heading-anchored insert: the new block is placed UNDER the `## Cycles`
     heading and BEFORE the next top-level `## ` heading (if any), else at the
@@ -329,6 +360,11 @@ def _append_cycle_entry(body, period, verdict, facts, emitted=None):
         f"### {period} - {verdict}\n"
         f"checks: {reason} - emitted: {_format_emitted(emitted)} - next: {nxt}\n"
     )
+    if advanced:
+        entry += (
+            f"advanced: {advanced['from']} -> {advanced['to']} "
+            f"on checkpoint {advanced['checkpoint']}\n"
+        )
 
     body = body or ""
     if _CYCLES_HEADING not in body:
@@ -438,6 +474,165 @@ def _evaluate_emitters(program, type_entry, verdict, facts, root=None):
     return emitted
 
 
+def _has_adapter_completion(body, anchor=None, since=None):
+    """True when the body carries a RELEVANT, FRESH adapter `completion`.
+
+    A match requires a kind=`completion` observation whose `source` starts with
+    `adapter:` (the tracker-truth grounding shape, e.g.
+    `adapter:project_management:EPIC-204`) AND, when scoping args are given:
+      - `anchor`: the source must reference THIS program's tracker anchor, so an
+        unrelated adapter completion can never advance this program; and
+      - `since` (an ISO date): the observation must be dated on/after it -- the
+        current phase's entry date. You cannot complete a phase's exit before
+        entering the phase, so a stale completion recorded in an earlier phase
+        must not flip a later phase's checkpoint.
+    Such an observation is the deterministic signal the tracker confirms done --
+    enough to flip a still-pending MECHANICAL checkpoint to met and advance.
+    Tolerant: an unparseable body simply yields no match (never raises).
+    """
+    for date, kind, source, _claim in _iter_observations(body):
+        if kind != "completion" or not source.startswith("adapter:"):
+            continue
+        if anchor and anchor not in source:
+            continue
+        if since and (not date or date < since):
+            continue
+        return True
+    return False
+
+
+def _iter_observations(body):
+    """Yield (date, kind, source, claim) for each observation in `body`.
+
+    A thin reader over the `## Observations` section that exposes the header date
+    and source line (both of which program_lib._parse_observations drops). Mirrors
+    program_lib's header/source/claim line shapes; missing fields default to "".
+    Never raises.
+    """
+    if not body:
+        return
+    lines = body.splitlines()
+    section = []
+    in_section = False
+    for line in lines:
+        if line.strip().startswith("## "):
+            if in_section:
+                break
+            in_section = line.strip()[3:].strip().lower() == "observations"
+            continue
+        if in_section:
+            section.append(line)
+
+    pending = None
+    for line in section:
+        m = program_lib._OBS_HEADER_RE.match(line.strip())
+        if m:
+            if pending is not None:
+                yield pending
+            date = (m.group("date") or "").strip()
+            kind = (m.group("kind") or "").strip()
+            pending = (date, kind, "", "")
+            continue
+        if pending is None:
+            continue
+        stripped = line.strip()
+        low = stripped.lower()
+        if low.startswith("source:") and not pending[2]:
+            source = stripped[len("source:"):].strip()
+            pending = (pending[0], pending[1], source, pending[3])
+        elif low.startswith("claim:") and not pending[3]:
+            claim = stripped[len("claim:"):].strip()
+            pending = (pending[0], pending[1], pending[2], claim)
+    if pending is not None:
+        yield pending
+
+
+def _next_phase_id(type_entry, phase):
+    """Return the id of the phase AFTER `phase` in the type's order, or None.
+
+    None when `phase` is unknown, is the last phase, or has no successor.
+    """
+    phases = type_entry.get("phases") or []
+    ids = [p.get("id") for p in phases if isinstance(p, dict)]
+    try:
+        i = ids.index(phase)
+    except ValueError:
+        return None
+    if i + 1 >= len(ids):
+        return None
+    return ids[i + 1]
+
+
+def _maybe_advance_phase(fm, type_entry, body, now):
+    """The FACT door: auto-advance a pipeline phase on a mechanically-confirmed
+    exit checkpoint. Returns (body, advanced_record | None).
+
+    Eligibility (all must hold):
+      - the current phase has an `exit_checkpoint` in the type and is not terminal,
+      - that checkpoint exists in `fm["checkpoints"]`,
+      - its `instrument` is mechanical (_instrument_is_mechanical),
+      - AND it is already `status == met` OR a fresh adapter-grounded `completion`
+        observation is present (the tracker confirms done).
+
+    On advance it mutates `fm` in place (flips the checkpoint to met if needed;
+    sets `phase` to the next phase; stamps `phase_entered` for the new phase to
+    today, respecting the existing dict-vs-scalar form) and returns
+    {"from", "to", "checkpoint"}. Human-attested / unclear instruments, terminal
+    phases, and unconfirmed checkpoints return (body, None) -- Task 6 will propose
+    those. Idempotent: after advancing, the new phase's own exit_checkpoint is
+    still pending, so it cannot chain-advance in the same tick.
+    """
+    phase = fm.get("phase")
+    phases = type_entry.get("phases") or []
+    phase_def = next(
+        (p for p in phases if isinstance(p, dict) and p.get("id") == phase), {}
+    )
+    if phase_def.get("terminal"):
+        return body, None
+    cp_id = phase_def.get("exit_checkpoint")
+    if not cp_id:
+        return body, None
+
+    checkpoints = fm.get("checkpoints") or []
+    cp = next(
+        (c for c in checkpoints if isinstance(c, dict) and c.get("id") == cp_id),
+        None,
+    )
+    if cp is None:
+        return body, None
+
+    if not _instrument_is_mechanical(cp.get("instrument")):
+        return body, None  # human-attested / unclear -> Task 6's proposal door
+
+    # An adapter completion only counts when it cites THIS program's tracker anchor
+    # and post-dates entry into the current phase (you cannot complete a phase's
+    # exit before entering it) -- so a stale or unrelated completion never advances.
+    anchor = program_lib.tracker_anchor(fm)
+    since = _phase_entered_date(fm, phase)
+    confirmed = cp.get("status") == "met" or _has_adapter_completion(
+        body, anchor=anchor, since=since.isoformat() if since else None)
+    if not confirmed:
+        return body, None
+
+    next_phase = _next_phase_id(type_entry, phase)
+    if not next_phase:
+        return body, None  # no successor (already the last/terminal phase)
+
+    # The fact, grounded in the adapter observation: the checkpoint is met.
+    if cp.get("status") != "met":
+        cp["status"] = "met"
+
+    fm["phase"] = next_phase
+    today = _to_date(now).isoformat()
+    entered = fm.get("phase_entered")
+    if isinstance(entered, dict):
+        entered[next_phase] = today
+    else:
+        fm["phase_entered"] = today  # scalar form = the current phase's entry date
+
+    return body, {"from": phase, "to": next_phase, "checkpoint": cp_id}
+
+
 def reconcile_program(program, registry, now=None, force=False, root=None):
     """Run one program's reconcile cycle. Returns a result dict.
 
@@ -445,11 +640,16 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     Computes the verdict, then guards to once-per-cadence-period: if this
     program already ran this period (and not `force`), returns without touching
     the file. On a fresh cycle, evaluates the type's declarative emitters
-    (the escalate card fires here, deduped), writes drift/last_cycle/last_run
-    back into the frontmatter, appends a `## Cycles` log entry recording any
-    emitted card ids, and writes the file ONCE via _write_program_file.
+    (the escalate card fires here, deduped), runs the FACT-door phase advancement
+    (_maybe_advance_phase), writes drift/last_cycle/last_run + any phase change
+    back into the frontmatter, and appends a `## Cycles` log entry (recording any
+    emitted card ids and any advancement) via _write_program_file. When a phase
+    advanced, a second write follows: program_lib.append_observation stamps the
+    source-cited `completion` fact observation (it re-reads + rewrites the file,
+    so it must run AFTER the frontmatter write).
 
-    Returns {"program_id", "verdict", "new_cycle": bool, "emitted": [ids]}.
+    Returns {"program_id", "verdict", "new_cycle": bool, "emitted": [ids],
+    "advanced": {from, to, checkpoint} | None}.
     May raise on a genuinely unwritable file; reconcile_all (Task 4) wraps it.
     """
     now = now or datetime.now(timezone.utc)
@@ -479,23 +679,64 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     )
     emitted = _evaluate_emitters(program, type_entry, verdict, facts, root=root)
 
+    # The FACT door: mutate `fm` in place (phase + checkpoint) when the current
+    # phase's mechanical exit checkpoint is confirmed done. The mutation and its
+    # cycle note land in the SINGLE _write_program_file below; the grounded fact
+    # OBSERVATION is stamped AFTER that write (append_observation re-reads +
+    # rewrites the file, so it would otherwise lose this frontmatter change).
+    advanced = None
+    if type_entry.get("state_model") == "pipeline":
+        body, advanced = _maybe_advance_phase(fm, type_entry, body, now)
+
     fm["drift"] = verdict
     fm["last_cycle"] = period
     fm["last_run"] = program_lib._now_iso()
-    body = _append_cycle_entry(body, period, verdict, facts, emitted=emitted)
+    body = _append_cycle_entry(
+        body, period, verdict, facts, emitted=emitted, advanced=advanced
+    )
 
     filepath = program.get("filepath")
     if not filepath:
         filepath = os.path.join(
             program_lib._program_dir(root), f"{fm['program_id']}.md"
         )
+    # WRITE 1: phase/checkpoint mutation + verdict + cycle note, in one write.
     program_lib._write_program_file(filepath, fm, body)
+
+    # WRITE 2 (only when we advanced): the source-cited fact observation. This is
+    # a separate call deliberately - append_observation re-reads the just-written
+    # file (now carrying the new phase) and appends under ## Observations,
+    # deduped. Ordering it AFTER write 1 keeps the phase change durable; doing it
+    # before would be clobbered by write 1's frontmatter serialization.
+    if advanced:
+        # append_observation reconstructs the file path from (program_id, root)
+        # via program_lib._program_dir(root) = <root>/datasets/programs. When the
+        # caller passed no `root` but the program carries an absolute filepath
+        # (the test + reconcile_all shape), derive the matching root from that
+        # path so the observation lands on the SAME file we just wrote, never the
+        # real datasets/ dir.
+        obs_root = root
+        if obs_root is None:
+            obs_root = os.path.dirname(os.path.dirname(os.path.dirname(filepath)))
+        program_lib.append_observation(
+            fm["program_id"],
+            kind="completion",
+            sentinel="reconciler",
+            source=f"checkpoint:{advanced['checkpoint']}",
+            claim=(
+                f"Phase advanced {advanced['from']} -> {advanced['to']} "
+                f"on checkpoint {advanced['checkpoint']}."
+            ),
+            date=_to_date(now).isoformat(),
+            root=obs_root,
+        )
 
     return {
         "program_id": fm.get("program_id"),
         "verdict": verdict,
         "new_cycle": True,
         "emitted": emitted,
+        "advanced": advanced,
     }
 
 

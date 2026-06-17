@@ -9,9 +9,9 @@
     { "id": "roadmap-initiative", "label": "Roadmap initiative", "family": "roadmap",
       "state_model": "pipeline",
       "phases": [
-        { "id": "discovery", "label": "Discovery", "max_age_days": 21 },
+        { "id": "discovery", "label": "Discovery", "max_age_days": 21, "exit_checkpoint": "discovery-exit" },
         { "id": "planning",  "label": "Planning",  "max_age_days": 14 },
-        { "id": "execution", "label": "Execution" },
+        { "id": "execution", "label": "Execution", "exit_checkpoint": "ship" },
         { "id": "shipped",   "label": "Shipped" },
         { "id": "verified",  "label": "Verified", "terminal": true }
       ],
