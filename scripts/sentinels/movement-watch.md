@@ -5,6 +5,7 @@ sources:
   - { kind: transcripts, mode: read }
 observation_kinds: [status-signal, completion, date-change, commitment, risk, blocker]
 scope: active-programs
+model_tier: deep
 allowed_tools:
   - "Read(*)"
   - "mcp__qmd__*"
