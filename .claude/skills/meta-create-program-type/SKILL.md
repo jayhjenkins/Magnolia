@@ -35,7 +35,7 @@ rejects anything else):
   `phase-advance-proposable`, `cycle-fresh`, `completion-verified`,
   `silent-too-long`.
 - **emitter `action`s**: `escalate`, `draft-message`, `produce-artifact`,
-  `propose-update` (+ the bootstrap actions for an `intake` block).
+  `propose-update`, `draft-ticket` (+ the bootstrap actions for an `intake` block).
 - **sentinels**: reference only sentinels that already exist in
   `scripts/sentinels/` (e.g. `movement-watch`, `tracker-truth`, `sheet-watch`,
   `program-intake`). A genuinely new sentinel is a separate build, not this factory.

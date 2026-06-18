@@ -105,6 +105,27 @@ def test_publish_teams_references_sharepoint_url(monkeypatch, tmp_path):
     assert seen["atts"][0]["name"] == "digest.md"
 
 
+def test_publish_teams_degrades_when_doc_sync_unconfigured_systemexit(monkeypatch, tmp_path):
+    """doc_sync.load_config() calls sys.exit(1) (SystemExit, a BaseException) when
+    doc_sync is unconfigured - the default. The Teams attachment path must still
+    degrade to an inline link, NOT crash the send (slice 9 iron rule)."""
+    monkeypatch.setattr(m365.shutil, "which", lambda _: "/usr/bin/mgc")
+    monkeypatch.setattr(m365, "_resolve_me_upn", lambda: "me@co.com")
+    md = tmp_path / "digest.md"
+    md.write_text("# hi")
+    def _exit(_p):
+        raise SystemExit(1)   # mirrors doc_sync.load_config() when unconfigured
+    monkeypatch.setattr(m365.doc_sync, "sync_one", _exit)
+    seen = {}
+    monkeypatch.setattr(graph, "send_teams",
+                        lambda me, to, body, **k: seen.update(atts=k.get("attachments"), body=body)
+                        or {"message_id": "M1"})
+    # Must NOT raise SystemExit; must degrade.
+    m365.publish({"channel": "teams", "to": ["t@co.com"], "body": "B", "attachments": [str(md)]})
+    assert not seen["atts"]
+    assert str(md) in seen["body"]
+
+
 def test_publish_teams_degrades_when_no_url(monkeypatch, tmp_path):
     monkeypatch.setattr(m365.shutil, "which", lambda _: "/usr/bin/mgc")
     monkeypatch.setattr(m365, "_resolve_me_upn", lambda: "me@co.com")

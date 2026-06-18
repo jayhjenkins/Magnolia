@@ -80,7 +80,12 @@ def _resolve_attachments(paths, channel, root=None):
                 if not url:
                     raise RuntimeError("no hosted URL for attachment")
                 send_atts.append({"name": os.path.basename(p), "url": url})
-        except Exception:
+        except (Exception, SystemExit):
+            # SystemExit too (not just Exception): doc_sync.load_config() calls
+            # sys.exit(1) when doc_sync is unconfigured (the default on a fresh
+            # install / no sync_config.yaml), which is a BaseException and would
+            # otherwise escape and CRASH the send. The degrade-to-inline-link
+            # guarantee must hold regardless of doc_sync config state.
             degraded.append(p)
     return send_atts, degraded, tmp_files
 
