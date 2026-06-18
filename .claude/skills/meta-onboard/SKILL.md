@@ -125,3 +125,22 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
 ## Close
 Recap what's live, what's pending (and why it's fine), and point them at the board. Leave them in the
 sunshine.
+
+## Mark complete (the final step — always do this last)
+Once everything above is done and you've closed warmly, set the completion marker and signal you're
+finished:
+
+1. **Set the marker** — stamp the durable onboarding-complete flag into the live profile config (this
+   is what tells the board to stop showing onboarding and reveal itself from now on):
+   `python3 -c "import sys; sys.path.insert(0,'scripts'); import profile_lib; profile_lib.mark_onboarded()"`
+2. **Print the sentinel** — emit the literal line, on its own, so the host knows onboarding reached its
+   terminal state:
+   `ONBOARDING_COMPLETE`
+
+Do **not** print that sentinel earlier — only here, after the marker is set and onboarding is genuinely
+done.
+
+> **When run headless inside the board** (the in-UI onboarding room rather than a terminal): browser
+> sign-in windows pop up OUTSIDE the chat. Narrate them in plain language — "a sign-in window just
+> opened; finish it there and come back and tell me when you're done" — and wait for the user before
+> continuing. Never claim you can click it for them.
