@@ -128,6 +128,19 @@ def _write_session_id(session_id):
         pass
 
 
+def _clear_session_id():
+    """Forget the persisted onboarding session id (best-effort; never crashes).
+
+    Called when onboarding completes so the completed/dead session is not
+    --resumed by a later re-trigger; the next onboarding mints a fresh id.
+    """
+    try:
+        if os.path.exists(SESSION_STATE_PATH):
+            os.remove(SESSION_STATE_PATH)
+    except OSError:
+        pass
+
+
 # --- The harness -------------------------------------------------------------
 
 _HARNESS = """\
@@ -185,6 +198,11 @@ def run_turn(message):
     if new_session:
         # claude --session-id requires a canonical hyphenated UUID.
         sid = str(uuid.uuid4())
+        # A genuinely new onboarding run starts from a clean log: clear any stale
+        # transcript (incl. a prior run's onboarding_complete) BEFORE the first
+        # append. A resuming turn (session id present) skips this and keeps its
+        # accruing log. First-ever run resets an empty log (harmless).
+        onboard_transcript.reset()
     else:
         sid = existing_sid
 
@@ -217,8 +235,10 @@ def run_turn(message):
             if kind == "result":
                 # Metadata for the UI - yield, don't log. Persist the session id
                 # (falling back to the minted --session-id sid) so the next turn
-                # resumes; mirrors chat_runner's `result_sid or sid`.
-                if new_session:
+                # resumes; mirrors chat_runner's `result_sid or sid`. Skip the
+                # write once onboarding has completed - the session is dead and
+                # was just cleared, so persisting would resurrect it.
+                if new_session and not completed:
                     _write_session_id(event.get("session_id") or sid)
                 yield event
                 continue
@@ -238,4 +258,8 @@ def run_turn(message):
                     "text": "Onboarding complete - your board is live.",
                 }
                 onboard_transcript.append_event(dict(complete_evt))
+                # Clear the completed/dead session so a re-trigger is a fresh
+                # session + fresh log (a new run --session-id, not a --resume of
+                # the dead one). The transcript reset happens on that next new run.
+                _clear_session_id()
                 yield complete_evt

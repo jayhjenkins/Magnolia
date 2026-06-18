@@ -110,6 +110,9 @@ _DESTRUCTIVE_TOKEN_CHECKS = (_is_rm_rf_root, _is_mkfs_or_dd_device)
 def bash_is_destructive(command):
     """True iff a Bash command is obviously destructive (deny it).
 
+    Best-effort rail against accidental footguns - NOT a defense against an
+    adversarial agent; the real bound is repo-confinement on the Write/Edit tools.
+
     Coarse safety rails: rm -rf of a root/home target, mkfs, dd to a device, a
     fork bomb. An empty or unparseable command (unbalanced quotes) is treated as
     destructive - fail CLOSED. Everything else (installers, auth, cp, python3,

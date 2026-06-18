@@ -67,3 +67,21 @@ def test_legacy_migration_stamps_populated_profile(tmp_path):
 
 def test_legacy_migration_skips_when_no_live_profile(tmp_path):
     assert profile_lib.migrate_legacy_onboarded(root=str(tmp_path)) is False
+
+
+def test_mark_onboarded_is_noop_without_live_profile(tmp_path):
+    # no live profile/ in tmp_path
+    profile_lib.mark_onboarded(root=str(tmp_path))            # must not raise, must not write
+    assert profile_lib.onboarding_complete(root=str(tmp_path)) is False
+    # and it must NOT have created/written a profile dir under tmp_path
+    assert not os.path.isdir(os.path.join(str(tmp_path), "profile"))
+
+
+def test_onboarding_complete_false_on_corrupt_config(tmp_path):
+    # A live profile whose config.yaml is malformed must gate to onboarding
+    # (return False) rather than raising.
+    _mk_live_profile(str(tmp_path))
+    cfgp = os.path.join(str(tmp_path), "profile", "config.yaml")
+    with open(cfgp, "w", encoding="utf-8") as fh:
+        fh.write("models: [unbalanced\n  : : :\n")  # deliberately invalid YAML
+    assert profile_lib.onboarding_complete(root=str(tmp_path)) is False

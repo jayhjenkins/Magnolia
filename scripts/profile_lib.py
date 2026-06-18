@@ -329,14 +329,27 @@ def onboarding_complete(root=None):
     mid-onboarding)."""
     if not profile_is_live(root):
         return False
-    return bool(config(root=root).get("onboarded"))
+    try:
+        return bool(config(root=root).get("onboarded"))
+    except Exception:
+        # A malformed config.yaml must not crash the gate. Treat an unreadable
+        # config as "not complete" - the safe direction, gating to onboarding.
+        return False
 
 
 def mark_onboarded(root=None):
     """Stamp `onboarded: true` into the live profile config (the completion
     marker). Called by meta-onboard's final step. Uses the same round-trip
     read-modify-write idiom every other config setter uses, preserving siblings
-    and comments."""
+    and comments.
+
+    No-op (no write) when there is no live profile/. Without this guard a call
+    with no live profile would fall through profile_dir()'s profile.example
+    fallback and stamp the SHIPPED template - dirtying the tree and making every
+    fresh clone skip onboarding. A silent no-op is the safe behavior for a marker
+    writer; this mirrors the profile_is_live guard its sibling setters rely on."""
+    if not profile_is_live(root):
+        return
     def mutate(doc):
         doc["onboarded"] = True
     _update_yaml("config.yaml", mutate, root)

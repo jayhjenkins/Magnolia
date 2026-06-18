@@ -163,3 +163,42 @@ def test_second_turn_resumes_the_session(stub_model, monkeypatch):
     assert "--resume" in cmd
     assert cmd[cmd.index("--resume") + 1] == "onb-1"
     assert "--session-id" not in cmd
+
+
+# --- Transcript + session reset on re-run ------------------------------------
+
+def test_new_run_resets_stale_transcript(stub_model, monkeypatch):
+    # A prior run left a stale event (incl. a stale completion) in the log, but
+    # NO session state exists -> this is a genuinely new run. It must start from a
+    # clean log: the stale event is gone, only this run's events remain.
+    onboard_transcript.append_event({"kind": "onboarding_complete",
+                                     "role": "system", "text": "stale"})
+    assert onboard_transcript.read_events()    # stale event present
+
+    _run(monkeypatch, "onboard me", _canned_stream())
+
+    logged = onboard_transcript.read_events()
+    assert not any(e.get("text") == "stale" for e in logged)
+    assert any(e.get("kind") == "text" for e in logged)
+
+
+def test_resuming_run_does_not_reset_transcript(stub_model, monkeypatch):
+    # First turn mints + persists a session id; its events land in the log.
+    _run(monkeypatch, "onboard me", _canned_stream(session_id="onb-1"))
+    first_count = len(onboard_transcript.read_events())
+    assert first_count > 0
+    # Second turn RESUMES (session id present) -> must NOT reset; events accrue.
+    _run(monkeypatch, "keep going", _canned_stream(session_id="onb-1"))
+    assert len(onboard_transcript.read_events()) > first_count
+
+
+def test_completion_clears_session_state(stub_model, monkeypatch):
+    stream = [
+        _assistant_text("All set! ONBOARDING_COMPLETE"),
+        _result(session_id="onb-done"),
+    ]
+    _run(monkeypatch, "finish up", stream)
+    # The completed/dead session must be cleared so the NEXT onboarding mints a
+    # fresh session id rather than resuming the dead one.
+    assert not os.path.exists(onboard_runner.SESSION_STATE_PATH)
+    assert onboard_runner._read_session_id() is None
