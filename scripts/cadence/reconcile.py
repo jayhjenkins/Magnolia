@@ -19,6 +19,7 @@ invariant #8.
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -825,12 +826,13 @@ def _build_archive_description(mutation, program_id):
     """
     reason = mutation.get("reason", "unknown")
     citations = mutation.get("citations", [])
-    cite_str = "; ".join(citations) if citations else "(no citations)"
-
-    # Backlink to the program
-    program_link = f"[{program_id}](/programs/{program_id})"
-
-    return f"{reason} ({cite_str}) - {program_link}"
+    cite_str = "; ".join(str(c) for c in citations) if citations else "none"
+    # Plain-text backlink, matching _build_birth_description / _build_proposal_description
+    # (no markdown link to a nonexistent route). ASCII only, no em-dash.
+    return (
+        f"Cadence proposes archiving {program_id}: {reason}. "
+        f"Evidence: {cite_str}."
+    )
 
 
 def _propose_archive(fm, type_entry, body):
@@ -865,29 +867,55 @@ def _propose_archive(fm, type_entry, body):
                     "citations": [cp.get("id", "unknown")]
                 }
 
-    # Fact 3: Tracker-closed observation
-    # Scan body for ## Observations section, look for a completion obs whose source cites a tracker
-    # and claim mentions closed
+    # Fact 3: a `completion` observation reporting a tracker/epic closed.
+    # Observations are "### <date> - sentinel:NAME [kind] (confidence X)" headers
+    # followed by the claim text on the next line(s) -- NOT "- " bullets. Scan for
+    # a [completion] header whose following claim mentions "closed", and cite the
+    # observation's sentinel/source from the header.
     if body:
-        lines = body.split("\n")
         in_obs = False
-        for i, line in enumerate(lines):
-            if line.startswith("## Observations"):
+        current_hdr = None
+        for line in body.split("\n"):
+            s = line.strip()
+            if s.startswith("## Observations"):
                 in_obs = True
                 continue
-            if in_obs and line.startswith("## "):
-                break  # end of observations
-            if in_obs and line.startswith("- ") and "completion" in line.lower() and "closed" in line.lower():
-                # Simple check: if line mentions completion and closed, it's a tracker-closed completion
-                # Extract the source if possible (e.g., "source: gong:call-123")
-                # For now, just cite "tracker-closed"
+            if in_obs and s.startswith("## "):
+                break  # end of the observations section
+            if not in_obs:
+                continue
+            if s.startswith("### "):
+                current_hdr = s
+                continue
+            if current_hdr and "[completion]" in current_hdr and "closed" in s.lower():
                 return {
                     "op": "archive",
-                    "reason": "tracker-closed (completion observation)",
-                    "citations": ["tracker-closed"]
+                    "reason": "tracker reported closed (completion observation)",
+                    "citations": [_obs_source_from_header(current_hdr)],
                 }
 
     return None
+
+
+def _obs_source_from_header(header):
+    """Extract a citation from an observation header line.
+
+    Returns the `sentinel:NAME` token when present (e.g. "sentinel:tracker-truth"),
+    else a generic "tracker" citation. ASCII only.
+    """
+    m = re.search(r"sentinel:([\w-]+)", header or "")
+    return f"sentinel:{m.group(1)}" if m else "tracker"
+
+
+# Days per cadence period -- the silent-archive threshold is N of these.
+_PERIOD_DAYS = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30,
+                "quarterly": 90}
+
+
+def _period_days(type_entry):
+    """Length of one cadence period in days for a type (defaults to weekly=7)."""
+    cadence = (type_entry or {}).get("cadence") or "weekly"
+    return _PERIOD_DAYS.get(cadence, 7)
 
 
 def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
@@ -912,36 +940,26 @@ def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
     if not silent_cycles:
         return None  # No silent policy configured for this type
 
-    # Extract latest observation date from body
+    # Latest observation date = the program's last activity signal. Iterate fully
+    # and keep the max date (observations are not guaranteed sorted).
     latest_obs_date = None
-    if body:
-        for obs_date, obs_kind, obs_source, obs_claim in _iter_observations(body):
-            if obs_date and not latest_obs_date:
-                # _iter_observations yields in order (scanning top-to-bottom);
-                # we want the LATEST (most recent) so keep iterating.
-                try:
-                    latest_obs_date = _parse_iso_date(obs_date)
-                except (ValueError, TypeError):
-                    continue
-
-    # Find the actual latest: iterate fully and keep the one with the max date
-    if body:
-        latest_obs_date = None
-        for obs_date, obs_kind, obs_source, obs_claim in _iter_observations(body):
-            if obs_date:
-                try:
-                    parsed = _parse_iso_date(obs_date)
-                    if latest_obs_date is None or parsed > latest_obs_date:
-                        latest_obs_date = parsed
-                except (ValueError, TypeError):
-                    continue
+    for obs_date, _kind, _source, _claim in _iter_observations(body or ""):
+        if not obs_date:
+            continue
+        try:
+            parsed = _parse_iso_date(obs_date)
+        except (ValueError, TypeError):
+            continue
+        if latest_obs_date is None or parsed > latest_obs_date:
+            latest_obs_date = parsed
 
     if not latest_obs_date:
         return None  # No observations, cannot apply silent archive
 
-    # Check if we're beyond the silent threshold
+    # Threshold = the type's cadence-period length * N cycles (period-aware per the
+    # approved design; defaults to weekly when a type declares no cadence).
     now = _parse_iso_date(now_iso)
-    silent_threshold_days = silent_cycles * 7
+    silent_threshold_days = silent_cycles * _period_days(type_entry)
     days_silent = (now - latest_obs_date).days
     if days_silent < silent_threshold_days:
         return None  # Still active (within the threshold)

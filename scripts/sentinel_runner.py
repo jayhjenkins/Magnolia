@@ -652,17 +652,22 @@ def run_sentinel(name, root=None, now=None):
     Telemetry is always recorded (success or error).
     """
     root = root or os.getcwd()
-    now = now or program_lib._now_iso()
+    # The telemetry stamp is a full ISO timestamp. It must stay SEPARATE from the
+    # `now` passed to the impl: the impl treats `now` as a YYYY-MM-DD date (the
+    # observation date AND the source scan-window), so passing a full timestamp
+    # through would malform observation headers. Pass `now` verbatim (None -> the
+    # impl applies its own [:10] default).
+    stamp = program_lib._now_iso()
 
     try:
         summary = _run_sentinel_impl(name, root=root, now=now)
         # Record success
         emitted_count = summary.get("appended", 0) if summary else 0
-        record_sentinel_run(name, success=True, emitted_count=emitted_count, root=root, now=now)
+        record_sentinel_run(name, success=True, emitted_count=emitted_count, root=root, now=stamp)
         return summary
     except Exception as e:
         # Record failure
-        record_sentinel_run(name, success=False, emitted_count=0, error=str(e), root=root, now=now)
+        record_sentinel_run(name, success=False, emitted_count=0, error=str(e), root=root, now=stamp)
         # Return summary indicating failure (preserve "never raises" contract)
         return {"sentinel": name, "appended": 0, "dropped": 0, "error": str(e)}
 

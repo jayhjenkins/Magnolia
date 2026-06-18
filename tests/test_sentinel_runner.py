@@ -556,3 +556,33 @@ def test_run_sentinel_stamps_telemetry(tmp_path, monkeypatch):
     assert "last_run" in entry
     assert entry["last_success"] == entry["last_run"]  # success
     assert entry["last_emitted_count"] == 1
+
+
+def test_run_sentinel_passes_date_not_timestamp_to_impl(tmp_path, monkeypatch):
+    """Regression: the wrapper must NOT pass a full ISO timestamp into the impl.
+
+    The impl treats `now` as a YYYY-MM-DD date (observation date + scan window);
+    the telemetry stamp is a separate full timestamp. If the wrapper conflated
+    them, observation headers would be malformed in production. Lock that the impl
+    receives `now` verbatim (None when the caller passed None) while telemetry
+    still records a full timestamp.
+    """
+    root = str(tmp_path)
+    _pin_programs(tmp_path, monkeypatch)
+
+    seen = {}
+
+    def fake_impl(name, root=None, now=None):
+        seen["now"] = now
+        return {"sentinel": name, "appended": 0, "dropped": 0}
+
+    monkeypatch.setattr(sentinel_runner, "_run_sentinel_impl", fake_impl)
+
+    sentinel_runner.run_sentinel("movement-watch", root=root)  # now defaults to None
+
+    # The impl must see None (so its own [:10] date default applies), NOT a
+    # fabricated full timestamp.
+    assert seen["now"] is None
+    # Telemetry still got a real timestamp (full ISO, longer than a date).
+    entry = sentinel_runner.read_sentinel_runs(root)["movement-watch"]
+    assert len(entry["last_run"]) > len("2026-06-18")

@@ -1709,6 +1709,40 @@ def test_propose_archive_fires_on_did_it_work_verified(tmp_path):
     assert "did-it-work" in result.get("reason", "").lower()
 
 
+def test_propose_archive_fires_on_tracker_closed_observation(tmp_path):
+    # Fact 3: a `completion` observation (real "### <date> - sentinel:NAME
+    # [completion]" format, NOT a "- " bullet) whose claim reports the tracker
+    # closed -> archive proposal. Isolated from Fact 1/2: mid-phase, no
+    # did-it-work checkpoint, so ONLY the tracker-closed fact can fire.
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Tracker-closed initiative",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",  # not terminal
+            "phase_entered": {"execution": "2026-06-01"},
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    pl.append_observation(
+        program_id, kind="completion", sentinel="tracker-truth",
+        source="tracker:EPIC-1", claim="Epic EPIC-1 closed.",
+        date="2026-06-10", root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"] if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_archive(program["frontmatter"], type_entry, program["body"])
+
+    assert result is not None
+    assert result.get("op") == "archive"
+    assert "closed" in result.get("reason", "").lower()
+    # cites the observation's sentinel, not a bare placeholder
+    assert any("tracker-truth" in str(c) for c in result.get("citations", []))
+
+
 def test_propose_archive_none_when_active_midphase(tmp_path):
     # Create a pipeline program in a mid-pipeline phase (not terminal).
     # Call _propose_archive and assert it returns None (no archive).

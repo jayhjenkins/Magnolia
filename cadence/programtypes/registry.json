@@ -19,7 +19,7 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" }, { "kind": "project_management", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
         "signals": [
@@ -56,7 +56,7 @@
     { "id": "did-it-work", "label": "Did it work?", "family": "outcomes",
       "state_model": "target", "cadence": "weekly",
       "sources": [ { "kind": "metrics", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "completion-verified", "action": "propose-update" } ],
       "presentation": { "chip_tokens": {} } },
 
     { "id": "eos-rock", "label": "EOS rock", "family": "eos",
@@ -69,7 +69,7 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "completion-verified", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
         "signals": [ "quarterly rock commitment declared in a leadership session" ],
