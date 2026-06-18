@@ -316,6 +316,49 @@ def set_cost_posture(level, root=None):
     _update_yaml("config.yaml", mutate, root)
 
 
+def profile_is_live(root=None):
+    """True if the live profile/ dir exists (not the profile.example fallback)."""
+    root = root or PM_OS_DIR
+    return os.path.isdir(os.path.join(root, "profile"))
+
+
+def onboarding_complete(root=None):
+    """True once onboarding has finished: the live profile exists AND its config
+    carries `onboarded: true`. NOT mere profile/ existence (meta-onboard creates
+    profile/ early, at step 0, so existence alone would flip the gate
+    mid-onboarding)."""
+    if not profile_is_live(root):
+        return False
+    return bool(config(root=root).get("onboarded"))
+
+
+def mark_onboarded(root=None):
+    """Stamp `onboarded: true` into the live profile config (the completion
+    marker). Called by meta-onboard's final step. Uses the same round-trip
+    read-modify-write idiom every other config setter uses, preserving siblings
+    and comments."""
+    def mutate(doc):
+        doc["onboarded"] = True
+    _update_yaml("config.yaml", mutate, root)
+
+
+def migrate_legacy_onboarded(root=None):
+    """Backward-compat: an existing install (live profile already populated with
+    a real identity) predates the marker - stamp it so it is never re-gated into
+    onboarding. Returns True if it stamped, False otherwise. Idempotent."""
+    if not profile_is_live(root):
+        return False
+    cfg = config(root=root)
+    if cfg.get("onboarded"):
+        return False
+    name = (profile(root=root).get("display_name") or "").strip()
+    placeholder = name == "" or name.lower() in ("your name", "name")
+    if placeholder:
+        return False   # genuinely fresh/example-shaped; let onboarding run
+    mark_onboarded(root=root)
+    return True
+
+
 def autonomy_enforcement(root=None):
     """Global posture flag: may an autonomous action-type auto-ship without a
     per-instance human approve? Default False (auto-ship is opt-in per install)."""
