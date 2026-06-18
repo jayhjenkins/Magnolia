@@ -860,7 +860,15 @@ def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
     if target is None and link_to:
         linked = _find_open_candidate(items, candidate_id=link_to)
         if linked is not None:
-            if confidence is not None and float(confidence) >= _CANDIDATE_LINK_CONFIDENCE:
+            # Coerce defensively: a sentinel may emit a non-numeric confidence
+            # (e.g. the string "high"); treat that as below-threshold and fall
+            # through to the flagged branch (mirrors append_observation).
+            try:
+                confident = (confidence is not None
+                             and float(confidence) >= _CANDIDATE_LINK_CONFIDENCE)
+            except (TypeError, ValueError):
+                confident = False
+            if confident:
                 target = linked
                 action = "merged"
             else:
@@ -1001,6 +1009,12 @@ def birth_program(spec, root=None):
     """
     program_type = (spec or {}).get("program_type")
     title = (spec or {}).get("title")
+
+    # Guard a malformed spec here with a birth-specific message instead of
+    # letting it surface from deep inside create_program (symmetry with the
+    # program_type registry check below).
+    if not (title or "").strip():
+        raise ValueError("birth spec requires a title")
 
     # Validate the type against the registry (ValueError on unknown).
     registry = load_registry()

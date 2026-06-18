@@ -786,6 +786,55 @@ def test_upsert_candidate_flags_link_without_confidence(tmp_path):
     assert items[second["candidate_id"]]["possible_duplicate_of"] == first["candidate_id"]
 
 
+def test_upsert_candidate_non_numeric_confidence_flags(tmp_path):
+    # A sentinel emits a non-numeric confidence (e.g. "high") on a resolvable
+    # link -> defensively treated as below-threshold (flagged), never raises.
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Alpha initiative", source="meeting-A", claim="c1", root=str(tmp_path))
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="Vague name", source="meeting-B", claim="c2",
+        link_to=first["candidate_id"], confidence="high", root=str(tmp_path))
+    assert second["action"] == "flagged"
+    assert second["candidate_id"] != first["candidate_id"]
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = {it["id"]: it for it in prog["frontmatter"]["items"]}
+    assert items[second["candidate_id"]]["possible_duplicate_of"] == first["candidate_id"]
+
+
+def test_upsert_candidate_anchor_precedence_over_link(tmp_path):
+    # When BOTH a matching anchor AND a link_to (to a different open candidate)
+    # are supplied, the anchor match wins: merged into the anchor candidate, the
+    # link is ignored, and possible_duplicate_of is NOT set.
+    ip = _seed_intake(tmp_path)
+    anchored = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Anchored initiative", source="meeting-A", claim="c1",
+        anchor="EPIC-77", root=str(tmp_path))
+    other = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="Other open candidate", source="meeting-B", claim="c2",
+        root=str(tmp_path))
+    # Same anchor AND a link to the OTHER candidate -> anchor wins.
+    res = pl.upsert_candidate(
+        ip, candidate_key="k3", program_type="roadmap-initiative",
+        title="Different name entirely", source="meeting-C", claim="c3",
+        anchor="EPIC-77", link_to=other["candidate_id"], confidence=0.99,
+        root=str(tmp_path))
+    assert res["action"] == "merged"
+    assert res["candidate_id"] == anchored["candidate_id"]
+    assert res["candidate_id"] != other["candidate_id"]
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = {it["id"]: it for it in prog["frontmatter"]["items"]}
+    # Merged into the anchored candidate; the link was ignored.
+    assert "possible_duplicate_of" not in items[anchored["candidate_id"]]
+    assert len(items[anchored["candidate_id"]]["evidence"]) == 2
+    # The other candidate is untouched.
+    assert len(items[other["candidate_id"]]["evidence"]) == 1
+
+
 def test_upsert_candidate_distinct_source_counting(tmp_path):
     # Same source twice -> source_count stays 1 (it counts DISTINCT sources).
     ip = _seed_intake(tmp_path)
@@ -986,6 +1035,22 @@ def test_birth_program_unknown_type_raises(tmp_path):
     with pytest.raises(ValueError):
         pl.birth_program(
             {"program_type": "not-a-real-type", "title": "Nope"},
+            root=str(tmp_path),
+        )
+
+
+def test_birth_program_blank_title_raises_birth_specific(tmp_path):
+    # A missing/blank title fails with the birth-specific message rather than
+    # surfacing from deep inside create_program.
+    import pytest
+    with pytest.raises(ValueError, match="birth spec requires a title"):
+        pl.birth_program(
+            {"program_type": "roadmap-initiative", "title": "   "},
+            root=str(tmp_path),
+        )
+    with pytest.raises(ValueError, match="birth spec requires a title"):
+        pl.birth_program(
+            {"program_type": "roadmap-initiative"},
             root=str(tmp_path),
         )
 
