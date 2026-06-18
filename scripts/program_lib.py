@@ -949,6 +949,110 @@ def mark_candidate_birthed(intake_program_id, candidate_id, born_program_id, roo
     return cand
 
 
+# ─── Birth path (create an active program from an intake birth spec) ──────────
+#
+# birth_program is the sibling to apply_mutation: apply_mutation MUTATES an
+# existing program; birth_program CREATES one. The accept path (a later task)
+# calls this when a human accepts a birth proposal, then enqueues bootstrap
+# emissions -- so birth_program stays PURE file-creation (no task queue, no
+# external write) to keep it unit-testable in isolation. It reuses create_program
+# for the base file write (DRY), then writes the citations into ## Intent and
+# appends exactly ONE origin observation via append_observation. ASCII-safe
+# runtime strings (invariant #8); owner_role is a ROLE token, never a name
+# (invariant #1); append-only (invariant #6).
+
+# Sane default owner when a spec omits one. A ROLE token, never a person/team
+# name (invariant #1) -- the same token create_program's callers seed with.
+_DEFAULT_OWNER_ROLE = "product"
+
+
+def _first_phase_id(type_entry):
+    """Return the id of the FIRST phase in a pipeline type, or None.
+
+    None for a non-pipeline type (no `phases`) or a malformed/empty phase list,
+    so a register/cycle/target birth simply gets no inferred phase (never raises).
+    """
+    phases = (type_entry or {}).get("phases") or []
+    for p in phases:
+        if isinstance(p, dict) and p.get("id"):
+            return p.get("id")
+    return None
+
+
+def birth_program(spec, root=None):
+    """Create a new active program from an intake birth spec; return its id.
+
+    spec is a dict:
+        program_type : registry type id (ValueError if unknown).
+        title        : program title.
+        checkpoints? : list of checkpoint dicts, carried onto the new program with
+                       each forced to status "pending" (a newborn has met nothing).
+        citations?   : list of source citations that earned the birth; written into
+                       ## Intent as a one-line origin paragraph and the first one
+                       cited as the origin observation's source.
+        owner_role?  : a ROLE token (defaults to "product"); never a name.
+        phase?       : explicit starting phase; defaults to the type's FIRST phase
+                       for a pipeline type, else None (register/cycle/target).
+
+    Pure file-creation (Tier-1): writes the program file, its ## Intent origin
+    paragraph, and ONE origin observation. Does NOT enqueue bootstrap emissions --
+    that is the accept path's job (a later task) -- so this is unit-testable
+    without the task queue. Returns the freshly minted program_id.
+    """
+    program_type = (spec or {}).get("program_type")
+    title = (spec or {}).get("title")
+
+    # Validate the type against the registry (ValueError on unknown).
+    registry = load_registry()
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == program_type),
+        None,
+    )
+    if type_entry is None:
+        raise ValueError(f"unknown program_type: {program_type!r}")
+
+    owner_role = (spec or {}).get("owner_role") or _DEFAULT_OWNER_ROLE
+
+    # Phase: explicit spec phase, else the type's first phase for a pipeline
+    # model, else None (a register/cycle/target type has no phase).
+    phase = (spec or {}).get("phase")
+    if phase is None and type_entry.get("state_model") == "pipeline":
+        phase = _first_phase_id(type_entry)
+
+    # Carry the spec's checkpoints, each forced to status "pending" (a newborn has
+    # met nothing). Copy each dict so we never mutate the caller's spec.
+    checkpoints = []
+    for cp in (spec or {}).get("checkpoints") or []:
+        cp = dict(cp)
+        cp["status"] = "pending"
+        checkpoints.append(cp)
+
+    citations = [str(c) for c in ((spec or {}).get("citations") or []) if c]
+
+    frontmatter_extra = {"checkpoints": checkpoints, "drift": "holding"}
+    if phase is not None:
+        frontmatter_extra["phase"] = phase
+
+    # Reuse create_program for the base file (status defaults to "active"). It
+    # writes the canonical ## Intent / ## Observations / ## Cycles body.
+    citation_str = ", ".join(citations) if citations else "intake candidate"
+    intent = f"Born from intake evidence: {citation_str}."
+    program_id, _ = create_program(
+        type=program_type, title=title, owner_role=owner_role,
+        intent=intent, frontmatter_extra=frontmatter_extra, root=root,
+    )
+
+    # Exactly ONE origin observation, source-cited to the first citation (or the
+    # generic "intake" when there are none). ASCII-safe claim.
+    append_observation(
+        program_id, kind="status-signal", sentinel="program-intake",
+        source=(citations[0] if citations else "intake"),
+        claim="Program born from intake candidate.", root=root,
+    )
+
+    return program_id
+
+
 # ─── Phase advancement core (shared by the fact door + the proposal applier) ──
 #
 # _next_phase_id + _advance_phase_fm are the ONE place the engine advances a

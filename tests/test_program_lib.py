@@ -935,3 +935,131 @@ def test_upsert_candidate_no_anchor_no_link_opens_when_no_title_match(tmp_path):
                             title="Beta", source="s2", claim="c2", root=str(tmp_path))
     assert a["action"] == "opened" and b["action"] == "opened"
     assert a["candidate_id"] != b["candidate_id"]
+
+
+# ─── birth_program (Task 4, the birth path: pure file-creation) ───────────────
+
+def test_birth_program_pipeline_creates_active_at_first_phase(tmp_path):
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {
+            "program_type": "roadmap-initiative",
+            "title": "Smart reconciliation",
+            "checkpoints": [
+                {"id": "discovery-exit", "label": "Discovery exit", "due": "2026-07-01"},
+            ],
+            "citations": ["meeting-A", "meeting-B"],
+        },
+        root=root,
+    )
+    prog = pl.read_program(new_id, root=root)
+    fm = prog["frontmatter"]
+    assert fm["program_id"] == new_id
+    assert fm["status"] == "active"
+    assert fm["type"] == "roadmap-initiative"
+    assert fm["title"] == "Smart reconciliation"
+    # First phase of roadmap-initiative is `discovery`.
+    assert fm["phase"] == "discovery"
+    # owner_role defaults to a role token (never a name).
+    assert fm["owner_role"] == "product"
+    # Carried checkpoint, forced to status pending.
+    assert len(fm["checkpoints"]) == 1
+    cp = fm["checkpoints"][0]
+    assert cp["id"] == "discovery-exit"
+    assert cp["status"] == "pending"
+    # Exactly one origin observation, stamped by the intake sentinel.
+    obs = list(pl.iter_observations(prog["body"]))
+    assert len(obs) == 1
+    date, kind, sentinel, source, claim = obs[0]
+    assert kind == "status-signal"
+    assert sentinel == "program-intake"
+    assert source == "meeting-A"  # first citation
+    assert claim  # non-empty
+    # Intent is non-empty and carries the citations.
+    intent = pl._parse_intent(prog["body"])
+    assert intent
+    assert "meeting-A" in intent and "meeting-B" in intent
+
+
+def test_birth_program_unknown_type_raises(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        pl.birth_program(
+            {"program_type": "not-a-real-type", "title": "Nope"},
+            root=str(tmp_path),
+        )
+
+
+def test_birth_program_returns_freshly_minted_id(tmp_path):
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {"program_type": "roadmap-initiative", "title": "Fresh one"},
+        root=root,
+    )
+    # The returned id round-trips through read_program.
+    prog = pl.read_program(new_id, root=root)
+    assert prog["frontmatter"]["program_id"] == new_id
+    # A second birth mints a distinct id.
+    second = pl.birth_program(
+        {"program_type": "roadmap-initiative", "title": "Second one"},
+        root=root,
+    )
+    assert second != new_id
+
+
+def test_birth_program_citations_land_in_intent(tmp_path):
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {
+            "program_type": "roadmap-initiative",
+            "title": "Cited birth",
+            "citations": ["GONG-123", "ZD-456"],
+        },
+        root=root,
+    )
+    intent = pl._parse_intent(pl.read_program(new_id, root=root)["body"])
+    assert "GONG-123" in intent
+    assert "ZD-456" in intent
+
+
+def test_birth_program_register_type_does_not_crash_on_phase(tmp_path):
+    # A non-pipeline (register / cycle) type has no phases; birth must not
+    # try to infer a phase or crash.
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {"program_type": "program-intake", "title": "Nursery 2"},
+        root=root,
+    )
+    fm = pl.read_program(new_id, root=root)["frontmatter"]
+    assert fm["status"] == "active"
+    assert fm["type"] == "program-intake"
+    # No phase inferred for a register-model type.
+    assert fm.get("phase") is None
+    assert fm["checkpoints"] == []
+
+
+def test_birth_program_owner_role_from_spec(tmp_path):
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {
+            "program_type": "roadmap-initiative",
+            "title": "Owned",
+            "owner_role": "engineering",
+        },
+        root=root,
+    )
+    assert pl.read_program(new_id, root=root)["frontmatter"]["owner_role"] == "engineering"
+
+
+def test_birth_program_empty_citations_still_births(tmp_path):
+    # No citations at all -> Intent + observation still land (source falls back).
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {"program_type": "roadmap-initiative", "title": "Uncited"},
+        root=root,
+    )
+    prog = pl.read_program(new_id, root=root)
+    obs = list(pl.iter_observations(prog["body"]))
+    assert len(obs) == 1
+    assert obs[0][3] == "intake"  # source falls back to "intake"
+    assert pl._parse_intent(prog["body"])
