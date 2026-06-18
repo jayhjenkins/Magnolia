@@ -69,6 +69,7 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "sentinels": ["sheet-watch"],
       "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "completion-verified", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
@@ -80,6 +81,7 @@
     { "id": "eos-cycle", "label": "EOS cycle", "family": "eos",
       "state_model": "cycle", "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "sentinels": ["sheet-watch"],
       "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
       "intake": { "route": "capture" },
       "presentation": { "chip_tokens": {} } },
@@ -87,7 +89,19 @@
     { "id": "eos-issues", "label": "EOS issues", "family": "eos",
       "state_model": "register", "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "sentinels": ["sheet-watch"],
       "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "eos-l10-prep", "label": "EOS L10 prep", "family": "eos",
+      "state_model": "cycle", "cadence": "weekly",
+      "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
+      "sentinels": ["sheet-watch"],
+      "emitters": [
+        { "on": "drift:broken", "action": "escalate" },
+        { "on": "cycle-fresh", "action": "draft-message", "template": "l10-prep-nudge", "max_nudges_per_person_per_week": 2 }
+      ],
+      "intake": { "route": "capture" },
       "presentation": { "chip_tokens": {} } },
 
     { "id": "program-intake", "label": "Program intake", "family": "system",

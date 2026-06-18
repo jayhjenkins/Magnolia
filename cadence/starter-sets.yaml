@@ -1,0 +1,19 @@
+# Cadence starter sets - curated program-type bundles the onboarding concierge
+# offers ONCE at setup (design brief section 8). NEVER consulted at runtime: a
+# program type is "live" iff the operator has >=1 active program of it, so a
+# starter set is purely a cold-start convenience ("you run EOS - want the L10-prep
+# and scorecard programs seeded?"). Each bundle lists program-type ids that must
+# exist in cadence/programtypes/registry.json (the starter_sets.validate guard).
+sets:
+  eos:
+    label: "EOS facilitation"
+    description: >
+      Seed the standing EOS programs for a team running EOS: L10 meeting prep,
+      quarterly rocks, the weekly scorecard cycle, and the issues list. The EOS
+      sheet stays manual-on-purpose (read-only); these programs read, prepare,
+      and nudge - they never write to the sheet.
+    types:
+      - eos-l10-prep
+      - eos-rock
+      - eos-cycle
+      - eos-issues

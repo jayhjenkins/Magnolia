@@ -67,6 +67,13 @@ CLAUDE_TIMEOUT = 300
 _ADAPTER_SOURCE_KIND = "project_management"
 _ADAPTER_FAMILY = "project_management"
 
+# The read-only sheet source kind (the EOS sheet). A sentinel whose sources are
+# ALL this kind reads the sheet LIVE at dispatch via the M365 MCP. When the
+# operator has configured no sheet locator the sentinel is BLIND (it cannot read)
+# rather than quiet-but-live - recorded success=False so the silent-archive door
+# never treats an EOS program as dormant off it.
+_SHEET_SOURCE_KIND = "eos_sheet"
+
 # Tracker statuses (lower-cased) that mechanically support a `completion`
 # observation. Anything else maps to `status-signal`. No interpretation.
 _DONE_STATUSES = {"done", "closed", "complete", "completed", "resolved", "shipped"}
@@ -153,6 +160,15 @@ def _adapter_configured(name, root=None):
     """
     mod = adapters.get(_ADAPTER_FAMILY, root)
     return bool(mod and mod.is_configured(root))
+
+
+def _sheet_configured(name, root=None):
+    """Whether the read-only EOS sheet locator is configured (profile-driven).
+
+    A small module-level seam (like _adapter_configured) so the blind no-op is
+    monkeypatchable in tests. `name` is the sentinel name (room for per-sentinel
+    sheet routing later). Unconfigured -> the sheet sentinel runs blind."""
+    return bool(profile_lib.eos_sheet(root))
 
 
 # --- Source gathering (thin, mockable; heavy qmd wiring deferred) ------------
@@ -594,6 +610,20 @@ def _run_sentinel_impl(name, root=None, now=None):
                 "clean no-op (0 observations)")
             return summary
         return _run_tracker_truth(name, programs, root=root, now=now)
+
+    # A sheet-backed sentinel (all sources eos_sheet) reads a manual-on-purpose
+    # external sheet LIVE via the M365 MCP at dispatch. With no configured locator
+    # it CANNOT read -> it is BLIND, not quiet-but-live: mark the summary error so
+    # run_sentinel records success=False. (Distinguishing a configured-but-
+    # MCP-absent dispatch from a genuinely empty read is the deferred
+    # dispatch-failure-vs-empty nuance; configured -> dispatch and trust the read.)
+    if source_kinds and source_kinds == {_SHEET_SOURCE_KIND}:
+        if not _sheet_configured(name, root):
+            log(f"sentinel '{name}': eos_sheet locator unconfigured - "
+                "blind (0 observations)")
+            summary["error"] = "eos_sheet source unconfigured (blind)"
+            return summary
+        # configured -> fall through to the normal LLM dispatch path below.
 
     source_digest = _gather_sources(definition, programs, now=now)
     prompt = _build_prompt(definition, programs, source_digest)

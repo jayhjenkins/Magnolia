@@ -141,6 +141,40 @@ def test_rejected_record_counted_as_dropped_no_crash(tmp_path, monkeypatch):
     assert "Bad kind record." not in body1
 
 
+def test_sheet_watch_blind_when_locator_unconfigured(tmp_path, monkeypatch):
+    """A sheet sentinel with no configured locator is BLIND, not live: it does NOT
+    dispatch and records success=False so the silent-archive door never reads a
+    dormant EOS program off it. inc5 slice 10."""
+    _seed_two_programs(tmp_path, monkeypatch)
+    monkeypatch.setattr(sentinel_runner, "_sheet_configured", lambda name, root=None: False)
+    called = []
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda *a, **k: called.append(1) or "[]")
+    summary = sentinel_runner.run_sentinel("sheet-watch", root=str(tmp_path))
+    assert summary["appended"] == 0
+    assert "error" in summary          # blind
+    assert not called                  # never dispatched (can't read the sheet)
+    runs = sentinel_runner.read_sentinel_runs(root=str(tmp_path))
+    assert runs["sheet-watch"].get("last_error")
+    assert "last_success" not in runs["sheet-watch"]   # blind != succeeded
+
+
+def test_sheet_watch_configured_dispatches_and_records_live(tmp_path, monkeypatch):
+    pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
+    monkeypatch.setattr(sentinel_runner, "_sheet_configured", lambda name, root=None: True)
+    records = [{"program_id": pid1, "kind": "status-signal",
+                "source": "sheet:EOS/Scorecard!A2", "claim": "Rock on track.",
+                "confidence": 0.8}]
+    called = []
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: called.append(1) or json.dumps(records))
+    summary = sentinel_runner.run_sentinel("sheet-watch", root=str(tmp_path))
+    assert called                       # configured -> live dispatch
+    assert summary["appended"] == 1
+    runs = sentinel_runner.read_sentinel_runs(root=str(tmp_path))
+    assert runs["sheet-watch"]["last_success"]   # live + succeeded
+
+
 def test_tracker_truth_unconfigured_adapter_is_clean_noop(tmp_path, monkeypatch):
     pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
     # The adapter check reports unconfigured; dispatch must NOT be called.

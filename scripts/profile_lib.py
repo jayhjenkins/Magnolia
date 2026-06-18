@@ -100,6 +100,15 @@ def doc_sync_config(root=None):
     }
 
 
+def eos_sheet(root=None):
+    """The read-only EOS sheet locator (an M365/SharePoint resource), or None.
+
+    Read by the sheet-watch sentinel; the EOS sheet is manual-on-purpose and is
+    NEVER written. The locator lives in the per-person profile, never in the
+    engine (invariant #1); unconfigured -> None -> sheet-watch runs blind."""
+    return integration("eos", root).get("sheet") or None
+
+
 def _analytics(name, root=None):
     return (integrations(root).get("analytics") or {}).get(name) or {}
 

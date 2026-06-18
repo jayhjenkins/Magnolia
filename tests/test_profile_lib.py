@@ -31,6 +31,22 @@ def test_identity_accessors(profile_root):
     assert profile_lib.persona(root=profile_root) == "pm"
 
 
+def test_eos_sheet_none_when_unconfigured(profile_root):
+    # No eos block in the seeded profile -> sheet-watch sees no locator (blind).
+    assert profile_lib.eos_sheet(root=profile_root) is None
+
+
+def test_eos_sheet_returns_configured_locator(tmp_path):
+    import textwrap
+    prof = tmp_path / "profile"
+    prof.mkdir()
+    (prof / "integrations.yaml").write_text(textwrap.dedent("""\
+        eos:
+          sheet: "sharepoint:PM-OS/EOS/scorecard.xlsx"
+    """))
+    assert profile_lib.eos_sheet(root=str(tmp_path)) == "sharepoint:PM-OS/EOS/scorecard.xlsx"
+
+
 def test_identity_fallbacks_when_absent(tmp_path):
     (tmp_path / "profile").mkdir()
     assert profile_lib.display_name(root=str(tmp_path)) == "Operator"

@@ -36,6 +36,38 @@ def test_weekly_priorities_has_produce_artifact_and_draft_message_emitters():
     assert draft["max_nudges_per_person_per_week"] == 1
 
 
+# ─── inc5 slice 10: EOS family + L10-prep nudge + sheet-watch wiring ─────────
+
+def _types_by_id():
+    with open(ps.REGISTRY, encoding="utf-8") as f:
+        reg = json.load(f)
+    return {t["id"]: t for t in reg["types"]}
+
+
+def test_eos_l10_prep_type_has_rate_capped_nudge():
+    """eos-l10-prep is a cycle type whose pre-L10 nudge is a rate-capped
+    draft-message on cycle-fresh (reuses the inc3b nudge fence)."""
+    t = _types_by_id()["eos-l10-prep"]
+    assert t["state_model"] == "cycle"
+    assert t["family"] == "eos"
+    nudge = next(e for e in t["emitters"] if e.get("action") == "draft-message")
+    assert nudge["on"] == "cycle-fresh"
+    assert isinstance(nudge["max_nudges_per_person_per_week"], int)
+    assert nudge["max_nudges_per_person_per_week"] >= 1
+
+
+def test_all_eos_types_read_the_sheet_via_sheet_watch():
+    """Every EOS type binds the read-only sheet-watch sentinel and keeps its
+    eos_sheet source mode:read (manual-on-purpose, never written)."""
+    types = _types_by_id()
+    for tid in ("eos-rock", "eos-cycle", "eos-issues", "eos-l10-prep"):
+        t = types[tid]
+        assert "sheet-watch" in (t.get("sentinels") or []), tid
+        srcs = t["sources"]
+        assert all(s["mode"] == "read" for s in srcs), tid
+        assert any(s["kind"] == "eos_sheet" for s in srcs), tid
+
+
 def test_prog_0005_items_survive_read_program():
     """Option 1 seam check: the seeded role-referenced items survive the read
     and are available to the worker (which is how items are consumed). No
