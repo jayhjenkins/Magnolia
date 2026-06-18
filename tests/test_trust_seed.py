@@ -25,3 +25,50 @@ def test_read_state_not_logged_in(tmp_path):
     st = trust_seed.read_state(path=str(cfg))
     assert st["logged_in"] is False
     assert st["connectors"] == []
+
+
+def test_seed_trust_creates_project_entry(tmp_path):
+    cfg = tmp_path / ".claude.json"
+    cfg.write_text(json.dumps({"oauthAccount": {"accountUuid": "x"}, "projects": {}}))
+    res = trust_seed.seed_trust("/repo/Magnolia", path=str(cfg))
+    assert res["status"] == "seeded"
+    data = json.loads(cfg.read_text())
+    entry = data["projects"]["/repo/Magnolia"]
+    assert entry["hasTrustDialogAccepted"] is True
+    assert "qmd" in entry["enabledMcpjsonServers"]
+    assert entry["hasClaudeMdExternalIncludesApproved"] is True
+
+
+def test_seed_trust_preserves_existing_keys_and_other_projects(tmp_path):
+    cfg = tmp_path / ".claude.json"
+    cfg.write_text(json.dumps({
+        "oauthAccount": {"accountUuid": "x"},
+        "theme": "dark",
+        "projects": {
+            "/other": {"hasTrustDialogAccepted": True},
+            "/repo/Magnolia": {"lastCost": 1.23, "enabledMcpjsonServers": ["foo"]},
+        },
+    }))
+    trust_seed.seed_trust("/repo/Magnolia", path=str(cfg))
+    data = json.loads(cfg.read_text())
+    assert data["theme"] == "dark"
+    assert data["projects"]["/other"] == {"hasTrustDialogAccepted": True}
+    entry = data["projects"]["/repo/Magnolia"]
+    assert entry["lastCost"] == 1.23
+    assert set(entry["enabledMcpjsonServers"]) == {"foo", "qmd"}
+
+
+def test_seed_trust_idempotent(tmp_path):
+    cfg = tmp_path / ".claude.json"
+    cfg.write_text(json.dumps({"oauthAccount": {"x": 1}, "projects": {}}))
+    trust_seed.seed_trust("/repo/Magnolia", path=str(cfg))
+    trust_seed.seed_trust("/repo/Magnolia", path=str(cfg))
+    entry = json.loads(cfg.read_text())["projects"]["/repo/Magnolia"]
+    assert entry["enabledMcpjsonServers"] == ["qmd"]
+
+
+def test_seed_trust_skips_when_config_absent(tmp_path):
+    missing = tmp_path / "nope.json"
+    res = trust_seed.seed_trust("/repo/Magnolia", path=str(missing))
+    assert res["status"] == "skipped"
+    assert not missing.exists()

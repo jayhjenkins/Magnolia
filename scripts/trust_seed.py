@@ -31,3 +31,36 @@ def read_state(path=None):
     if not isinstance(connectors, list):
         connectors = []
     return {"logged_in": bool(data.get("oauthAccount")), "connectors": connectors}
+
+
+def _atomic_write(path, data):
+    d = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
+def seed_trust(project_path, path=None):
+    """Seed Layer-2 folder trust for project_path. Mutates ONLY that project
+    entry; preserves all other config. If ~/.claude.json is absent (login not
+    done) we skip gracefully rather than fabricate it. Returns a result dict."""
+    cfg_path = path or claude_config_path()
+    data = _load(cfg_path)
+    if not isinstance(data, dict):
+        return {"status": "skipped", "reason": "no ~/.claude.json (run claude login first)"}
+    projects = data.setdefault("projects", {})
+    entry = projects.setdefault(project_path, {})
+    entry["hasTrustDialogAccepted"] = True
+    entry["hasClaudeMdExternalIncludesApproved"] = True
+    enabled = entry.get("enabledMcpjsonServers") or []
+    if "qmd" not in enabled:
+        enabled = enabled + ["qmd"]
+    entry["enabledMcpjsonServers"] = enabled
+    _atomic_write(cfg_path, data)
+    return {"status": "seeded", "project": project_path}
