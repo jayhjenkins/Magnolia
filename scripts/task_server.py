@@ -44,6 +44,8 @@ import platform_lib
 import adaptations_lib
 import adapt_runner
 import adapt_transcript
+import onboard_runner
+import onboard_transcript
 import live_runs
 import adapters
 from adapters.project_management._contract import NotConfigured
@@ -66,6 +68,23 @@ from shipper import (
 def _chat_run_key(task_id):
     """live_runs key for a task's chat run. Namespaced to avoid adapt-key collision."""
     return "chat:%s" % (task_id,)
+
+
+def _onboarding_run_key():
+    """live_runs key for THE onboarding run. Onboarding is single-session, so the
+    key is fixed (namespaced to avoid colliding with chat/adapt keys)."""
+    return "onboarding"
+
+
+def _should_onboard():
+    """True when the first-run gate should serve the onboarding room instead of
+    the board: onboarding has NOT completed (no live profile, or its config lacks
+    the `onboarded` marker). Defensive: any read failure defaults to NOT gating
+    (serve the board) so a profile-read bug can never lock a working install out."""
+    try:
+        return not profile_lib.onboarding_complete()
+    except Exception:
+        return False
 
 
 # ─── Load LangFuse env vars if not already set ───────────────────────────────
@@ -1676,6 +1695,53 @@ def handle_chat(handler, task_id):
     )
 
 
+# ─── Onboarding: the first-run front door ──────────────────────────────────────
+# The onboarding run is DECOUPLED from the SSE client via live_runs (mirrors
+# chat/adapt): a single fixed-key run drives the headless meta-onboard session,
+# runs to completion on its own daemon thread, and a client disconnect only stops
+# the tail (never the run). One LIVE run (a NEW message while live -> 409).
+
+def handle_onboarding_run(handler):
+    """POST /api/onboarding/run {message} - run one onboarding turn over SSE.
+
+    Mirrors handle_chat: validate the message, guard a concurrent run via
+    live_runs.is_live (409), start the decoupled run keyed by the fixed
+    onboarding key with a NO-OP append_fn (onboard_runner owns the durable log),
+    then stream by tailing onboard_transcript. The first-run gate (do_GET) serves
+    the onboarding room until profile_lib.onboarding_complete() is true.
+    """
+    body = _read_request_body(handler)
+    message = (body.get("message") or "").strip()
+    if not message:
+        _error_response(handler, "message is required")
+        return
+
+    # One LIVE onboarding run at a time. A second concurrent POST while live is a
+    # 409 - the surviving run keeps filling the transcript; reconnect by GET-ing
+    # the room and replaying. (No GET stream endpoint in 3a; the room reload in
+    # 3b will replay via onboard_transcript.)
+    key = _onboarding_run_key()
+    if live_runs.is_live(key):
+        _error_response(handler, "An onboarding run is already in progress", status=409)
+        return
+
+    # Start the decoupled run. NO-OP append_fn: onboard_runner owns the durable
+    # log (onboard_transcript); passing append_event here would double-log.
+    live_runs.start(
+        key,
+        onboard_runner.run_turn(message),
+        lambda event: None,
+    )
+
+    _sse_begin(handler)
+    _stream_live_run(
+        handler,
+        key,
+        lambda: onboard_transcript.read_events(),
+        "The onboarding run ended unexpectedly. You can retry.",
+    )
+
+
 # ─── Adapt: gated build session + rail CRUD ────────────────────────────────────
 # The build run is DECOUPLED from the SSE client via live_runs: the run is keyed
 # by adaptation_id, runs to completion on its own daemon thread, and a client
@@ -2750,6 +2816,13 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
             handle_rename_adaptation(self, unquote(match.group(1)))
             return True
 
+        # ─── Onboarding API routes ─────────────────────────────────────
+        # POST /api/onboarding/run - run an onboarding turn (decoupled SSE).
+
+        if path == "/api/onboarding/run" and method == "POST":
+            handle_onboarding_run(self)
+            return True
+
         # ─── Task trace routes ─────────────────────────────────────────
 
         # Match /api/tasks/{id}/traces/{trace_id}/score
@@ -3046,9 +3119,16 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
         if self._route_request("GET"):
             return
 
-        # Static file serving: route / to index.html
+        # First-run gate: until onboarding is complete (a live profile carrying
+        # the `onboarded` marker), serve the onboarding room in place of the
+        # board for the index. This keys off the MARKER, not mere profile/
+        # existence - meta-onboard creates profile/ at step 0, so existence alone
+        # would flip the gate mid-onboarding. (Inc 3b ships the real
+        # onboarding.html; a minimal placeholder resolves the route in 3a.)
         parsed = urlparse(self.path)
-        if parsed.path == "/":
+        if parsed.path in ("/", "/index.html") and _should_onboard():
+            self.path = "/onboarding.html"
+        elif parsed.path == "/":
             self.path = "/index.html"
 
         # Add CORS header to static file responses
@@ -3081,6 +3161,15 @@ def main():
         print("  API endpoints will work, but static file serving will fail.")
         print(f"  Create {UI_DIR}/index.html to serve the task board UI.")
         print()
+
+    # Legacy onboarding migration: stamp the `onboarded` marker on an existing
+    # populated install so it is NEVER re-gated into onboarding by the new
+    # first-run gate. Idempotent + best-effort (a migration hiccup must not stop
+    # the server from booting).
+    try:
+        profile_lib.migrate_legacy_onboarded()
+    except Exception as e:
+        print(f"Warning: legacy onboarding migration skipped: {e}")
 
     # Start cron scheduler background thread
     scheduler = CronScheduler()
