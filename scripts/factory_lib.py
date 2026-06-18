@@ -142,6 +142,31 @@ def validate_card_type(name, registry_path=None):
     return errs
 
 
+def validate_program_type(name, registry_path=None):
+    """Return a list of problems with a program type in the registry ([] = ok).
+
+    Runs the full program-schema gate (closed state_model set, phases only on
+    pipelines, declared family, token-only chips, every source mode, closed
+    emitter action/trigger sets, nudge-cap shape, intake routing) and confirms
+    the named type is present. meta-create-program-type runs this GREEN before
+    committing a scaffolded entry — the program-type analogue of
+    validate_card_type."""
+    import json
+    import program_schema
+    path = registry_path or program_schema.REGISTRY
+    try:
+        with open(path, encoding="utf-8") as f:
+            reg = json.load(f)
+    except OSError as e:
+        return [f"could not read registry: {e}"]
+    except json.JSONDecodeError as e:
+        return [f"registry is not valid JSON: {e}"]
+    errs = program_schema.validate_doc(reg, program_schema._theme_tokens())
+    if name not in {t.get("id") for t in reg.get("types", [])}:
+        errs.append(f"program type '{name}' not found in the registry")
+    return errs
+
+
 def _protocols_in(contract_module):
     """Return the typing.Protocol subclasses defined in a family's _contract module.
 
@@ -217,6 +242,8 @@ if __name__ == "__main__":
     v.add_argument("path")
     vc = sub.add_parser("validate-card-type")
     vc.add_argument("name")
+    vp = sub.add_parser("validate-program-type")
+    vp.add_argument("name")
     va = sub.add_parser("validate-adapter")
     va.add_argument("family")
     va.add_argument("provider")
@@ -230,6 +257,11 @@ if __name__ == "__main__":
         print("ok")
     elif args.cmd == "validate-card-type":
         probs = validate_card_type(args.name)
+        if probs:
+            print("\n".join(probs)); sys.exit(1)
+        print("ok")
+    elif args.cmd == "validate-program-type":
+        probs = validate_program_type(args.name)
         if probs:
             print("\n".join(probs)); sys.exit(1)
         print("ok")

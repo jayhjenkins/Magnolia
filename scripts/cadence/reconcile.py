@@ -1013,6 +1013,30 @@ def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
     }
 
 
+def _active_family_count(root=None, exclude_family=None):
+    """Distinct families with >=1 active program (the portfolio-rollup >=N gate).
+
+    Counted from the program store, never a family literal: each active program's
+    family is looked up from the registry by its type. `exclude_family` drops one
+    family from the tally - the rollup passes its OWN (system) family so the
+    seeded system programs (intake, janitor, the rollup itself) never count toward
+    the "the operator runs >=2 families" threshold. A program of an unknown type
+    is skipped. Never raises."""
+    import program_lib
+    try:
+        reg = program_lib.load_registry(root)
+    except Exception:
+        return 0
+    fam_by_type = {t.get("id"): t.get("family") for t in (reg.get("types") or [])}
+    fams = set()
+    for prog in program_lib.list_programs(status="active", root=root):
+        fm = prog.get("frontmatter") or {}
+        fam = fam_by_type.get(fm.get("type"))
+        if fam and fam != exclude_family:
+            fams.add(fam)
+    return len(fams)
+
+
 def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None,
                        period=None, registry=None, now=None):
     """Evaluate the type's declarative emitters. Returns created task ids.
@@ -1207,6 +1231,20 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             worker = em.get("worker")
             if not worker:
                 continue
+            # Optional declarative gate (the brief's ">=2 families" rule for the
+            # cross-program rollup): fire only once the portfolio spans >= N active
+            # families OTHER than this program's own. Below the threshold the
+            # rollup stays inert (no empty digest). Counted from the store, never a
+            # literal.
+            min_families = em.get("min_active_families")
+            if min_families is not None:
+                try:
+                    needed = int(min_families)
+                except (TypeError, ValueError):
+                    needed = 0
+                if _active_family_count(
+                        root, exclude_family=type_entry.get("family")) < needed:
+                    continue
             import task_lib
             if open_agent_types is None:
                 open_agent_types = _open_agent_task_types(task_lib, program_id)
@@ -1219,8 +1257,8 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 creator="cadence",
                 tags=[program_id, "cadence"],
                 description=(
-                    f"Draft the weekly priorities digest for {program_id} "
-                    f"from the portfolio."
+                    f"Draft the {period or 'this period'} {worker} artifact for "
+                    f"{program_id} from the portfolio."
                 ),
             )
             emitted.append(task_id)

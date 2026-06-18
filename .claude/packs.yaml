@@ -35,6 +35,7 @@ core:
     - meta-create-worker
     - meta-create-card-type
     - meta-create-adapter
+    - meta-create-program-type
     - meta-scope-extension
     - meta-integration-discovery
     - meta-refine-workflow

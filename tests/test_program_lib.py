@@ -699,8 +699,8 @@ def test_all_seed_programs_render():
     reg = pl.load_registry()
     progs = pl.list_programs()  # real datasets root
     # 13 original seeds + PROG-0014 (program-intake nursery, inc4a) + PROG-0015
-    # (portfolio-health janitor, inc4b).
-    assert len(progs) == 15     # concrete count: a silently-dropped/malformed seed fails here
+    # (portfolio-health janitor, inc4b) + PROG-0016 (portfolio-rollup, inc5).
+    assert len(progs) == 16     # concrete count: a silently-dropped/malformed seed fails here
     for p in progs:
         vm = pl.render_view(p, reg)
         assert vm["model"] in {"pipeline", "target", "cycle", "register"}

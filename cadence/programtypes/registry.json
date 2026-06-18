@@ -119,6 +119,16 @@
       "emitters": [
         { "on": "drift:broken", "action": "escalate" }
       ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "portfolio-rollup", "label": "Portfolio rollup", "family": "system",
+      "state_model": "cycle", "cadence": "weekly",
+      "sources": [ { "kind": "transcripts", "mode": "read" } ],
+      "emitters": [
+        { "on": "drift:broken", "action": "escalate" },
+        { "on": "cycle-fresh", "action": "produce-artifact", "worker": "portfolio-rollup", "min_active_families": 2 }
+      ],
+      "intake": { "route": "ignore" },
       "presentation": { "chip_tokens": {} } }
   ]
 }

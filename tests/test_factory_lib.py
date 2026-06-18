@@ -85,6 +85,15 @@ def test_validate_worker_accepts_good_and_flags_missing_fields(tmp_path):
     assert missing == {"priority", "tier", "match", "allowed_tools", "timeout", "max_turns"}
 
 
+def test_validate_program_type_accepts_real_and_flags_missing():
+    import factory_lib
+    # the shipped registry validates and contains a known type
+    assert factory_lib.validate_program_type("weekly-priorities") == []
+    # a type id not present is flagged (the factory's must-be-green check)
+    errs = factory_lib.validate_program_type("no-such-type")
+    assert any("no-such-type" in e for e in errs)
+
+
 def test_validate_worker_flags_empty_body(tmp_path):
     import factory_lib
     nobody = tmp_path / "nobody.md"

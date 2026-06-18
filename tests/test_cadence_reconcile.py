@@ -1296,6 +1296,61 @@ def test_produce_artifact_deduped_within_period(tmp_path, monkeypatch):
     assert len(cards) == 1  # still just the one
 
 
+# ─── portfolio-rollup >=2-families dispatch gate (inc5 slice 11) ─────────────
+#
+# The cross-program rollup's produce-artifact emitter carries min_active_families.
+# It fires only once the portfolio spans >= N active families OTHER than the
+# rollup's own (system) family; below the threshold it stays inert (no empty
+# digest). Family count is read from the program store (real registry), never a
+# literal, so the seeded programs use real types.
+
+
+def _rollup_registry():
+    return {"types": [{
+        "id": "portfolio-rollup", "label": "Portfolio rollup",
+        "state_model": "cycle", "cadence": "weekly", "family": "system",
+        "emitters": [{
+            "on": "cycle-fresh", "action": "produce-artifact",
+            "worker": "portfolio-rollup", "min_active_families": 2,
+        }],
+    }]}
+
+
+def test_portfolio_rollup_fires_when_two_families_active(tmp_path, monkeypatch):
+    root = str(tmp_path / "data")
+    # Two non-system families active in the store (roadmap + weekly).
+    pl.create_program(type="roadmap-initiative", title="R", owner_role="product", root=root)
+    pl.create_program(type="weekly-priorities", title="W", owner_role="product", root=root)
+    rollup_id, _ = pl.create_program(
+        type="portfolio-rollup", title="Rollup", owner_role="product",
+        frontmatter_extra={"last_cycle": OTHER_PERIOD}, root=root)
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    program = pl.read_program(rollup_id, root=root)
+    result = reconcile.reconcile_program(program, _rollup_registry(), now=NOW, force=True, root=root)
+
+    assert len(result["emitted"]) == 1
+    card = task_lib.list_tasks(queue="agent", status="open")[0]
+    assert card["task_type"] == "portfolio-rollup"
+    assert rollup_id in card["tags"]
+
+
+def test_portfolio_rollup_inert_below_two_families(tmp_path, monkeypatch):
+    root = str(tmp_path / "data")
+    # Only ONE non-system family active -> the rollup stays inert.
+    pl.create_program(type="roadmap-initiative", title="R", owner_role="product", root=root)
+    rollup_id, _ = pl.create_program(
+        type="portfolio-rollup", title="Rollup", owner_role="product",
+        frontmatter_extra={"last_cycle": OTHER_PERIOD}, root=root)
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    program = pl.read_program(rollup_id, root=root)
+    result = reconcile.reconcile_program(program, _rollup_registry(), now=NOW, force=True, root=root)
+
+    assert result["emitted"] == []   # inert: <2 active families
+    assert task_lib.list_tasks(queue="agent", status="open") == []
+
+
 # ─── draft-message emitter (Task 4, the rate-capped nudge door) ──────────────
 #
 # On a FRESH cycle, a `draft-message` emitter creates a send-message COLLAB card

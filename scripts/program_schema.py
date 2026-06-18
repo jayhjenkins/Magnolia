@@ -142,6 +142,13 @@ def validate_doc(reg, tokens):
                                 f"type '{tid}': emitter "
                                 f"max_nudges_per_person_per_week must be a "
                                 f"non-negative int, got {type(v).__name__}")
+                    if "min_active_families" in em:
+                        v = em["min_active_families"]
+                        # The cross-program rollup's >=N-families dispatch gate.
+                        if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                            errors.append(
+                                f"type '{tid}': emitter min_active_families must "
+                                f"be a non-negative int, got {type(v).__name__}")
 
         # Archive field (Task 3) — when to archive a program after silent cycles.
         if "archive_after_silent_cycles" in t:
