@@ -1189,3 +1189,281 @@ def test_propose_update_ignores_adapter_completion(tmp_path):
     assert cards == []
     # And it did not auto-advance either (human-attested instrument).
     assert pl.read_program(pid, root=root)["frontmatter"]["phase"] == "discovery"
+
+
+# ─── produce-artifact emitter (Task 3, the worker-dispatch door) ─────────────
+#
+# On a FRESH cycle, a `produce-artifact` emitter dispatches a worker as an
+# agent-queue task for this program (Tier-1: a local agent card + a detached
+# task_dispatch spawn, no external write here). Deduped to once per period
+# against an OPEN agent task tagged with the program_id carrying the worker's
+# task_type. `_dispatch_agent_task` is a module function so tests monkeypatch it
+# (no real `claude` spawn). The registry emitter wiring is Task 6; these tests
+# build a minimal cycle-type registry inline so the branch is exercised alone.
+
+
+def _digest_registry():
+    """A minimal registry whose cycle type fires the produce-artifact emitter.
+
+    Mirrors the weekly-priorities shape (state_model=cycle, weekly cadence) but
+    carries ONLY the produce-artifact emitter so escalate never co-fires."""
+    return {
+        "types": [
+            {
+                "id": "weekly-priorities",
+                "label": "Weekly priorities",
+                "state_model": "cycle",
+                "cadence": "weekly",
+                "emitters": [
+                    {
+                        "on": "cycle-fresh",
+                        "action": "produce-artifact",
+                        "worker": "priority-digest",
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _seed_holding_weekly_priorities(root, last_cycle=OTHER_PERIOD):
+    """Create a weekly-priorities program that computes to `holding` (no periods)."""
+    program_id, _ = pl.create_program(
+        type="weekly-priorities",
+        title="Weekly priorities",
+        owner_role="product",
+        frontmatter_extra={"last_cycle": last_cycle},
+        root=root,
+    )
+    return program_id
+
+
+def test_produce_artifact_dispatches_priority_digest_agent_task(tmp_path, monkeypatch):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    calls = []
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: calls.append(tid))
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _digest_registry(), now=NOW, force=True
+    )
+
+    assert result["verdict"] == "holding"
+    assert len(result["emitted"]) == 1
+    task_id = result["emitted"][0]
+
+    # An agent-queue task tagged [program_id, "cadence"] with the worker task_type.
+    cards = task_lib.list_tasks(queue="agent", status="open")
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["id"] == task_id
+    assert card["task_type"] == "priority-digest"
+    assert program_id in card["tags"]
+    assert "cadence" in card["tags"]
+
+    # The worker was dispatched exactly once, for that task id.
+    assert calls == [task_id]
+
+
+def test_produce_artifact_deduped_within_period(tmp_path, monkeypatch):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    # First fresh cycle: one priority-digest agent task created.
+    program = pl.read_program(program_id, root=root)
+    first = reconcile.reconcile_program(
+        program, _digest_registry(), now=NOW, force=True
+    )
+    assert len(first["emitted"]) == 1
+
+    # A second forced run in the SAME period: the open digest task already exists
+    # -> dedupe -> no second task, no second dispatch.
+    calls = []
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: calls.append(tid))
+    program = pl.read_program(program_id, root=root)
+    second = reconcile.reconcile_program(
+        program, _digest_registry(), now=NOW, force=True
+    )
+    assert second["emitted"] == []
+    assert calls == []
+
+    cards = task_lib.list_tasks(queue="agent", status="open")
+    assert len(cards) == 1  # still just the one
+
+
+# ─── draft-message emitter (Task 4, the rate-capped nudge door) ──────────────
+#
+# On a FRESH cycle, a `draft-message` emitter creates a send-message COLLAB card
+# from a template, ENFORCING max_nudges_per_person_per_week per recipient and
+# recording a per-period response-rate counter on the program frontmatter. The
+# recipient is resolved profile-driven (degrades to a role-based target from the
+# program's owner_role) -- never a person/company literal. Tier-1: a local
+# collab card only; the actual send is the existing Tier-2 path. The registry
+# emitter wiring is a later task; these tests build a minimal cycle-type
+# registry inline so the branch is exercised alone.
+
+
+def _nudge_registry(cap=1):
+    """A minimal cycle-type registry whose only emitter is a draft-message nudge.
+
+    Carries ONLY the draft-message emitter so escalate/produce-artifact never
+    co-fire. `cap` sets max_nudges_per_person_per_week (None -> unlimited)."""
+    emitter = {"on": "cycle-fresh", "action": "draft-message", "template": "nudge"}
+    if cap is not None:
+        emitter["max_nudges_per_person_per_week"] = cap
+    return {
+        "types": [
+            {
+                "id": "weekly-priorities",
+                "label": "Weekly priorities",
+                "state_model": "cycle",
+                "cadence": "weekly",
+                "emitters": [emitter],
+            }
+        ]
+    }
+
+
+def test_draft_message_creates_send_message_collab_card(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _nudge_registry(cap=1), now=NOW, force=True
+    )
+
+    assert len(result["emitted"]) == 1
+    task_id = result["emitted"][0]
+
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["id"] == task_id
+    assert card["task_type"] == "send-message"
+    assert program_id in card["tags"]
+    assert "cadence" in card["tags"]
+
+    # The recipient is a role-based target (no literal); the body re-reads it.
+    fm_card = task_lib.read_task(task_id)["frontmatter"]
+    assert fm_card.get("message_to")  # a recipient string is set
+    # owner_role was "product" -> the role-based target references it.
+    assert "product" in fm_card["message_to"]
+    # The card must carry the nudge text in message_body — the shipper builds the
+    # outgoing draft from message_body, so an empty one would send a blank nudge.
+    assert fm_card.get("message_body")  # a NON-EMPTY wire body is set
+    assert program_id in fm_card["message_body"]
+
+
+def test_draft_message_respects_nudge_cap_and_suppresses(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    # First fresh cycle: one send-message collab card created for the recipient.
+    program = pl.read_program(program_id, root=root)
+    first = reconcile.reconcile_program(
+        program, _nudge_registry(cap=1), now=NOW, force=True
+    )
+    assert len(first["emitted"]) == 1
+
+    # A second forced run in the SAME period: the recipient is already at the
+    # cap (1/wk) -> SUPPRESSED. No new card; the suppression is recorded.
+    program = pl.read_program(program_id, root=root)
+    second = reconcile.reconcile_program(
+        program, _nudge_registry(cap=1), now=NOW, force=True
+    )
+
+    # No real card id was created on the second run.
+    real_ids = [e for e in second["emitted"] if e and e.startswith("TASK-")]
+    assert real_ids == []
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 1  # still just the one from the first cycle
+
+    # The suppression is visible in the cycle log (the emitted: clause).
+    body = pl.read_program(program_id, root=root)["body"]
+    cycles_section = body.split("## Cycles", 1)[1]
+    assert "nudge suppressed (cap 1/wk)" in cycles_section
+
+
+def test_draft_message_records_nudge_counter(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    program = pl.read_program(program_id, root=root)
+    reconcile.reconcile_program(program, _nudge_registry(cap=1), now=NOW, force=True)
+
+    fm = pl.read_program(program_id, root=root)["frontmatter"]
+    counts = fm.get("nudge_counts") or {}
+    period_counts = counts.get(PERIOD) or {}
+    # Exactly one recipient counted, with a count of 1 this period.
+    assert period_counts
+    assert sum(period_counts.values()) == 1
+    assert all(v == 1 for v in period_counts.values())
+    # A response_rate stub is present for the UI to read.
+    assert "response_rate" in fm
+
+
+def test_draft_message_cap_is_period_scoped_not_lifetime(tmp_path):
+    """The cap is N-per-recipient-PER-PERIOD, never N-per-recipient-ever.
+
+    Regression for the rate-cap scoping bug: the cap was enforced by scanning
+    OPEN send-message cards for the recipient, with NO period filter. In this
+    system messaging is normally unconfigured (channel `none`), so a created
+    send-message card never sends and stays `open` indefinitely. That meant the
+    FIRST period's nudge card suppressed EVERY later period's nudge -- turning
+    "max 1 per week" into "max 1 ever".
+
+    Here we plant a stale OPEN send-message card for the recipient from a PRIOR
+    period (it never sent), AND a prior-period entry in nudge_counts already at
+    the cap. Then we run a draft-message in a NEW period whose counter is 0. A
+    card MUST be created: the prior period's open card / count does not suppress
+    the new period. Fails against the open-card scan; passes once the cap reads
+    the period-keyed counter.
+    """
+    root = str(tmp_path / "data")
+    # Program last reconciled in OTHER_PERIOD, with a prior-period nudge already
+    # recorded at the cap for the role-based recipient ("product team").
+    recipient = "product team"
+    program_id, _ = pl.create_program(
+        type="weekly-priorities",
+        title="Weekly priorities",
+        owner_role="product",
+        frontmatter_extra={
+            "last_cycle": OTHER_PERIOD,
+            "nudge_counts": {OTHER_PERIOD: {recipient: 1}},
+        },
+        root=root,
+    )
+
+    # A stale OPEN send-message card from the prior period that never sent.
+    task_lib.create_task(
+        title="prior-period nudge",
+        queue="collab",
+        creator="cadence",
+        task_type="send-message",
+        tags=[program_id, "cadence"],
+        message_channel="none",
+        message_to=recipient,
+    )
+
+    # Run a fresh cycle in the CURRENT period (NOW -> PERIOD != OTHER_PERIOD).
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _nudge_registry(cap=1), now=NOW, force=True
+    )
+
+    # A new card IS created -- the prior period's open card / count does not
+    # suppress this period's nudge.
+    real_ids = [e for e in result["emitted"] if e and e.startswith("TASK-")]
+    assert len(real_ids) == 1, "prior-period nudge wrongly suppressed this period"
+
+    # The counter for THIS period now reflects the one new nudge.
+    fm = pl.read_program(program_id, root=root)["frontmatter"]
+    period_counts = (fm.get("nudge_counts") or {}).get(PERIOD) or {}
+    assert period_counts.get(recipient) == 1
+    # The prior period's entry is untouched (per-period scoping is preserved).
+    assert (fm.get("nudge_counts") or {}).get(OTHER_PERIOD, {}).get(recipient) == 1

@@ -19,10 +19,12 @@ invariant #8.
 
 import argparse
 import os
+import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import platform_lib
 import program_lib
 
 # Worst-signal-wins ordering: broken beats drifting beats holding.
@@ -450,6 +452,104 @@ def _open_propose_update_ops(task_lib, program_id):
     return ops
 
 
+def _resolve_nudge_target(fm, root=None):
+    """Resolve a (channel, recipient) nudge target -- profile-driven, NO literal.
+
+    The recipient must never be a person/company literal (invariant #1,
+    test_engine_no_jay). We resolve the messaging CHANNEL from the profile's
+    messaging integration (e.g. `m365`), degrading to `none` when unset, and the
+    RECIPIENT to a generic ROLE-BASED target built from the program's
+    `owner_role` (e.g. `product team`). owner_role is itself a role token, not an
+    identity, so the resulting string carries no name. When a program declares no
+    owner_role we fall back to a generic `program owner` target. ASCII-safe.
+    """
+    import profile_lib
+    try:
+        channel = profile_lib.provider("messaging", root=root)
+    except Exception:
+        channel = "none"
+    role = (fm.get("owner_role") or "").strip()
+    recipient = f"{role} team" if role else "program owner"
+    return channel, recipient
+
+
+def _build_nudge_description(facts, program_id, recipient):
+    """Build a <=2-sentence ASCII nudge body (invariant #8).
+
+    A polite, role-addressed nudge that cites the program backlink and the worst
+    signal so the recipient knows why they are being pinged. ASCII, no em-dash.
+    """
+    reason = (facts or {}).get("reason", "needs a look")
+    nxt = (facts or {}).get("next", "review")
+    return (
+        f"Nudge for {recipient}: {program_id} {reason}. Next: {nxt}. "
+        f"Reply or update the program to clear this."
+    )
+
+
+def _record_nudge_count(fm, period, recipient):
+    """Bump the per-period nudge counter on `fm` in place (append-only per period).
+
+    fm["nudge_counts"][period][recipient] += 1, plus a `response_rate` stub the UI
+    reads (acked/sent; acked starts at 0 -- a later task wires acknowledgement).
+    Mutating the passed fm is deliberate: reconcile_program persists this same fm
+    dict in its single _write_program_file, so the counter rides that one write
+    (no second file write). Idempotent within a period only insofar as each fired
+    nudge increments once -- a suppressed nudge never reaches here.
+    """
+    counts = fm.setdefault("nudge_counts", {})
+    period_counts = counts.setdefault(period, {})
+    period_counts[recipient] = period_counts.get(recipient, 0) + 1
+    sent = sum(v for pc in counts.values() for v in pc.values())
+    rr = fm.setdefault("response_rate", {})
+    if isinstance(rr, dict):
+        rr["sent"] = sent
+        rr.setdefault("acked", 0)
+
+
+def _open_agent_task_types(task_lib, program_id):
+    """Return the set of task_types carried by OPEN agent-queue tasks tagged with
+    `program_id` (the produce-artifact dedupe fence).
+
+    Mirrors _open_propose_update_ops but for the agent queue: collect the
+    `task_type` of every open agent card tagged with this program_id, so a second
+    reconcile in the same period cannot dispatch a duplicate worker run while one
+    is still open. list_tasks already projects `task_type`, so no re-read needed.
+    """
+    types = set()
+    for t in task_lib.list_tasks(queue="agent", status="open"):
+        if program_id not in (t.get("tags") or []):
+            continue
+        tt = t.get("task_type")
+        if tt:
+            types.add(tt)
+    return types
+
+
+def _dispatch_agent_task(task_id):
+    """Fire task_dispatch.py --task {task_id} in the background (detached).
+
+    Mirrors cron_lib._auto_dispatch: spawn the dispatcher as a detached process
+    with the Claude-stripped headless env and the platform process-group kwargs.
+    Kept as a module-level function so tests can monkeypatch it (no real claude
+    spawn under test). Never raises - a failed spawn is logged to stderr.
+    """
+    scripts_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dispatch_script = os.path.join(scripts_dir, "task_dispatch.py")
+    env = platform_lib.headless_claude_env()
+    try:
+        subprocess.Popen(
+            [sys.executable, dispatch_script, "--task", task_id],
+            cwd=os.path.dirname(scripts_dir),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **platform_lib.process_group_kwargs(),
+        )
+    except Exception as e:
+        sys.stderr.write(f"[cadence] Failed to dispatch agent task {task_id}: {e}\n")
+
+
 def _propose_phase_advance(fm, type_entry, body):
     """The INTERPRETATION door's gate. Returns an advance-phase mutation or None.
 
@@ -556,10 +656,11 @@ def _latest_interpretive_claim(body):
     return claim
 
 
-def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None):
+def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None,
+                       period=None):
     """Evaluate the type's declarative emitters. Returns created task ids.
 
-    Two emitter families fire here, both Tier-1 (LOCAL cards, no external writes,
+    Three emitter families fire here, all Tier-1 (LOCAL cards, no external writes,
     no judge/ladder):
 
       - `escalate` (on `drift:<verdict>`): dedupe against open human cards already
@@ -573,6 +674,13 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
         (task_type=cadence-propose-update) carrying the mutation as `proposal`,
         tagged [program_id, "cadence"]. Deduped against any OPEN propose-update
         card already carrying this program_id AND the same op.
+      - `produce-artifact` (on `cycle-fresh`): the worker-dispatch door. This
+        function only runs on a fresh cycle, so the trigger name simply marks the
+        emitter as fresh-cycle scoped. Creates an AGENT-queue task for the named
+        `worker` (the worker name doubles as task_type, e.g. `priority-digest`),
+        tagged [program_id, "cadence"], then dispatches it via
+        `_dispatch_agent_task`. Deduped against any OPEN agent task tagged with
+        this program_id already carrying that task_type (once per period).
 
     Any other recognized action no-ops this increment (logged to stderr).
     """
@@ -584,8 +692,9 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
     program_id = fm.get("program_id")
     title = fm.get("title") or program_id or "Program"
     emitted = []
-    open_tags = None       # lazily computed on the first escalate fire
-    open_prop_ops = None   # lazily computed on the first propose-update fire
+    open_tags = None        # lazily computed on the first escalate fire
+    open_prop_ops = None    # lazily computed on the first propose-update fire
+    open_agent_types = None  # lazily computed on the first produce-artifact fire
 
     for em in emitters:
         action = em.get("action")
@@ -638,6 +747,85 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             )
             emitted.append(task_id)
             open_prop_ops.add(mutation["op"])
+
+        elif action == "produce-artifact":
+            # Fresh-cycle scoped: this function only runs on a fresh cycle, so the
+            # trigger name marks the emitter as fresh-cycle. The worker name
+            # doubles as the agent task_type.
+            if on != "cycle-fresh":
+                continue
+            worker = em.get("worker")
+            if not worker:
+                continue
+            import task_lib
+            if open_agent_types is None:
+                open_agent_types = _open_agent_task_types(task_lib, program_id)
+            if worker in open_agent_types:
+                continue  # an open run for this worker already exists -> dedupe
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: draft {period or 'this'} digest",
+                queue="agent",
+                task_type=worker,
+                creator="cadence",
+                tags=[program_id, "cadence"],
+                description=(
+                    f"Draft the weekly priorities digest for {program_id} "
+                    f"from the portfolio."
+                ),
+            )
+            emitted.append(task_id)
+            # Reflect the just-created task so a second produce-artifact emitter
+            # in the same evaluation cannot double-fire for this worker.
+            open_agent_types.add(worker)
+            _dispatch_agent_task(task_id)
+
+        elif action == "draft-message":
+            # The rate-capped nudge primitive. Fresh-cycle scoped like
+            # produce-artifact (this function only runs on a fresh cycle). Resolve
+            # the recipient profile-driven (role-based, never a literal), enforce
+            # max_nudges_per_person_per_week per recipient, and record a per-period
+            # response-rate counter on the in-memory fm (reconcile_program persists
+            # it in its single write). A capped recipient is SUPPRESSED: no card,
+            # and a suppression marker rides the cycle log's `emitted:` clause.
+            if on and on != "cycle-fresh":
+                continue
+            import task_lib
+            channel, recipient = _resolve_nudge_target(fm, root=root)
+            cap = em.get("max_nudges_per_person_per_week")
+            if cap is not None:
+                try:
+                    cap = int(cap)
+                except (TypeError, ValueError):
+                    cap = None
+            if cap is not None:
+                # Enforce the cap off the PERIOD-KEYED counter on the program
+                # frontmatter, not a cross-period open-card scan. In this system
+                # messaging is normally unconfigured, so a created send-message
+                # card never sends and stays `open` indefinitely; an open-card
+                # scan would let the first period's nudge suppress every later
+                # period's. nudge_counts is period-scoped, so the cap is correctly
+                # "N per recipient per period".
+                already = (fm.get("nudge_counts") or {}).get(period, {}).get(recipient, 0)
+                if already >= cap:
+                    # Suppress: surface it in the cycle log (no card created).
+                    emitted.append(f"nudge suppressed (cap {cap}/wk)")
+                    continue
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: nudge {recipient}",
+                queue="collab",
+                creator="cadence",
+                task_type="send-message",
+                tags=[program_id, "cadence"],
+                description=_build_nudge_description(facts, program_id, recipient),
+                message_channel=channel,
+                message_to=recipient,
+                # The shipper builds the outgoing draft from message_body, so the
+                # nudge text must ride that field too (description is the
+                # human-facing card body; duplicating the text is fine).
+                message_body=_build_nudge_description(facts, program_id, recipient),
+            )
+            emitted.append(task_id)
+            _record_nudge_count(fm, period, recipient)
 
         elif action:
             sys.stderr.write(
@@ -805,7 +993,7 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
         (t for t in registry.get("types", []) if t.get("id") == type_id), {}
     )
     emitted = _evaluate_emitters(
-        program, type_entry, verdict, facts, body=body, root=root
+        program, type_entry, verdict, facts, body=body, root=root, period=period
     )
 
     # The FACT door: mutate `fm` in place (phase + checkpoint) when the current

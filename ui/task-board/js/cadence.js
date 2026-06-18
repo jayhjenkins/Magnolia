@@ -235,6 +235,7 @@ function cadenceExpandedPanel(p, tone) {
           <div class="cadence-eyebrow">Emissions</div>
           ${cadenceEmissions(p)}
         </div>
+        ${cadenceDigestsBlock(p)}
       </div>
     </div>
     ${footer}
@@ -244,7 +245,12 @@ function cadenceExpandedPanel(p, tone) {
 function cadenceHistory(p, tone) {
   if (p.model === 'pipeline') return cadencePhaseHistory(p, tone);
   if (p.model === 'target') return cadenceChart(p, tone);
-  if (p.model === 'cycle') return cadencePeriods(p);
+  if (p.model === 'cycle') {
+    // Recent periods, plus the cycle's declared priorities (when present) so a
+    // weekly-priorities row lists this cycle's items below the period strip.
+    const items = (p.items && p.items.length) ? cadenceItems(p) : '';
+    return cadencePeriods(p) + items;
+  }
   return cadenceItems(p);
 }
 
@@ -316,17 +322,33 @@ function cadenceItems(p) {
   const policy = p.policy;
   let rows = '';
   for (const it of items) {
+    // Shared across register items ({name, owner, age}) and cycle items
+    // ({name, owner, status}). Show whichever the item carries: a present age
+    // (register) renders the aged 'Nd' meta; a present status (cycle) renders
+    // the status word; absent both falls back to a bare '-'. Tokens only.
     const age = it.age;
-    // Missing age → neutral --text-dim and a bare '-' (no trailing 'd');
-    // a present age (incl. 0) keeps its color comparison and 'Nd' label.
     const hasAge = age != null;
-    let ageColor = 'var(--text-dim)';
-    if (hasAge && policy != null && age > policy) ageColor = 'var(--danger)';
-    else if (hasAge && age > 14) ageColor = 'var(--warning)';
-    const ageStr = hasAge ? `${escapeHtml(String(age))}d` : '-';
+    const hasStatus = it.status != null && it.status !== '';
+    let trailing;
+    if (hasAge) {
+      // Missing age → neutral --text-dim and a bare '-' (no trailing 'd');
+      // a present age (incl. 0) keeps its color comparison and 'Nd' label.
+      let ageColor = 'var(--text-dim)';
+      if (policy != null && age > policy) ageColor = 'var(--danger)';
+      else if (age > 14) ageColor = 'var(--warning)';
+      trailing = `<span class="cadence-item-age" style="color:${ageColor};">${escapeHtml(String(age))}d</span>`;
+    } else if (hasStatus) {
+      // Cycle-item status: done/met → success, missed/late → danger, else dim.
+      const st = String(it.status);
+      const stColor = (st === 'done' || st === 'met') ? 'var(--success)'
+        : (st === 'missed' || st === 'late') ? 'var(--danger)' : 'var(--text-dim)';
+      trailing = `<span class="cadence-item-status" style="color:${stColor};">${escapeHtml(st)}</span>`;
+    } else {
+      trailing = `<span class="cadence-item-age" style="color:var(--text-dim);">-</span>`;
+    }
     rows += `<div class="cadence-item">
       <span class="cadence-item-name">${escapeHtml(it.name || '')}</span>
-      <span class="cadence-item-meta">${escapeHtml(it.owner || '')} · <span class="cadence-item-age" style="color:${ageColor};">${ageStr}</span></span>
+      <span class="cadence-item-meta">${escapeHtml(it.owner || '')} · ${trailing}</span>
     </div>`;
   }
   return `<div class="cadence-items">${rows}</div>`;
@@ -414,6 +436,26 @@ function cadenceEmissions(p) {
     </div>`;
   }
   return `<div class="cadence-emissions">${rows}</div>`;
+}
+
+// Digest history: the program's recent versioned digest artifacts (newest
+// first), shown as a compact period + version line. The slug carries the period
+// (e.g. 2026-W25-priorities); we surface that and the version. Rendered only
+// when digests exist so steady rows stay quiet. Tokens only (no hardcoded color).
+function cadenceDigestsBlock(p) {
+  const digests = p.digests || [];
+  if (!digests.length) return '';
+  let rows = '';
+  for (const d of digests) {
+    rows += `<div class="cadence-digest">
+      <span class="cadence-digest-period">${escapeHtml(d.slug || '')}</span>
+      <span class="cadence-digest-version" style="color:var(--text-dim);">v${escapeHtml(String(d.version != null ? d.version : ''))}</span>
+    </div>`;
+  }
+  return `<div class="cadence-block">
+    <div class="cadence-eyebrow">Digest history</div>
+    <div class="cadence-digests">${rows}</div>
+  </div>`;
 }
 
 function cadenceFooter(p) {

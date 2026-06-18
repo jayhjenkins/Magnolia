@@ -157,6 +157,72 @@ def test_render_register(tmp_path):
     assert vm["policy"] == 21
 
 
+def test_render_view_surfaces_items_for_cycle(tmp_path):
+    # A cycle program (weekly-priorities) can declare `items` — the week's
+    # priorities. render_view must surface them in the view model so the Cadence
+    # row can list them. The canonical cycle-item shape is the SEED's shape:
+    # {id, label, owner_role, status} (role-referenced, invariant #1 compliant).
+    # render_view maps label -> name and owner_role -> owner, and includes status.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="weekly-priorities", title="Weekly priorities", owner_role="product",
+        root=root, frontmatter_extra={
+            "drift": "holding",
+            "status_line": "Sent Monday - 9 of 9 done",
+            "items": [
+                {"id": "close-payments-prd", "label": "Close payments PRD",
+                 "owner_role": "product", "status": "open"},
+                {"id": "review-home-backlog", "label": "Review home backlog",
+                 "owner_role": "engineering", "status": "open"},
+            ],
+        })
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["model"] == "cycle"
+    assert len(vm["items"]) == 2
+    # The label -> name mapping works (non-null).
+    assert vm["items"][0]["name"] == "Close payments PRD"
+    assert vm["items"][0]["name"] is not None
+    # The owner_role -> owner mapping works (a role token, non-null).
+    assert vm["items"][1]["owner"] == "engineering"
+    assert vm["items"][1]["owner"] is not None
+    # status is included.
+    assert vm["items"][0]["status"] == "open"
+    assert vm["items"][1]["status"] == "open"
+
+
+def test_render_view_includes_digests_when_artifacts_exist(tmp_path):
+    # When a cycle program has written versioned digest artifacts, render_view
+    # (given the root) projects a newest-first `digests` list capped at 3, each
+    # {slug, version, path}.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="weekly-priorities", title="Weekly priorities", owner_role="product",
+        root=root, frontmatter_extra={"drift": "holding"})
+    pl.write_artifact(pid, "2026-W24-priorities", "w24 body", root=root)
+    pl.write_artifact(pid, "2026-W25-priorities", "w25 body", root=root)
+    vm = pl.render_view(pl.read_program(pid, root=root), reg, root=root)
+    assert vm["digests"]  # non-empty
+    # Newest-first: W25 leads W24 (sort by slug desc).
+    assert vm["digests"][0]["slug"] == "2026-W25-priorities"
+    assert vm["digests"][0]["version"] == 1
+    assert vm["digests"][0]["path"].endswith("2026-W25-priorities-v1.md")
+    assert vm["digests"][1]["slug"] == "2026-W24-priorities"
+
+
+def test_render_view_digests_default_empty_without_root(tmp_path):
+    # render_view without a root (existing call-site shape) tolerates artifacts
+    # being unreachable -> digests is [].
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="weekly-priorities", title="Weekly priorities", owner_role="product",
+        root=root, frontmatter_extra={"drift": "holding"})
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["digests"] == []
+
+
 def test_render_activity_from_observations():
     reg = pl.load_registry()
     program = {

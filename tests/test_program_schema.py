@@ -1,8 +1,53 @@
+import json
+
 import program_schema as ps
+import program_lib
 
 
 def test_seed_registry_is_valid():
     assert ps.validate() == []   # the real seed registry passes
+
+
+# ─── Task 6: weekly-priorities digest wiring ─────────────────────────────────
+
+def _weekly_priorities_type():
+    with open(ps.REGISTRY, encoding="utf-8") as f:
+        reg = json.load(f)
+    return next(t for t in reg["types"] if t["id"] == "weekly-priorities")
+
+
+def test_weekly_priorities_has_produce_artifact_and_draft_message_emitters():
+    """weekly-priorities keeps escalate and gains the two cycle-fresh emitters
+    that drive the Monday digest (worker dispatch + rate-capped nudge)."""
+    wp = _weekly_priorities_type()
+    actions = {(em.get("on"), em.get("action")) for em in wp["emitters"]}
+    # escalate stays
+    assert ("drift:broken", "escalate") in actions
+    # produce-artifact dispatches the priority-digest worker
+    produce = next(em for em in wp["emitters"]
+                   if em.get("action") == "produce-artifact")
+    assert produce["on"] == "cycle-fresh"
+    assert produce["worker"] == "priority-digest"
+    # draft-message carries the weekly-digest template + a nudge cap
+    draft = next(em for em in wp["emitters"]
+                 if em.get("action") == "draft-message")
+    assert draft["on"] == "cycle-fresh"
+    assert draft["template"] == "weekly-digest"
+    assert draft["max_nudges_per_person_per_week"] == 1
+
+
+def test_prog_0005_items_survive_read_program():
+    """Option 1 seam check: the seeded role-referenced items survive the read
+    and are available to the worker (which is how items are consumed). No
+    person/company names leak into the seed."""
+    prog = program_lib.read_program("PROG-0005")
+    items = prog["frontmatter"]["items"]
+    assert items, "PROG-0005 must seed a non-empty items list"
+    for it in items:
+        assert isinstance(it, dict)
+        assert it.get("owner_role")          # role token present
+        assert "owner" not in it             # no person token
+        assert "company" not in it           # no company token
 
 
 # ─── sentinel defs are validated by the gate (Task 2) ─────────────────────────
@@ -158,6 +203,67 @@ def test_rejects_emitter_not_a_dict():
     reg = _type_with_emitters(["escalate"])
     errs = ps.validate_doc(reg, tokens={"--accent"})
     assert any("emitter" in e for e in errs)
+
+
+# ─── nudge cap + type-level default items (Task 2) ───────────────────────────
+
+
+def test_rejects_non_int_nudge_cap():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "max_nudges_per_person_per_week": "lots"}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("max_nudges_per_person_per_week" in e for e in errs)
+
+
+def test_accepts_int_nudge_cap():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "max_nudges_per_person_per_week": 1}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_rejects_negative_nudge_cap():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "max_nudges_per_person_per_week": -1}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("max_nudges_per_person_per_week" in e for e in errs)
+
+
+def test_rejects_bool_nudge_cap():
+    # bool is an int subclass in Python; it must be rejected explicitly.
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "max_nudges_per_person_per_week": True}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("max_nudges_per_person_per_week" in e for e in errs)
+
+
+def _type_with_items(items):
+    return {"families": [{"id": "x", "label": "X", "order": 1}],
+            "types": [{"id": "t", "label": "T", "family": "x", "state_model": "cycle",
+                       "sources": [], "presentation": {"chip_tokens": {}},
+                       "items": items}]}
+
+
+def test_rejects_non_list_default_items():
+    reg = _type_with_items("nope")
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("items" in e for e in errs)
+
+
+def test_rejects_non_dict_default_item():
+    reg = _type_with_items([{"ok": True}, "bad"])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("items" in e for e in errs)
+
+
+def test_accepts_list_of_dict_default_items():
+    reg = _type_with_items([{"id": "a"}, {"id": "b"}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
 
 
 # ─── exit_checkpoint on pipeline phases (Task 5) ─────────────────────────────
