@@ -818,6 +818,78 @@ def _latest_interpretive_claim(body):
     return claim
 
 
+def _build_archive_description(mutation, program_id):
+    """Build a one-line description for an archive proposal card.
+
+    Format: reason + citations + program backlink.
+    """
+    reason = mutation.get("reason", "unknown")
+    citations = mutation.get("citations", [])
+    cite_str = "; ".join(citations) if citations else "(no citations)"
+
+    # Backlink to the program
+    program_link = f"[{program_id}](/programs/{program_id})"
+
+    return f"{reason} ({cite_str}) - {program_link}"
+
+
+def _propose_archive(fm, type_entry, body):
+    """Propose archive mutation if ANY fact indicates completion.
+
+    Facts checked:
+    1. Program phase is terminal
+    2. A "did-it-work" checkpoint is verified/met
+    3. A completion observation cites a tracker as closed
+
+    Returns:
+      - A dict with op:"archive", reason, citations if archive is proposed
+      - None otherwise
+    """
+    # Fact 1: Terminal phase
+    phase = fm.get("phase")
+    if phase and program_lib._terminal_phase(type_entry, phase):
+        return {
+            "op": "archive",
+            "reason": f"reached terminal phase: {phase}",
+            "citations": [phase]  # cite the phase name
+        }
+
+    # Fact 2: did-it-work checkpoint verified
+    checkpoints = fm.get("checkpoints") or []
+    for cp in checkpoints:
+        if "did-it-work" in (cp.get("id", "") + cp.get("kind", "")):
+            if cp.get("status") in {"verified", "met"}:
+                return {
+                    "op": "archive",
+                    "reason": f"did-it-work verified: {cp.get('id', 'unnamed')}",
+                    "citations": [cp.get("id", "unknown")]
+                }
+
+    # Fact 3: Tracker-closed observation
+    # Scan body for ## Observations section, look for a completion obs whose source cites a tracker
+    # and claim mentions closed
+    if body:
+        lines = body.split("\n")
+        in_obs = False
+        for i, line in enumerate(lines):
+            if line.startswith("## Observations"):
+                in_obs = True
+                continue
+            if in_obs and line.startswith("## "):
+                break  # end of observations
+            if in_obs and line.startswith("- ") and "completion" in line.lower() and "closed" in line.lower():
+                # Simple check: if line mentions completion and closed, it's a tracker-closed completion
+                # Extract the source if possible (e.g., "source: gong:call-123")
+                # For now, just cite "tracker-closed"
+                return {
+                    "op": "archive",
+                    "reason": "tracker-closed (completion observation)",
+                    "citations": ["tracker-closed"]
+                }
+
+    return None
+
+
 def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None,
                        period=None, registry=None):
     """Evaluate the type's declarative emitters. Returns created task ids.
@@ -917,6 +989,32 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 emitted.append(task_id)
                 if cid:
                     open_birth_ids.add(cid)
+
+        elif action == "propose-update" and on == "completion-verified":
+            # The ARCHIVE door (inc4b): propose archiving when facts indicate completion.
+            # The mutation function is the real gate: _propose_archive checks terminal
+            # phase, verified checkpoints, and tracker-closed observations.
+            mutation = _propose_archive(fm, type_entry, body or "")
+            if not mutation:
+                continue
+            import task_lib
+            if open_prop_ops is None:
+                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+            if mutation["op"] in open_prop_ops:
+                continue  # an open proposal for the same op already exists -> dedupe
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: archive?",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                card_type="recommendation",
+                task_type="cadence-propose-update",
+                tags=[program_id, "cadence"],
+                proposal=mutation,
+                description=_build_archive_description(mutation, program_id),
+            )
+            emitted.append(task_id)
+            open_prop_ops.add(mutation["op"])
 
         elif action == "propose-update":
             # The mutation function is the real gate (the `on` string is only a

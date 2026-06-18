@@ -1643,3 +1643,164 @@ def test_birth_skips_closed_and_birthed_candidates(tmp_path):
     reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
 
     assert _birth_cards() == []
+
+
+# ─── archive door (Task 4) ─────────────────────────────────────────────────────
+#
+# The fact archive door: a program can be archived based on facts (terminal phase,
+# verified "did-it-work" checkpoint, or tracker-closed observation). The proposal
+# is deduplicated against any open propose-update card with op=="archive".
+
+
+def test_propose_archive_fires_on_terminal_phase(tmp_path):
+    # Create a pipeline program at its terminal phase (verified for
+    # roadmap-initiative). Call _propose_archive and assert it returns a dict
+    # with op=="archive" and a reason mentioning "terminal".
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Shipped initiative",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "verified",  # terminal phase for roadmap-initiative
+            "phase_entered": {"verified": "2026-06-01"},
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    type_entry = next((t for t in _registry()["types"] if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_archive(fm, type_entry, program["body"])
+
+    assert result is not None
+    assert isinstance(result, dict)
+    assert result.get("op") == "archive"
+    assert "terminal" in result.get("reason", "").lower()
+    assert isinstance(result.get("citations"), list)
+
+
+def test_propose_archive_fires_on_did_it_work_verified(tmp_path):
+    # Create a program with a checkpoint of kind/id containing "did-it-work"
+    # with status "verified". Call _propose_archive and assert it returns
+    # archive mutation with op=="archive".
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="did-it-work",
+        title="Target verification",
+        owner_role="pm",
+        frontmatter_extra={
+            "checkpoints": [
+                {"id": "did-it-work", "kind": "completion", "status": "verified"},
+            ],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    type_entry = next((t for t in _registry()["types"] if t["id"] == "did-it-work"), {})
+
+    result = reconcile._propose_archive(fm, type_entry, program["body"])
+
+    assert result is not None
+    assert result.get("op") == "archive"
+    assert "did-it-work" in result.get("reason", "").lower()
+
+
+def test_propose_archive_none_when_active_midphase(tmp_path):
+    # Create a pipeline program in a mid-pipeline phase (not terminal).
+    # Call _propose_archive and assert it returns None (no archive).
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="In progress initiative",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",  # not terminal for roadmap-initiative
+            "phase_entered": {"execution": "2026-06-01"},
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    type_entry = next((t for t in _registry()["types"] if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_archive(fm, type_entry, program["body"])
+
+    assert result is None
+
+
+def test_evaluate_emitters_creates_archive_card_and_dedupes(tmp_path):
+    # Create a type with emitter: {on:"completion-verified", action:"propose-update"}
+    # (using roadmap-initiative). Create an active terminal-phase program.
+    # Call _evaluate_emitters and assert ONE cadence-propose-update card is
+    # created with proposal.op == "archive" and tags [program_id, "cadence"].
+    # Call _evaluate_emitters again on the same program and assert NO duplicate
+    # card is created (op-dedupe via _open_propose_update_ops).
+    root = str(tmp_path / "data")
+    # For this test to work, we need a type with the archive emitter. roadmap-initiative
+    # does not have one by default, so we'll manually check if the logic works by calling
+    # _evaluate_emitters with a mock type_entry.
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Complete initiative",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "verified",  # terminal
+            "phase_entered": {"verified": "2026-06-01"},
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    registry = _registry()
+    type_entry = next((t for t in registry["types"] if t["id"] == "roadmap-initiative"), {})
+
+    # Add a completion-verified emitter to the type entry for this test
+    if "emitters" not in type_entry:
+        type_entry["emitters"] = []
+    type_entry["emitters"].append({
+        "action": "propose-update",
+        "on": "completion-verified"
+    })
+
+    # First call to _evaluate_emitters
+    fm = program["frontmatter"]
+    body = program["body"]
+    period = reconcile.current_period("weekly", NOW)
+    emitted_1 = reconcile._evaluate_emitters(
+        program, type_entry, "holding", {}, body=body, root=root,
+        period=period, registry=registry
+    )
+
+    # Should have created one card
+    assert len(emitted_1) == 1
+    task_id_1 = emitted_1[0]
+
+    # Verify the card exists and has the right properties
+    cards = task_lib.list_tasks(queue="human", status="open")
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["id"] == task_id_1
+    assert program_id in card["tags"]
+    assert "cadence" in card["tags"]
+
+    # Verify the proposal op is "archive"
+    card_full = task_lib.read_task(task_id_1)
+    proposal = card_full["frontmatter"].get("proposal", {})
+    assert proposal.get("op") == "archive"
+
+    # Second call to _evaluate_emitters: should dedupe
+    emitted_2 = reconcile._evaluate_emitters(
+        program, type_entry, "holding", {}, body=body, root=root,
+        period=period, registry=registry
+    )
+
+    # Should NOT create a new card (dedupe)
+    assert len(emitted_2) == 0
+
+    # Verify still only one card in queue
+    cards = task_lib.list_tasks(queue="human", status="open")
+    assert len(cards) == 1
