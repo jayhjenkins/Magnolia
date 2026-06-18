@@ -23,7 +23,11 @@
     { "id": "weekly-priorities", "label": "Weekly priorities", "family": "weekly",
       "state_model": "cycle", "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
+      "emitters": [
+        { "on": "drift:broken", "action": "escalate" },
+        { "on": "cycle-fresh", "action": "produce-artifact", "worker": "priority-digest" },
+        { "on": "cycle-fresh", "action": "draft-message", "template": "weekly-digest", "max_nudges_per_person_per_week": 1 }
+      ],
       "presentation": { "chip_tokens": {} } },
 
     { "id": "eng-sync-prep", "label": "Eng sync prep", "family": "weekly",
