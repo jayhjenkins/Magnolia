@@ -1189,3 +1189,107 @@ def test_propose_update_ignores_adapter_completion(tmp_path):
     assert cards == []
     # And it did not auto-advance either (human-attested instrument).
     assert pl.read_program(pid, root=root)["frontmatter"]["phase"] == "discovery"
+
+
+# ─── produce-artifact emitter (Task 3, the worker-dispatch door) ─────────────
+#
+# On a FRESH cycle, a `produce-artifact` emitter dispatches a worker as an
+# agent-queue task for this program (Tier-1: a local agent card + a detached
+# task_dispatch spawn, no external write here). Deduped to once per period
+# against an OPEN agent task tagged with the program_id carrying the worker's
+# task_type. `_dispatch_agent_task` is a module function so tests monkeypatch it
+# (no real `claude` spawn). The registry emitter wiring is Task 6; these tests
+# build a minimal cycle-type registry inline so the branch is exercised alone.
+
+
+def _digest_registry():
+    """A minimal registry whose cycle type fires the produce-artifact emitter.
+
+    Mirrors the weekly-priorities shape (state_model=cycle, weekly cadence) but
+    carries ONLY the produce-artifact emitter so escalate never co-fires."""
+    return {
+        "types": [
+            {
+                "id": "weekly-priorities",
+                "label": "Weekly priorities",
+                "state_model": "cycle",
+                "cadence": "weekly",
+                "emitters": [
+                    {
+                        "on": "cycle-fresh",
+                        "action": "produce-artifact",
+                        "worker": "priority-digest",
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _seed_holding_weekly_priorities(root, last_cycle=OTHER_PERIOD):
+    """Create a weekly-priorities program that computes to `holding` (no periods)."""
+    program_id, _ = pl.create_program(
+        type="weekly-priorities",
+        title="Weekly priorities",
+        owner_role="product",
+        frontmatter_extra={"last_cycle": last_cycle},
+        root=root,
+    )
+    return program_id
+
+
+def test_produce_artifact_dispatches_priority_digest_agent_task(tmp_path, monkeypatch):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    calls = []
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: calls.append(tid))
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _digest_registry(), now=NOW, force=True
+    )
+
+    assert result["verdict"] == "holding"
+    assert len(result["emitted"]) == 1
+    task_id = result["emitted"][0]
+
+    # An agent-queue task tagged [program_id, "cadence"] with the worker task_type.
+    cards = task_lib.list_tasks(queue="agent", status="open")
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["id"] == task_id
+    assert card["task_type"] == "priority-digest"
+    assert program_id in card["tags"]
+    assert "cadence" in card["tags"]
+
+    # The worker was dispatched exactly once, for that task id.
+    assert calls == [task_id]
+
+
+def test_produce_artifact_deduped_within_period(tmp_path, monkeypatch):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    # First fresh cycle: one priority-digest agent task created.
+    program = pl.read_program(program_id, root=root)
+    first = reconcile.reconcile_program(
+        program, _digest_registry(), now=NOW, force=True
+    )
+    assert len(first["emitted"]) == 1
+
+    # A second forced run in the SAME period: the open digest task already exists
+    # -> dedupe -> no second task, no second dispatch.
+    calls = []
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: calls.append(tid))
+    program = pl.read_program(program_id, root=root)
+    second = reconcile.reconcile_program(
+        program, _digest_registry(), now=NOW, force=True
+    )
+    assert second["emitted"] == []
+    assert calls == []
+
+    cards = task_lib.list_tasks(queue="agent", status="open")
+    assert len(cards) == 1  # still just the one
