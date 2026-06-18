@@ -1513,6 +1513,48 @@ def _project_observations(body):
     return entries
 
 
+def _grounding(fm, body, type_entry, root):
+    """Render-only grounding summary for a program (slice 8). DATA ONLY.
+
+    Surfaces how well-grounded a program is, with no external calls:
+      - citations: number of source-cited observations,
+      - last_observation: the most recent observation date (ISO) or None,
+      - sentinel_live: whether the movement-watch sentinel is live per telemetry
+        (True/False), or "unknown" when telemetry is unavailable,
+      - binding_warnings: ASCII binding-health notes (a target program with no
+        metric instrument, a pipeline program with no tracker binding).
+    """
+    obs = _project_observations(body)
+    citations = sum(1 for o in obs if o.get("source"))
+    dates = [o.get("date") for o in obs if o.get("date")]
+    last_observation = max(dates) if dates else None  # ISO dates sort lexically
+
+    sentinel_live = "unknown"
+    if root:
+        try:
+            import sentinel_runner  # lazy: sentinel_runner imports program_lib
+            tele = sentinel_runner.read_sentinel_runs(root) or {}
+            mw = tele.get("movement-watch")
+            if isinstance(mw, dict) and mw.get("last_run"):
+                sentinel_live = not mw.get("last_error")
+        except Exception:
+            sentinel_live = "unknown"
+
+    warnings = []
+    sm = (type_entry or {}).get("state_model")
+    if sm == "target" and not (fm.get("metric") or {}).get("instrument"):
+        warnings.append("metric instrument not set")
+    if sm == "pipeline" and not tracker_anchor(fm):
+        warnings.append("no tracker binding")
+
+    return {
+        "citations": citations,
+        "last_observation": last_observation,
+        "sentinel_live": sentinel_live,
+        "binding_warnings": warnings,
+    }
+
+
 def render_view(program, registry, needs_you=0, emissions=None, root=None):
     """Map a program dict (frontmatter + body) into the render contract.
 
@@ -1549,6 +1591,7 @@ def render_view(program, registry, needs_you=0, emissions=None, root=None):
         "intent": _parse_intent(body),
         "family": family,
         "type_label": type_label,
+        "grounding": _grounding(fm, body, type_entry, root),
         "activity": _parse_observations(body),
         # The richer ledger: same entries as `activity` but keeping the source
         # citation + sentinel/kind that `activity` drops. `activity` stays for

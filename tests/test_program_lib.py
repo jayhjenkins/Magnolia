@@ -65,6 +65,40 @@ def test_render_pipeline_current_index(tmp_path):
     assert vm["intent"] == "Rebuild reconciliation."
 
 
+def test_render_view_includes_grounding(tmp_path):
+    # slice 8: render_view surfaces a grounding summary (data only).
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Grounded initiative", owner_role="product",
+        root=root, frontmatter_extra={
+            "phase": "execution",
+            "bindings": [{"role": "truth", "kind": "project_management",
+                          "anchor": "EPIC-1"}],
+        })
+    pl.append_observation(pid, kind="status-signal", sentinel="movement-watch",
+                          source="m.md", claim="signal.", date="2026-06-10", root=root)
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    g = vm["grounding"]
+    assert g["citations"] == 1
+    assert g["last_observation"] == "2026-06-10"
+    # no telemetry passed here (root has none) -> sentinel liveness unknown
+    assert g["sentinel_live"] in (True, False, "unknown")
+    # well-bound pipeline -> no binding warnings
+    assert g["binding_warnings"] == []
+
+
+def test_render_view_binding_warning_for_target_without_instrument(tmp_path):
+    # A target program with no metric instrument earns a binding-health warning.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="did-it-work", title="Unbound target", owner_role="product",
+        root=root, frontmatter_extra={"metric": {"tolerance": 5}})  # no instrument
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert "metric instrument not set" in vm["grounding"]["binding_warnings"]
+
+
 def test_render_pipeline_tolerates_scalar_phase_entered(tmp_path):
     # The Cadence design brief (§4) documents phase_entered as a SCALAR date
     # string (the date the CURRENT phase was entered). render_view must tolerate
