@@ -1034,7 +1034,7 @@ def _project_observations(body):
     return entries
 
 
-def render_view(program, registry, needs_you=0, emissions=None):
+def render_view(program, registry, needs_you=0, emissions=None, root=None):
     """Map a program dict (frontmatter + body) into the render contract.
 
     `program` is the shape returned by read_program (keys: frontmatter, body).
@@ -1042,8 +1042,11 @@ def render_view(program, registry, needs_you=0, emissions=None):
     the count of open Now (human-queue) cards linked to this program; `emissions`
     is the program's emission history (escalate/propose-update/receipt cards with
     their outcomes), both supplied by the caller (build_cadence_payload) and
-    defaulting (0 / []) for unit-test/call-site simplicity. Returns DATA ONLY —
-    no styling. The client derives all tone/color from drift/age/status.
+    defaulting (0 / []) for unit-test/call-site simplicity. `root` (the datasets
+    root) lets the view surface the program's recent versioned digest artifacts
+    via iter_recent_artifacts; when omitted (older call sites / unit tests) the
+    `digests` list degrades to []. Returns DATA ONLY — no styling. The client
+    derives all tone/color from drift/age/status.
     """
     fm = program.get("frontmatter", {}) or {}
     body = program.get("body", "") or ""
@@ -1099,6 +1102,15 @@ def render_view(program, registry, needs_you=0, emissions=None):
         # Emission history (escalate/propose-update/receipt cards + outcomes),
         # supplied by the caller; the client owns the outcome-word coloring.
         "emissions": emissions or [],
+        # Recent versioned digest artifacts (newest-first, cap 3), each
+        # {slug, version, path}. Only the citation is projected (not the body) —
+        # the row shows a compact history, not the digest text. Degrades to []
+        # when no root is supplied or no artifacts have been written.
+        "digests": [
+            {"slug": a["slug"], "version": a["version"], "path": a["path"]}
+            for a in (iter_recent_artifacts(fm.get("program_id"), n=3, root=root)
+                      if fm.get("program_id") else [])
+        ],
     }
 
     if state_model == "pipeline":
@@ -1146,6 +1158,13 @@ def render_view(program, registry, needs_you=0, emissions=None):
         vm["status_line"] = fm.get("status_line")
         vm["periods"] = [
             {"w": p.get("w"), "s": p.get("s")} for p in (fm.get("periods") or [])
+        ]
+        # A cycle program (e.g. weekly-priorities) may declare `items` — the
+        # current cycle's priorities. Surface them like the register branch so
+        # the row can list them; absent -> [].
+        vm["items"] = [
+            {"name": it.get("name"), "owner": it.get("owner"), "age": it.get("age")}
+            for it in (fm.get("items") or [])
         ]
     elif state_model == "register":
         vm["status_line"] = fm.get("status_line")
@@ -1314,6 +1333,7 @@ def build_cadence_payload(root=None):
             p, registry,
             needs_you=counts.get(program_id, 0),
             emissions=emissions.get(program_id, []),
+            root=root,
         ))
 
     families = []

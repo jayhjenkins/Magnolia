@@ -235,6 +235,7 @@ function cadenceExpandedPanel(p, tone) {
           <div class="cadence-eyebrow">Emissions</div>
           ${cadenceEmissions(p)}
         </div>
+        ${cadenceDigestsBlock(p)}
       </div>
     </div>
     ${footer}
@@ -244,7 +245,12 @@ function cadenceExpandedPanel(p, tone) {
 function cadenceHistory(p, tone) {
   if (p.model === 'pipeline') return cadencePhaseHistory(p, tone);
   if (p.model === 'target') return cadenceChart(p, tone);
-  if (p.model === 'cycle') return cadencePeriods(p);
+  if (p.model === 'cycle') {
+    // Recent periods, plus the cycle's declared priorities (when present) so a
+    // weekly-priorities row lists this cycle's items below the period strip.
+    const items = (p.items && p.items.length) ? cadenceItems(p) : '';
+    return cadencePeriods(p) + items;
+  }
   return cadenceItems(p);
 }
 
@@ -414,6 +420,26 @@ function cadenceEmissions(p) {
     </div>`;
   }
   return `<div class="cadence-emissions">${rows}</div>`;
+}
+
+// Digest history: the program's recent versioned digest artifacts (newest
+// first), shown as a compact period + version line. The slug carries the period
+// (e.g. 2026-W25-priorities); we surface that and the version. Rendered only
+// when digests exist so steady rows stay quiet. Tokens only (no hardcoded color).
+function cadenceDigestsBlock(p) {
+  const digests = p.digests || [];
+  if (!digests.length) return '';
+  let rows = '';
+  for (const d of digests) {
+    rows += `<div class="cadence-digest">
+      <span class="cadence-digest-period">${escapeHtml(d.slug || '')}</span>
+      <span class="cadence-digest-version" style="color:var(--text-dim);">v${escapeHtml(String(d.version != null ? d.version : ''))}</span>
+    </div>`;
+  }
+  return `<div class="cadence-block">
+    <div class="cadence-eyebrow">Digest history</div>
+    <div class="cadence-digests">${rows}</div>
+  </div>`;
 }
 
 function cadenceFooter(p) {

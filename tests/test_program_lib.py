@@ -157,6 +157,62 @@ def test_render_register(tmp_path):
     assert vm["policy"] == 21
 
 
+def test_render_view_surfaces_items_for_cycle(tmp_path):
+    # A cycle program (weekly-priorities) can declare `items` — the week's
+    # priorities. render_view must surface them in the view model, mirroring the
+    # register branch, so the Cadence row can list them.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="weekly-priorities", title="Weekly priorities", owner_role="product",
+        root=root, frontmatter_extra={
+            "drift": "holding",
+            "status_line": "Sent Monday - 9 of 9 done",
+            "items": [
+                {"name": "Close payments PRD", "owner": "product", "age": 2},
+                {"name": "Review home backlog", "owner": "product", "age": 5},
+            ],
+        })
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["model"] == "cycle"
+    assert len(vm["items"]) == 2
+    assert vm["items"][0]["name"] == "Close payments PRD"
+    assert vm["items"][1]["owner"] == "product"
+    assert vm["items"][1]["age"] == 5
+
+
+def test_render_view_includes_digests_when_artifacts_exist(tmp_path):
+    # When a cycle program has written versioned digest artifacts, render_view
+    # (given the root) projects a newest-first `digests` list capped at 3, each
+    # {slug, version, path}.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="weekly-priorities", title="Weekly priorities", owner_role="product",
+        root=root, frontmatter_extra={"drift": "holding"})
+    pl.write_artifact(pid, "2026-W24-priorities", "w24 body", root=root)
+    pl.write_artifact(pid, "2026-W25-priorities", "w25 body", root=root)
+    vm = pl.render_view(pl.read_program(pid, root=root), reg, root=root)
+    assert vm["digests"]  # non-empty
+    # Newest-first: W25 leads W24 (sort by slug desc).
+    assert vm["digests"][0]["slug"] == "2026-W25-priorities"
+    assert vm["digests"][0]["version"] == 1
+    assert vm["digests"][0]["path"].endswith("2026-W25-priorities-v1.md")
+    assert vm["digests"][1]["slug"] == "2026-W24-priorities"
+
+
+def test_render_view_digests_default_empty_without_root(tmp_path):
+    # render_view without a root (existing call-site shape) tolerates artifacts
+    # being unreachable -> digests is [].
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="weekly-priorities", title="Weekly priorities", owner_role="product",
+        root=root, frontmatter_extra={"drift": "holding"})
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["digests"] == []
+
+
 def test_render_activity_from_observations():
     reg = pl.load_registry()
     program = {
