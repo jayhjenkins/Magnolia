@@ -630,6 +630,85 @@ def append_observation(program_id, *, kind, sentinel, source, claim,
     return True
 
 
+# ─── Versioned artifact writer (the Monday-digest store) ──────────────────────
+#
+# Programs that produce a periodic artifact (the weekly-priorities digest) store
+# it under datasets/programs/artifacts/<program_id>/<slug>-vN.md. The deterministic
+# writer below owns the versioning so a `claude -p` worker can NEVER overwrite a
+# prior version: write_artifact always allocates the next N and never opens an
+# existing version for write (append-only / invariant #6). ASCII-safe.
+
+# Matches a versioned artifact filename: "<slug>-v<N>.md" (N a positive int).
+_ARTIFACT_RE = re.compile(r"^(?P<slug>.+)-v(?P<version>\d+)\.md$")
+
+
+def _artifacts_dir(program_id, root=None):
+    """Return (and create) datasets/programs/artifacts/<program_id>/ under root.
+
+    mkdir -p so the first write for a program just works. Mirrors _program_dir's
+    root passthrough (root=None -> engine datasets/; a caller root -> root/datasets).
+    """
+    path = os.path.join(_program_dir(root), "artifacts", program_id)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def write_artifact(program_id, slug, content, root=None):
+    """Write the next version of `<slug>` for `program_id`; return its path.
+
+    Finds the highest existing `<slug>-vN.md` in the program's artifacts dir and
+    writes `<slug>-v{N+1}.md` (so the first write is v1). NEVER opens an existing
+    version for write -- prior versions are immutable (invariant #6). Returns the
+    absolute path written.
+    """
+    adir = _artifacts_dir(program_id, root)
+    highest = 0
+    for fname in os.listdir(adir):
+        m = _ARTIFACT_RE.match(fname)
+        if m and m.group("slug") == slug:
+            highest = max(highest, int(m.group("version")))
+    target = os.path.join(adir, f"{slug}-v{highest + 1}.md")
+    # Exclusive create so a concurrent writer can never clobber a version: if the
+    # name somehow exists, that is a bug, not a silent overwrite.
+    with open(target, "x", encoding="utf-8") as f:
+        f.write(content)
+    return target
+
+
+def iter_recent_artifacts(program_id, n=3, root=None):
+    """Return up to `n` artifacts for `program_id`, newest-first.
+
+    Each entry is {"slug", "version" (int), "path", "body", "mtime"}. Sorted by
+    (slug, version) descending so the newest version of the newest period leads.
+    Tolerant of a missing artifacts dir (returns []). Read-only.
+    """
+    adir = os.path.join(_program_dir(root), "artifacts", program_id)
+    if not os.path.isdir(adir):
+        return []
+    found = []
+    for fname in os.listdir(adir):
+        m = _ARTIFACT_RE.match(fname)
+        if not m:
+            continue
+        path = os.path.join(adir, fname)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                body = f.read()
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue  # skip an unreadable artifact rather than raise
+        found.append({
+            "slug": m.group("slug"),
+            "version": int(m.group("version")),
+            "path": path,
+            "body": body,
+            "mtime": mtime,
+        })
+    # Newest version of the newest period first: sort by (slug, version) desc.
+    found.sort(key=lambda a: (a["slug"], a["version"]), reverse=True)
+    return found[:n]
+
+
 # ─── Phase advancement core (shared by the fact door + the proposal applier) ──
 #
 # _next_phase_id + _advance_phase_fm are the ONE place the engine advances a
@@ -1250,3 +1329,42 @@ def build_cadence_payload(root=None):
         )
 
     return {"families": families}
+
+
+# ─── CLI ──────────────────────────────────────────────────────────────────────
+#
+# A thin CLI so a `claude -p` worker can call the deterministic artifact writer
+# instead of doing its own Write (which could overwrite a version). Content is
+# read from a FILE path so a multi-line digest needn't be shell-quoted.
+#
+#   python3 scripts/program_lib.py write-artifact <program_id> <slug> <file> [--root R]
+
+def _cli(argv):
+    if not argv:
+        print("usage: program_lib.py write-artifact <program_id> <slug> <content_file> [--root R]",
+              file=sys.stderr)
+        return 2
+    cmd = argv[0]
+    if cmd == "write-artifact":
+        rest = argv[1:]
+        root = None
+        if "--root" in rest:
+            i = rest.index("--root")
+            root = rest[i + 1]
+            rest = rest[:i] + rest[i + 2:]
+        if len(rest) != 3:
+            print("usage: program_lib.py write-artifact <program_id> <slug> <content_file> [--root R]",
+                  file=sys.stderr)
+            return 2
+        program_id, slug, content_file = rest
+        with open(content_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        path = write_artifact(program_id, slug, content, root=root)
+        print(path)
+        return 0
+    print(f"unknown command: {cmd}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(_cli(sys.argv[1:]))
