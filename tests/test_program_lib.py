@@ -590,15 +590,17 @@ def test_build_payload_emissions_resilient_when_task_lib_raises(tmp_path, monkey
 def test_all_seed_programs_render():
     reg = pl.load_registry()
     progs = pl.list_programs()  # real datasets root
-    assert len(progs) == 13     # concrete count: a silently-dropped/malformed seed fails here
+    # 13 original seeds + PROG-0014 (the program-intake nursery, inc4a).
+    assert len(progs) == 14     # concrete count: a silently-dropped/malformed seed fails here
     for p in progs:
         vm = pl.render_view(p, reg)
         assert vm["model"] in {"pipeline", "target", "cycle", "register"}
         assert vm["name"]
-    # the family payload groups them and drops no expected family
+    # the family payload groups them and drops no expected family. The nursery
+    # adds the System family, which shelves last (order 99).
     payload = pl.build_cadence_payload()
     fam_ids = [f["id"] for f in payload["families"]]
-    assert fam_ids == ["roadmap", "weekly", "outcomes", "eos"]
+    assert fam_ids == ["roadmap", "weekly", "outcomes", "eos", "system"]
 
 
 # ─── tracker_anchor (Task 5, shared binding resolution) ──────────────────────
