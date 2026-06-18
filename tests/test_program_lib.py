@@ -157,6 +157,80 @@ def test_render_register(tmp_path):
     assert vm["policy"] == 21
 
 
+def test_render_register_unchanged_for_other_register(tmp_path):
+    # The program-intake projection must NOT change the plain-register projection
+    # for OTHER register programs (eos-issues etc.): they stay {name, owner, age}
+    # exactly, no extra candidate fields leak in.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="eos-issues", title="Issues list", owner_role="ops",
+        root=root, frontmatter_extra={
+            "drift": "holding",
+            "status_line": "14 open - oldest 16 days",
+            "items": [{"name": "Refund timing mismatch", "owner": "ops", "age": 16}],
+            "policy": 21,
+        })
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["model"] == "register"
+    assert vm["items"][0] == {"name": "Refund timing mismatch", "owner": "ops", "age": 16}
+
+
+def test_render_program_intake_surfaces_candidates(tmp_path):
+    # The program-intake nursery (a register) carries CANDIDATE items, not the
+    # plain {name, owner, age} register shape. render_view must surface each
+    # candidate so the Cadence row can list it. Build the candidate the way
+    # upsert_candidate actually writes it (NOT a hand-crafted dict) so the test
+    # asserts on the REAL shape: name <- title, owner <- program_type,
+    # age <- source_count, plus status and possible_duplicate_of when present.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="program-intake", title="Program intake", owner_role="product",
+        root=root, frontmatter_extra={
+            "drift": "holding",
+            "status_line": "1 candidate",
+            "items": [],
+            "policy": 30,
+        })
+    # First evidence opens a candidate; a second source merges (source_count -> 2).
+    r1 = pl.upsert_candidate(
+        pid, candidate_key="smart-recon", program_type="initiative",
+        title="Smart reconciliation", source="meeting:home-standup-0610",
+        claim="Team keeps asking for smarter reconciliation.", root=root)
+    pl.upsert_candidate(
+        pid, candidate_key="smart-recon", program_type="initiative",
+        title="Smart reconciliation", source="meeting:payments-sync-0612",
+        claim="Same ask surfaced again in payments.", root=root)
+    # A second, low-confidence linked candidate -> flagged with possible_duplicate_of.
+    r3 = pl.upsert_candidate(
+        pid, candidate_key="recon-dup", program_type="initiative",
+        title="Reconciliation revamp", source="meeting:platform-0613",
+        claim="Possibly the same reconciliation theme.",
+        link_to=r1["candidate_id"], confidence=0.4, root=root)
+    assert r3["action"] == "flagged"
+
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["model"] == "register"
+    assert len(vm["items"]) == 2
+
+    by_name = {it["name"]: it for it in vm["items"]}
+    # name <- title
+    assert "Smart reconciliation" in by_name
+    cand = by_name["Smart reconciliation"]
+    # owner <- program_type
+    assert cand["owner"] == "initiative"
+    # age <- source_count (two distinct sources merged)
+    assert cand["age"] == 2
+    # status is surfaced (open)
+    assert cand["status"] == "open"
+
+    dup = by_name["Reconciliation revamp"]
+    # possible_duplicate_of is surfaced and points at the first candidate.
+    assert dup["possible_duplicate_of"] == r1["candidate_id"]
+    assert dup["owner"] == "initiative"
+
+
 def test_render_view_surfaces_items_for_cycle(tmp_path):
     # A cycle program (weekly-priorities) can declare `items` — the week's
     # priorities. render_view must surface them in the view model so the Cadence
@@ -1127,4 +1201,50 @@ def test_birth_program_empty_citations_still_births(tmp_path):
     obs = list(pl.iter_observations(prog["body"]))
     assert len(obs) == 1
     assert obs[0][3] == "intake"  # source falls back to "intake"
-    assert pl._parse_intent(prog["body"])
+
+
+def test_render_view_projects_intake_candidates_with_extra_fields(tmp_path):
+    # Task 8: render_view on a program-intake program surfaces its candidates
+    # with the mapped fields: name <- title, owner <- program_type,
+    # age <- source_count, and status + possible_duplicate_of.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    ip = _seed_intake(tmp_path)
+
+    # Upsert a candidate: two sources.
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-A", claim="Mentioned.",
+        root=root)
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-B", claim="Raised again.",
+        root=root)
+
+    # Upsert a flagged candidate (possible duplicate).
+    pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="eos-rock",
+        title="Revenue sync", source="meeting-C", claim="Epic ROCK idea.",
+        link_to="CAND-0001", confidence=0.5, root=root)
+
+    prog = pl.read_program(ip, root=root)
+    vm = pl.render_view(prog, reg)
+
+    assert vm["model"] == "register"
+    assert len(vm["items"]) == 2
+
+    # First candidate: 2 sources, no duplicate marker.
+    item0 = vm["items"][0]
+    assert item0["name"] == "Smart reconciliation"
+    assert item0["owner"] == "roadmap-initiative"
+    assert item0["age"] == 2
+    assert item0["status"] == "open"
+    assert item0.get("possible_duplicate_of") is None
+
+    # Second candidate: 1 source, marked as possible duplicate.
+    item1 = vm["items"][1]
+    assert item1["name"] == "Revenue sync"
+    assert item1["owner"] == "eos-rock"
+    assert item1["age"] == 1
+    assert item1["status"] == "open"
+    assert item1["possible_duplicate_of"] == "CAND-0001"

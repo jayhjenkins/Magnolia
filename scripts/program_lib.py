@@ -1533,10 +1533,28 @@ def render_view(program, registry, needs_you=0, emissions=None, root=None):
         ]
     elif state_model == "register":
         vm["status_line"] = fm.get("status_line")
-        vm["items"] = [
-            {"name": it.get("name"), "owner": it.get("owner"), "age": it.get("age")}
-            for it in (fm.get("items") or [])
-        ]
+        # For program-intake programs, candidates have {title, program_type,
+        # source_count, status, possible_duplicate_of, ...}. Map them to the
+        # register view as {name: title, owner: program_type, age: source_count,
+        # status, possible_duplicate_of}. For other register programs, keep the
+        # existing {name, owner, age} projection. Both shapes are tolerated in
+        # `items` (the client is tolerant of extra fields).
+        if type_id == "program-intake":
+            vm["items"] = [
+                {
+                    "name": it.get("title"),
+                    "owner": it.get("program_type"),
+                    "age": it.get("source_count"),
+                    "status": it.get("status"),
+                    "possible_duplicate_of": it.get("possible_duplicate_of"),
+                }
+                for it in (fm.get("items") or [])
+            ]
+        else:
+            vm["items"] = [
+                {"name": it.get("name"), "owner": it.get("owner"), "age": it.get("age")}
+                for it in (fm.get("items") or [])
+            ]
         vm["policy"] = fm.get("policy")
 
     # Coerce any date/datetime values (from unquoted YAML dates) to ISO strings

@@ -346,9 +346,13 @@ function cadenceItems(p) {
     } else {
       trailing = `<span class="cadence-item-age" style="color:var(--text-dim);">-</span>`;
     }
+    // Optional possible_duplicate_of marker (program-intake candidates only).
+    const dupMarker = it.possible_duplicate_of
+      ? ` <span class="cadence-item-dup-marker" style="color:var(--warning);">⇄ ${escapeHtml(it.possible_duplicate_of)}</span>`
+      : '';
     rows += `<div class="cadence-item">
       <span class="cadence-item-name">${escapeHtml(it.name || '')}</span>
-      <span class="cadence-item-meta">${escapeHtml(it.owner || '')} · ${trailing}</span>
+      <span class="cadence-item-meta">${escapeHtml(it.owner || '')} · ${trailing}${dupMarker}</span>
     </div>`;
   }
   return `<div class="cadence-items">${rows}</div>`;
