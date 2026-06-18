@@ -55,5 +55,5 @@ def test_install_ps1_has_required_steps():
     assert "git clone" in body
     assert "scripts/trust_seed.py" in body or "scripts\\trust_seed.py" in body
     assert "claude" in body                               # detect-and-direct
-    assert "bin" in body                                  # adds repo bin to PATH
+    assert "SetEnvironmentVariable" in body and '"Path"' in body  # User-PATH append logic
     assert "magnolia" in body.lower()

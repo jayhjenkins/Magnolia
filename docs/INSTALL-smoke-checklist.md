@@ -51,6 +51,9 @@ There are two kinds of first run. Note which one you are testing:
    python3 scripts/trust_seed.py detect
    ```
 
+   (`detect` takes no repo path because it reads your GLOBAL `~/.claude.json` -
+   where folder trust was written.)
+
    Expect `~/.claude.json` to list the repo under `projects` with
    `hasTrustDialogAccepted: true`, and `qmd` present in
    `enabledMcpjsonServers`.
@@ -70,6 +73,12 @@ There are two kinds of first run. Note which one you are testing:
    ```
    irm https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.ps1 | iex
    ```
+
+   Note: winget does not refresh the CURRENT shell's PATH, so on a truly bare
+   machine the immediately-following `npm install -g @tobilu/qmd` (and `git`)
+   may not be found in the same session. If the installer errors there, open a
+   NEW terminal and re-run it - the installer is idempotent. (This mirrors the
+   "hot-swap" PATH gotcha in INSTALL-windows.md.)
 
 3. Watch each step narrate and complete in order:
    - prerequisites (git, node, python, pandoc) via winget

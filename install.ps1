@@ -39,11 +39,11 @@ if (-not (Test-Path (Join-Path $Dest ".git"))) {
     git clone $RepoUrl $Dest
 } else {
     Say "Updating existing Magnolia in $Dest ..."
-    git -C $Dest pull --ff-only
+    try { git -C $Dest pull --ff-only } catch { }
 }
 
-# 5. Seed folder trust + qmd enablement (Inc 1)
-python (Join-Path $Dest "scripts/trust_seed.py") seed $Dest
+# 5. Seed folder trust + qmd enablement (Inc 1; safe no-op if not logged in)
+try { python (Join-Path $Dest "scripts/trust_seed.py") seed $Dest } catch { }
 
 # 6. Put magnolia on PATH (add repo bin so bin\magnolia.cmd resolves in place)
 $bin = Join-Path $Dest "bin"
