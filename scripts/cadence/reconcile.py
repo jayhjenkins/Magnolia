@@ -452,6 +452,146 @@ def _open_propose_update_ops(task_lib, program_id):
     return ops
 
 
+def _open_birth_candidate_ids(task_lib, intake_program_id):
+    """Return the set of candidate_ids already covered by an OPEN birth proposal.
+
+    The birth-proposal dedupe fence. Mirrors _open_propose_update_ops but keys on
+    `proposal.candidate_id` instead of `proposal.op`: every birth shares op
+    "birth", so op-dedupe (correct for the single-op advance-phase door) would
+    collapse all candidates into one and let only the first candidate ever get a
+    proposal. We scan OPEN cadence-propose-update cards tagged with the intake
+    program_id whose proposal op is "birth" and collect each proposal's
+    candidate_id, so a second reconcile cannot stack a duplicate birth for a
+    candidate while one is still open. Defensive: list_tasks projects only light
+    fields, so we re-read each card's frontmatter for `proposal`; an unreadable
+    card is skipped. Never raises.
+    """
+    ids = set()
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        if t.get("task_type") != "cadence-propose-update":
+            continue
+        if intake_program_id not in (t.get("tags") or []):
+            continue
+        try:
+            fm = task_lib.read_task(t["id"])["frontmatter"]
+        except Exception:
+            continue
+        proposal = fm.get("proposal") or {}
+        if not isinstance(proposal, dict) or proposal.get("op") != "birth":
+            continue
+        cid = proposal.get("candidate_id")
+        if cid:
+            ids.add(cid)
+    return ids
+
+
+def _birth_threshold_for(program_type, registry):
+    """Return a target type's intake.birth_threshold dict, or {} when absent.
+
+    Tolerant of a type with no `intake` block or no `birth_threshold` (returns an
+    empty dict so the caller's ripeness test simply never fires). Never raises.
+    """
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == program_type), {}
+    )
+    intake = type_entry.get("intake") or {}
+    threshold = intake.get("birth_threshold") or {}
+    return threshold if isinstance(threshold, dict) else {}
+
+
+def _candidate_is_ripe(candidate, threshold):
+    """True when a candidate's evidence crosses its target type's birth_threshold.
+
+    Two ripeness paths, both read off the (already-validated) threshold dict:
+
+      - source-counting: ripe when `min_independent_sources` is present AND the
+        candidate's `source_count` meets it. This path is DISALLOWED for a
+        declaration-only type (no min_independent_sources key), so a quarterly
+        mention never source-counts its way to a birth.
+      - explicit declaration: ripe when the candidate carries `declared: true`
+        AND the threshold allows it (`or_explicit_declaration` OR
+        `explicit_declaration_only`).
+
+    The `declared` flag is the agreed lightweight representation of an explicit
+    "we are committing to this" declaration on a candidate (default False/absent).
+    upsert_candidate does NOT set it today; Task 5's intake sentinel / Task 7 can
+    set it later from a recognized declaration. Until then a declaration-only type
+    simply never births here -- which is the safe behavior (no premature births).
+    Tolerant of non-dict / missing shapes; never raises.
+    """
+    if not isinstance(candidate, dict) or not isinstance(threshold, dict):
+        return False
+
+    min_sources = threshold.get("min_independent_sources")
+    if isinstance(min_sources, int) and not isinstance(min_sources, bool):
+        source_count = candidate.get("source_count")
+        if isinstance(source_count, int) and not isinstance(source_count, bool):
+            if source_count >= min_sources:
+                return True
+
+    declared = candidate.get("declared") is True
+    allows_declaration = bool(
+        threshold.get("or_explicit_declaration")
+        or threshold.get("explicit_declaration_only")
+    )
+    return declared and allows_declaration
+
+
+def _candidate_citations(candidate):
+    """Return the DISTINCT evidence sources of a candidate, order-preserved.
+
+    These are the citations that earned a birth (written into the new program's
+    ## Intent at accept). Tolerant of malformed evidence; never raises.
+    """
+    seen = []
+    for ev in candidate.get("evidence") or []:
+        if not isinstance(ev, dict):
+            continue
+        src = (ev.get("source") or "").strip()
+        if src and src not in seen:
+            seen.append(src)
+    return seen
+
+
+def _propose_births(intake_fm, registry, body=None):
+    """Return birth proposals for the OPEN, ripe candidates in an intake register.
+
+    For each `status == "open"` candidate item under intake_fm["items"], look up
+    its TARGET type's intake.birth_threshold (NOT the intake program's), and if
+    the accumulated evidence is ripe (_candidate_is_ripe) emit a birth proposal:
+
+        {op: "birth", program_type, title, candidate_id, checkpoints: [],
+         citations: [distinct sources]}
+
+    Checkpoints are left empty here -- a newborn's inferred checkpoints are the
+    accept path's concern (4a marks them honestly as pending, no grounding sweep).
+    `body` is accepted for signature symmetry with the other producers but unused
+    (candidate state lives entirely in the frontmatter items). Proposal-only:
+    never mutates the intake program. ASCII-safe; tolerant of malformed items.
+    """
+    proposals = []
+    for cand in intake_fm.get("items") or []:
+        if not isinstance(cand, dict):
+            continue
+        if cand.get("status") != "open":
+            continue  # closed-with-reason / birthed / unknown -> never proposed
+        program_type = cand.get("program_type")
+        if not program_type:
+            continue
+        threshold = _birth_threshold_for(program_type, registry)
+        if not _candidate_is_ripe(cand, threshold):
+            continue
+        proposals.append({
+            "op": "birth",
+            "program_type": program_type,
+            "title": cand.get("title") or program_type,
+            "candidate_id": cand.get("id"),
+            "checkpoints": [],
+            "citations": _candidate_citations(cand),
+        })
+    return proposals
+
+
 def _resolve_nudge_target(fm, root=None):
     """Resolve a (channel, recipient) nudge target -- profile-driven, NO literal.
 
@@ -626,13 +766,35 @@ def _has_interpretive_completion(body, since=None):
     return False
 
 
+def _build_birth_description(proposal, program_id):
+    """Build a <=2-sentence ASCII birth-proposal card body (invariant #8).
+
+    Renders the prefilled-program preview a human sees when accepting a birth:
+    the target type, the proposed title, and the citations that earned it (so the
+    diff and its evidence are both on the card). `program_id` is the intake
+    register backlink. ASCII only, no em-dash; tolerant of missing fields.
+    """
+    program_type = proposal.get("program_type", "?")
+    title = proposal.get("title", "?")
+    citations = proposal.get("citations") or []
+    cites = ", ".join(str(c) for c in citations) if citations else "none"
+    return (
+        f"Cadence proposes birthing a {program_type} program '{title}' from "
+        f"intake {program_id}. Earned by: {cites}."
+    )
+
+
 def _build_proposal_description(mutation, body, program_id):
     """Build a <=2-sentence ASCII proposal card body (invariant #8).
 
     States the proposed change (advance from -> to on which checkpoint) and the
     interpretive observation's claim that earned it, so the human accepting the
-    card sees both the diff and its citation. ASCII arrows, no em-dash.
+    card sees both the diff and its citation. ASCII arrows, no em-dash. A birth
+    proposal (op "birth") has no from/to/checkpoint shape -- it is delegated to
+    _build_birth_description, which renders the prefilled-program preview.
     """
+    if isinstance(mutation, dict) and mutation.get("op") == "birth":
+        return _build_birth_description(mutation, program_id)
     frm = mutation.get("from", "?")
     to = mutation.get("to", "?")
     cp = mutation.get("checkpoint", "?")
@@ -657,7 +819,7 @@ def _latest_interpretive_claim(body):
 
 
 def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None,
-                       period=None):
+                       period=None, registry=None):
     """Evaluate the type's declarative emitters. Returns created task ids.
 
     Three emitter families fire here, all Tier-1 (LOCAL cards, no external writes,
@@ -688,6 +850,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
     if not emitters:
         return []
 
+    registry = registry or {}
     fm = program["frontmatter"]
     program_id = fm.get("program_id")
     title = fm.get("title") or program_id or "Program"
@@ -695,6 +858,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
     open_tags = None        # lazily computed on the first escalate fire
     open_prop_ops = None    # lazily computed on the first propose-update fire
     open_agent_types = None  # lazily computed on the first produce-artifact fire
+    open_birth_ids = None   # lazily computed on the first candidate-ripe fire
 
     for em in emitters:
         action = em.get("action")
@@ -722,6 +886,37 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             # Reflect the just-created card so a second escalate emitter in the
             # same evaluation cannot double-fire for this program.
             open_tags.add(program_id)
+
+        elif action == "propose-update" and on == "candidate-ripe":
+            # The BIRTH door (inc4a): the program-intake register's emitter. Each
+            # OPEN candidate that crosses its TARGET type's birth_threshold becomes
+            # a birth proposal -- mirror the advance-phase propose-update card, but
+            # dedupe by candidate_id (every birth shares op "birth", so op-dedupe
+            # would collapse them). The intake program_id tags every card.
+            births = _propose_births(fm, registry, body or "")
+            if not births:
+                continue
+            import task_lib
+            if open_birth_ids is None:
+                open_birth_ids = _open_birth_candidate_ids(task_lib, program_id)
+            for birth in births:
+                cid = birth.get("candidate_id")
+                if cid in open_birth_ids:
+                    continue  # an open birth proposal already covers this candidate
+                task_id, _ = task_lib.create_task(
+                    title=f"Birth {birth['program_type']}: {birth['title']}?",
+                    queue="human",
+                    priority="high",
+                    creator="cadence",
+                    card_type="recommendation",
+                    task_type="cadence-propose-update",
+                    tags=[program_id, "cadence"],
+                    proposal=birth,
+                    description=_build_birth_description(birth, program_id),
+                )
+                emitted.append(task_id)
+                if cid:
+                    open_birth_ids.add(cid)
 
         elif action == "propose-update":
             # The mutation function is the real gate (the `on` string is only a
@@ -993,7 +1188,8 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
         (t for t in registry.get("types", []) if t.get("id") == type_id), {}
     )
     emitted = _evaluate_emitters(
-        program, type_entry, verdict, facts, body=body, root=root, period=period
+        program, type_entry, verdict, facts, body=body, root=root, period=period,
+        registry=registry
     )
 
     # The FACT door: mutate `fm` in place (phase + checkpoint) when the current
