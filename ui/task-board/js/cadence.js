@@ -322,17 +322,33 @@ function cadenceItems(p) {
   const policy = p.policy;
   let rows = '';
   for (const it of items) {
+    // Shared across register items ({name, owner, age}) and cycle items
+    // ({name, owner, status}). Show whichever the item carries: a present age
+    // (register) renders the aged 'Nd' meta; a present status (cycle) renders
+    // the status word; absent both falls back to a bare '-'. Tokens only.
     const age = it.age;
-    // Missing age → neutral --text-dim and a bare '-' (no trailing 'd');
-    // a present age (incl. 0) keeps its color comparison and 'Nd' label.
     const hasAge = age != null;
-    let ageColor = 'var(--text-dim)';
-    if (hasAge && policy != null && age > policy) ageColor = 'var(--danger)';
-    else if (hasAge && age > 14) ageColor = 'var(--warning)';
-    const ageStr = hasAge ? `${escapeHtml(String(age))}d` : '-';
+    const hasStatus = it.status != null && it.status !== '';
+    let trailing;
+    if (hasAge) {
+      // Missing age → neutral --text-dim and a bare '-' (no trailing 'd');
+      // a present age (incl. 0) keeps its color comparison and 'Nd' label.
+      let ageColor = 'var(--text-dim)';
+      if (policy != null && age > policy) ageColor = 'var(--danger)';
+      else if (age > 14) ageColor = 'var(--warning)';
+      trailing = `<span class="cadence-item-age" style="color:${ageColor};">${escapeHtml(String(age))}d</span>`;
+    } else if (hasStatus) {
+      // Cycle-item status: done/met → success, missed/late → danger, else dim.
+      const st = String(it.status);
+      const stColor = (st === 'done' || st === 'met') ? 'var(--success)'
+        : (st === 'missed' || st === 'late') ? 'var(--danger)' : 'var(--text-dim)';
+      trailing = `<span class="cadence-item-status" style="color:${stColor};">${escapeHtml(st)}</span>`;
+    } else {
+      trailing = `<span class="cadence-item-age" style="color:var(--text-dim);">-</span>`;
+    }
     rows += `<div class="cadence-item">
       <span class="cadence-item-name">${escapeHtml(it.name || '')}</span>
-      <span class="cadence-item-meta">${escapeHtml(it.owner || '')} · <span class="cadence-item-age" style="color:${ageColor};">${ageStr}</span></span>
+      <span class="cadence-item-meta">${escapeHtml(it.owner || '')} · ${trailing}</span>
     </div>`;
   }
   return `<div class="cadence-items">${rows}</div>`;

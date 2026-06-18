@@ -819,6 +819,10 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 description=_build_nudge_description(facts, program_id, recipient),
                 message_channel=channel,
                 message_to=recipient,
+                # The shipper builds the outgoing draft from message_body, so the
+                # nudge text must ride that field too (description is the
+                # human-facing card body; duplicating the text is fine).
+                message_body=_build_nudge_description(facts, program_id, recipient),
             )
             emitted.append(task_id)
             _record_nudge_count(fm, period, recipient)

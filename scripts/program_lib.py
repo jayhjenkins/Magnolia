@@ -1160,10 +1160,17 @@ def render_view(program, registry, needs_you=0, emissions=None, root=None):
             {"w": p.get("w"), "s": p.get("s")} for p in (fm.get("periods") or [])
         ]
         # A cycle program (e.g. weekly-priorities) may declare `items` — the
-        # current cycle's priorities. Surface them like the register branch so
-        # the row can list them; absent -> [].
+        # current cycle's priorities. The canonical cycle-item shape is the
+        # seed's {id, label, owner_role, status} (role-referenced, invariant #1),
+        # which differs from the register branch's {name, owner, age}. Map
+        # view-model `name` <- item `label` (fallback `text` then `id`), `owner`
+        # <- item `owner_role` (a role token), and INCLUDE `status`. Absent -> [].
         vm["items"] = [
-            {"name": it.get("name"), "owner": it.get("owner"), "age": it.get("age")}
+            {
+                "name": it.get("label") or it.get("text") or it.get("id"),
+                "owner": it.get("owner_role"),
+                "status": it.get("status"),
+            }
             for it in (fm.get("items") or [])
         ]
     elif state_model == "register":

@@ -159,8 +159,10 @@ def test_render_register(tmp_path):
 
 def test_render_view_surfaces_items_for_cycle(tmp_path):
     # A cycle program (weekly-priorities) can declare `items` — the week's
-    # priorities. render_view must surface them in the view model, mirroring the
-    # register branch, so the Cadence row can list them.
+    # priorities. render_view must surface them in the view model so the Cadence
+    # row can list them. The canonical cycle-item shape is the SEED's shape:
+    # {id, label, owner_role, status} (role-referenced, invariant #1 compliant).
+    # render_view maps label -> name and owner_role -> owner, and includes status.
     root = str(tmp_path)
     reg = pl.load_registry()
     pid, _ = pl.create_program(
@@ -169,16 +171,24 @@ def test_render_view_surfaces_items_for_cycle(tmp_path):
             "drift": "holding",
             "status_line": "Sent Monday - 9 of 9 done",
             "items": [
-                {"name": "Close payments PRD", "owner": "product", "age": 2},
-                {"name": "Review home backlog", "owner": "product", "age": 5},
+                {"id": "close-payments-prd", "label": "Close payments PRD",
+                 "owner_role": "product", "status": "open"},
+                {"id": "review-home-backlog", "label": "Review home backlog",
+                 "owner_role": "engineering", "status": "open"},
             ],
         })
     vm = pl.render_view(pl.read_program(pid, root=root), reg)
     assert vm["model"] == "cycle"
     assert len(vm["items"]) == 2
+    # The label -> name mapping works (non-null).
     assert vm["items"][0]["name"] == "Close payments PRD"
-    assert vm["items"][1]["owner"] == "product"
-    assert vm["items"][1]["age"] == 5
+    assert vm["items"][0]["name"] is not None
+    # The owner_role -> owner mapping works (a role token, non-null).
+    assert vm["items"][1]["owner"] == "engineering"
+    assert vm["items"][1]["owner"] is not None
+    # status is included.
+    assert vm["items"][0]["status"] == "open"
+    assert vm["items"][1]["status"] == "open"
 
 
 def test_render_view_includes_digests_when_artifacts_exist(tmp_path):

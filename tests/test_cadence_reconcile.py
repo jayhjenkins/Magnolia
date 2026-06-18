@@ -1353,6 +1353,10 @@ def test_draft_message_creates_send_message_collab_card(tmp_path):
     assert fm_card.get("message_to")  # a recipient string is set
     # owner_role was "product" -> the role-based target references it.
     assert "product" in fm_card["message_to"]
+    # The card must carry the nudge text in message_body — the shipper builds the
+    # outgoing draft from message_body, so an empty one would send a blank nudge.
+    assert fm_card.get("message_body")  # a NON-EMPTY wire body is set
+    assert program_id in fm_card["message_body"]
 
 
 def test_draft_message_respects_nudge_cap_and_suppresses(tmp_path):
