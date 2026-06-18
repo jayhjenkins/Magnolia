@@ -225,6 +225,7 @@ def create_task(title, queue="human", priority="medium", domain=None,
                 meeting_duration=None, meeting_title=None,
                 meeting_description=None, message_channel=None,
                 message_to=None, message_subject=None, message_body=None,
+                attachments=None,
                 card_type=None, patch_path=None, proposal=None):
     """Create a new task file in the appropriate queue directory.
 
@@ -311,6 +312,9 @@ def create_task(title, queue="human", priority="medium", domain=None,
         frontmatter["message_to"] = message_to
         frontmatter["message_subject"] = message_subject
         frontmatter["message_body"] = message_body
+        # Local artifact paths the send should carry (email base64 / Teams
+        # reference; the messaging adapter degrades to inline links). inc5 slice 9.
+        frontmatter["attachments"] = attachments or []
 
     # Build body
     body_parts = ["\n## Description\n"]

@@ -49,6 +49,21 @@ class _FakeHandler:
 
 # ── draft build ──────────────────────────────────────────────────────────────
 
+def test_message_draft_carries_attachments(srv, monkeypatch):
+    monkeypatch.setattr(shipper, "_load_email_cache", lambda: {})
+    import task_lib
+    tid = _send_task(channel="Email", to="x@y.com", body="b")
+    task_lib.update_task(tid, {"attachments": ["datasets/programs/artifacts/PROG-1/x.md"]})
+    d = shipper._message_draft_from_task(tid)
+    assert d["attachments"] == ["datasets/programs/artifacts/PROG-1/x.md"]
+
+
+def test_message_draft_attachments_default_empty(srv, monkeypatch):
+    monkeypatch.setattr(shipper, "_load_email_cache", lambda: {})
+    d = shipper._message_draft_from_task(_send_task(channel="Email", to="x@y.com"))
+    assert d["attachments"] == []
+
+
 def test_message_draft_resolves_recipient_and_channel(srv, monkeypatch):
     monkeypatch.setattr(shipper, "_load_email_cache", lambda: {"Dana": "dana@co.com"})
     d = shipper._message_draft_from_task(_send_task(channel="Teams", to="Dana", body="ping"))

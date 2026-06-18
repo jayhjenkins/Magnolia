@@ -107,9 +107,14 @@ Task {task_id}. Follow these steps:
      --tags "<pid>,cadence" \
      --message-channel "Teams" \
      --message-to "<channel-or-recipient>" \
-     --message-body "<the digest body, verbatim, ASCII-safe>"
+     --message-body "<the digest body, verbatim, ASCII-safe>" \
+     --attachments "<the artifact path the write-artifact CLI just printed>"
    ```
    For an email digest use `--message-channel "Email"` and add `--message-subject "..."`.
+   The `--attachments` path rides the send as an Office-native file (the send path
+   renders it to .docx for email / a SharePoint link for Teams, and degrades to an
+   inline link when that is not possible) - so the operator gets the digest both inline
+   and as a document. Always pass the artifact path you just wrote.
    If messaging is unconfigured (no channel/recipient resolvable from the bindings or
    profile), DEGRADE TO DRAFT-ONLY: still create the card with the body, set
    `--message-to "(recipient not configured)"`, and note in the card that the operator

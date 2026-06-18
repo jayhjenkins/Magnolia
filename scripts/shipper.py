@@ -52,6 +52,7 @@ def _message_draft_from_task(task_id):
         "to_display": to_display,
         "subject": fm.get("message_subject") or "",
         "body": fm.get("message_body") or "",
+        "attachments": fm.get("attachments") or [],
         "task_id": task_id,
     }
 

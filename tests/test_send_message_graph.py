@@ -4,6 +4,7 @@ Pure payload builders are asserted exactly; the impure mgc runner is exercised
 only via dry-run and the missing-mgc guard. No real `mgc` is ever invoked.
 Mirrors the calendar precedent (create_calendar_event.py).
 """
+import base64
 import json
 import send_message_graph as g
 
@@ -117,3 +118,63 @@ def test_send_teams_message_uses_chat_id_option_not_positional(monkeypatch):
     assert message_argv[:4] == ["mgc", "chats", "messages", "create"]
     assert message_argv[message_argv.index("--chat-id") + 1] == "CHAT-1"
     assert out["message_id"] == "MSG-1"
+
+
+# ── Attachments (inc5 slice 9) ───────────────────────────────────────────────
+# Email carries a base64 fileAttachment; Teams carries a reference attachment
+# (a hosted URL) — Graph has NO base64 path for chat files.
+
+def test_email_payload_includes_base64_file_attachment(tmp_path):
+    f = tmp_path / "digest.docx"
+    f.write_bytes(b"PK\x03\x04fake-docx-bytes")
+    p = g.build_email_payload(["a@x.com"], "S", "B", attachments=[str(f)])
+    atts = p["message"]["attachments"]
+    assert len(atts) == 1
+    a = atts[0]
+    assert a["@odata.type"] == "#microsoft.graph.fileAttachment"
+    assert a["name"] == "digest.docx"
+    assert a["contentType"] == \
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert base64.b64decode(a["contentBytes"]) == b"PK\x03\x04fake-docx-bytes"
+
+
+def test_email_payload_no_attachments_key_when_empty():
+    # Back-compat: no attachments arg, or an empty list, leaves the payload clean.
+    assert "attachments" not in g.build_email_payload(["a@x.com"], "S", "B")["message"]
+    assert "attachments" not in \
+        g.build_email_payload(["a@x.com"], "S", "B", attachments=[])["message"]
+
+
+def test_chat_payload_reference_attachment_forces_html_and_links():
+    p = g.build_chat_message_payload(
+        "See attached.",
+        attachments=[{"name": "digest.docx", "url": "https://sp/sites/PM-OS/digest.docx"}])
+    # A chat attachment reference must ride an HTML body that references it by id.
+    assert p["body"]["contentType"] == "html"
+    atts = p["attachments"]
+    assert len(atts) == 1
+    a = atts[0]
+    assert a["contentType"] == "reference"
+    assert a["contentUrl"] == "https://sp/sites/PM-OS/digest.docx"
+    assert a["name"] == "digest.docx"
+    assert f'<attachment id="{a["id"]}">' in p["body"]["content"]
+
+
+def test_chat_payload_no_attachments_unchanged():
+    # Back-compat: the no-attachment shape is byte-for-byte what it was.
+    assert g.build_chat_message_payload("ping") == {
+        "body": {"contentType": "text", "content": "ping"}}
+
+
+def test_send_email_dry_run_carries_attachments(tmp_path):
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"x")
+    out = g.send_email(["a@x.com"], "S", "B", attachments=[str(f)], dry_run=True)
+    assert out["payload"]["message"]["attachments"][0]["name"] == "a.docx"
+
+
+def test_send_teams_dry_run_carries_reference_attachments():
+    out = g.send_teams("me@co.com", ["them@co.com"], "hi",
+                       attachments=[{"name": "a.docx", "url": "https://sp/a.docx"}],
+                       dry_run=True)
+    assert out["message"]["attachments"][0]["contentUrl"] == "https://sp/a.docx"

@@ -92,6 +92,7 @@ def cmd_add(args):
         message_to=args.message_to,
         message_subject=args.message_subject,
         message_body=args.message_body,
+        attachments=[a.strip() for a in (args.attachments or "").split(",") if a.strip()] or None,
         card_type=args.card_type,
         patch_path=args.patch_path,
     )
@@ -421,6 +422,8 @@ def main():
     p_add.add_argument("--message-to", default=None, help="Message recipient (send-message)")
     p_add.add_argument("--message-subject", default=None, help="Message subject (send-message, email)")
     p_add.add_argument("--message-body", default=None, help="Message body draft (send-message)")
+    p_add.add_argument("--attachments", default=None,
+                       help="Comma-separated local artifact paths to attach (send-message)")
     p_add.add_argument("--card-type", default=None,
                        help="Card type for the board renderer (recommendation|graduation|receipt)")
     p_add.add_argument("--patch-path", default=None,

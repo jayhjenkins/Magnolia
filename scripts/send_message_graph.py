@@ -15,10 +15,41 @@ Graph references:
                                          (scope Chat.ReadWrite)
 """
 import argparse
+import base64
 import json
+import mimetypes
+import os
 import shutil
 import subprocess
 import sys
+import uuid
+
+# Office MIME types mimetypes doesn't always know — used to label attachments.
+_OFFICE_MIME = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+
+def _content_type_for(path):
+    """Best-effort MIME type for an attachment path (Office types first)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _OFFICE_MIME:
+        return _OFFICE_MIME[ext]
+    return mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+
+def _file_attachment(path):
+    """A Graph #fileAttachment (base64 inline) for an email. Reads the file."""
+    with open(path, "rb") as fh:
+        content = fh.read()
+    return {
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        "name": os.path.basename(path),
+        "contentType": _content_type_for(path),
+        "contentBytes": base64.b64encode(content).decode("ascii"),
+    }
 
 # The unified mgc scope set for the whole engine — calendar + email + Teams +
 # attendee/recipient lookup. One `mgc login` with these grants every Graph
@@ -33,16 +64,19 @@ _GRAPH_USER = "https://graph.microsoft.com/v1.0/users('{upn}')"
 
 # ── Pure payload builders ────────────────────────────────────────────────────
 
-def build_email_payload(to, subject, body, html=False):
-    """Graph sendMail payload. `to` is a list of email addresses."""
-    return {
-        "message": {
-            "subject": subject or "",
-            "body": {"contentType": "HTML" if html else "Text", "content": body or ""},
-            "toRecipients": [{"emailAddress": {"address": a}} for a in to],
-        },
-        "saveToSentItems": True,
+def build_email_payload(to, subject, body, html=False, attachments=None):
+    """Graph sendMail payload. `to` is a list of email addresses.
+
+    `attachments` is a list of LOCAL FILE PATHS, each inlined as a base64
+    #fileAttachment. Omitted entirely when there are none (back-compat)."""
+    message = {
+        "subject": subject or "",
+        "body": {"contentType": "HTML" if html else "Text", "content": body or ""},
+        "toRecipients": [{"emailAddress": {"address": a}} for a in to],
     }
+    if attachments:
+        message["attachments"] = [_file_attachment(p) for p in attachments]
+    return {"message": message, "saveToSentItems": True}
 
 
 def build_chat_create_payload(me_upn, recipient_upns):
@@ -63,9 +97,29 @@ def build_chat_create_payload(me_upn, recipient_upns):
     }
 
 
-def build_chat_message_payload(body, html=False):
-    """Graph chatMessage payload (note: chat bodies use lowercase contentType)."""
-    return {"body": {"contentType": "html" if html else "text", "content": body or ""}}
+def build_chat_message_payload(body, html=False, attachments=None):
+    """Graph chatMessage payload (note: chat bodies use lowercase contentType).
+
+    `attachments` is a list of {"name", "url"} REFERENCE dicts — Graph chat
+    messages have no base64 path, so a file is referenced by its hosted URL.
+    Referencing one forces an HTML body that embeds the <attachment> tag(s).
+    Omitted entirely when there are none (back-compat)."""
+    if not attachments:
+        return {"body": {"contentType": "html" if html else "text", "content": body or ""}}
+    refs, tags = [], []
+    for att in attachments:
+        att_id = str(uuid.uuid4())
+        refs.append({
+            "id": att_id,
+            "contentType": "reference",
+            "contentUrl": att["url"],
+            "name": att.get("name") or os.path.basename(att["url"]),
+        })
+        tags.append(f'<attachment id="{att_id}"></attachment>')
+    return {
+        "body": {"contentType": "html", "content": (body or "") + "".join(tags)},
+        "attachments": refs,
+    }
 
 
 # ── Impure: the mgc runner ───────────────────────────────────────────────────
@@ -112,9 +166,11 @@ def _run_mgc(args, dry_run=False):
 
 # ── Send paths ───────────────────────────────────────────────────────────────
 
-def send_email(to, subject, body, html=False, dry_run=False):
-    """Send an email via Graph sendMail. Returns a dict (success marker / dry-run)."""
-    payload = build_email_payload(to, subject, body, html=html)
+def send_email(to, subject, body, html=False, dry_run=False, attachments=None):
+    """Send an email via Graph sendMail. Returns a dict (success marker / dry-run).
+
+    `attachments` is a list of local file paths (inlined base64)."""
+    payload = build_email_payload(to, subject, body, html=html, attachments=attachments)
     if dry_run:
         return {"dry_run": True, "channel": "email", "payload": payload}
     # sendMail lives under the users resource and REQUIRES --user-id ("me" =
@@ -124,10 +180,12 @@ def send_email(to, subject, body, html=False, dry_run=False):
     return {"status": "sent", "channel": "email", "to": list(to)}
 
 
-def send_teams(me_upn, recipient_upns, body, html=False, dry_run=False):
-    """Create (or reuse) the chat and post the message. Returns the message id."""
+def send_teams(me_upn, recipient_upns, body, html=False, dry_run=False, attachments=None):
+    """Create (or reuse) the chat and post the message. Returns the message id.
+
+    `attachments` is a list of {"name", "url"} reference dicts (hosted files)."""
     chat_payload = build_chat_create_payload(me_upn, recipient_upns)
-    msg_payload = build_chat_message_payload(body, html=html)
+    msg_payload = build_chat_message_payload(body, html=html, attachments=attachments)
     if dry_run:
         return {"dry_run": True, "channel": "teams",
                 "chat": chat_payload, "message": msg_payload}
