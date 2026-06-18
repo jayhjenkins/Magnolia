@@ -50,3 +50,9 @@ def update():
     """Pull the latest engine, fast-forward only (never auto-merge over local edits)."""
     rc, out = _run(["git", "-C", PM_OS_DIR, "pull", "--ff-only"])
     return {"status": "ok" if rc == 0 else "failed", "output": out}
+
+
+def doctor():
+    """Run capability detection (scripts/doctor.py detect) and return its output."""
+    rc, out = _run([sys.executable, os.path.join(PM_OS_DIR, "scripts", "doctor.py"), "detect"])
+    return {"status": "ok" if rc == 0 else "failed", "output": out}

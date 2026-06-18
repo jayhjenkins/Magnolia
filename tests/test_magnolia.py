@@ -1,3 +1,5 @@
+import sys
+
 import magnolia
 
 
@@ -59,3 +61,14 @@ def test_update_reports_failure(monkeypatch):
     res = magnolia.update()
     assert res["status"] == "failed"
     assert "fast-forward" in res["output"]
+
+
+def test_doctor_runs_detection(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(magnolia, "_run",
+                        lambda cmd: seen.update(cmd=cmd) or (0, '{"capabilities": {}}'))
+    res = magnolia.doctor()
+    assert seen["cmd"][0] == sys.executable
+    assert seen["cmd"][1].endswith("doctor.py")
+    assert seen["cmd"][2] == "detect"
+    assert res["status"] == "ok"
