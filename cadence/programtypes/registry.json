@@ -9,6 +9,7 @@
   "types": [
     { "id": "roadmap-initiative", "label": "Roadmap initiative", "family": "roadmap",
       "state_model": "pipeline",
+      "archive_after_silent_cycles": 6,
       "phases": [
         { "id": "discovery", "label": "Discovery", "max_age_days": 21, "exit_checkpoint": "discovery-exit" },
         { "id": "planning",  "label": "Planning",  "max_age_days": 14 },
@@ -94,6 +95,14 @@
       "sources": [ { "kind": "transcripts", "mode": "read" } ],
       "emitters": [
         { "on": "candidate-ripe", "action": "propose-update" },
+        { "on": "drift:broken", "action": "escalate" }
+      ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "portfolio-health", "label": "Portfolio health", "family": "system",
+      "state_model": "register", "cadence": "weekly",
+      "sources": [ { "kind": "transcripts", "mode": "read" } ],
+      "emitters": [
         { "on": "drift:broken", "action": "escalate" }
       ],
       "presentation": { "chip_tokens": {} } }
