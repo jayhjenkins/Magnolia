@@ -1205,7 +1205,9 @@ def _apply_archive(program_id, mutation, fm, type_entry, filepath, body, root):
     _write_program_file(filepath, fm, body)
 
     # Append a completion observation
-    source = f"meeting:{citations[0]}" if citations else "proposal"
+    # Cite the first citation VERBATIM (a terminal-phase name, a checkpoint id, a
+    # "sentinel:..." token, or a "meeting:..." id) -- never re-prefix it.
+    source = str(citations[0]) if citations else "proposal"
     append_observation(
         program_id, kind="completion", sentinel="reconciler", source=source,
         claim=f"Program archived: {reason}.", root=root)

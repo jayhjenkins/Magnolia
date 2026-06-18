@@ -558,6 +558,22 @@ def test_run_sentinel_stamps_telemetry(tmp_path, monkeypatch):
     assert entry["last_emitted_count"] == 1
 
 
+def test_run_sentinel_records_failure_when_def_unloadable(tmp_path, monkeypatch):
+    """A sentinel whose def will not load is BLIND: telemetry records a failed run
+    (last_error set, no last_success) so the silent-archive door does not treat it
+    as live."""
+    root = str(tmp_path)
+    _pin_programs(tmp_path, monkeypatch)
+    # A name with no def under scripts/sentinels/ -> load_sentinel raises -> the
+    # impl returns a summary carrying `error`.
+    summary = sentinel_runner.run_sentinel("no-such-sentinel-xyz", root=root)
+    assert "error" in summary
+    entry = sentinel_runner.read_sentinel_runs(root)["no-such-sentinel-xyz"]
+    assert entry.get("last_error")           # recorded as blind
+    assert entry.get("last_success") is None  # NOT a success
+    assert "last_run" in entry                # but we know it was attempted
+
+
 def test_run_sentinel_passes_date_not_timestamp_to_impl(tmp_path, monkeypatch):
     """Regression: the wrapper must NOT pass a full ISO timestamp into the impl.
 

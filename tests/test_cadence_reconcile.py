@@ -2029,7 +2029,9 @@ def test_propose_archive_silent_suppressed_when_sentinel_blind(tmp_path):
         root=root,
     )
 
-    body = f"## Observations\n\n- **{old_date}** | dormant observation"
+    # Parseable observation (### header) so the silent threshold IS crossed and
+    # the test genuinely reaches the blind-sentinel suppression branch.
+    body = f"## Observations\n\n### {old_date}\ndormant observation"
     program = pl.read_program(program_id, root=root)
     fm = program["frontmatter"]
 
@@ -2077,7 +2079,8 @@ def test_propose_archive_silent_none_when_recently_active(tmp_path):
         root=root,
     )
 
-    body = f"## Observations\n\n- **{recent_date}** | recent observation"
+    # Parseable observation so the test reaches the recently-active threshold check.
+    body = f"## Observations\n\n### {recent_date}\nrecent observation"
     program = pl.read_program(program_id, root=root)
     fm = program["frontmatter"]
 
@@ -2134,8 +2137,9 @@ def test_silent_and_fact_dedupe_to_one_archive_card(tmp_path):
         root=root,
     )
 
-    # Set body with old observation
-    body = f"## Observations\n\n- **{old_date}** | old observation"
+    # Parseable old observation so the SILENT door genuinely fires too (not just
+    # the fact/terminal door) -- only then does the op-dedupe get exercised.
+    body = f"## Observations\n\n### {old_date}\nold observation"
     program = pl.read_program(program_id, root=root)
     fm = program["frontmatter"]
     pl._write_program_file(program["filepath"], fm, body)

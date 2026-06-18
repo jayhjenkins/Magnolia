@@ -565,6 +565,15 @@ def _run_sentinel_impl(name, root=None, now=None):
         definition = sentinel_lib.load_sentinel(name)
     except (FileNotFoundError, ValueError) as exc:
         log(f"sentinel '{name}' could not be loaded: {exc}")
+        # A def that will not load means the sentinel did NOT run -> blind. Mark
+        # the summary so run_sentinel records success=False (the silent-archive
+        # door must not treat a blind sentinel as live). NOTE (deferred): a run
+        # that DID dispatch but returned zero records is intentionally treated as
+        # live -- a quiet sentinel over a genuinely dormant program is exactly the
+        # case the silent door exists to archive. Distinguishing a dispatch
+        # FAILURE (claude missing/timeout) from an empty result needs _dispatch to
+        # signal that; tracked for a later increment.
+        summary["error"] = f"sentinel def could not be loaded: {exc}"
         return summary
 
     programs = program_lib.list_programs(status="active", root=root)
@@ -661,9 +670,13 @@ def run_sentinel(name, root=None, now=None):
 
     try:
         summary = _run_sentinel_impl(name, root=root, now=now)
-        # Record success
+        # A summary carrying an `error` means the sentinel did not actually run
+        # (e.g. its def would not load) -> record it as a failed run so the
+        # silent-archive door reads it as blind, not live.
+        err = (summary or {}).get("error")
         emitted_count = summary.get("appended", 0) if summary else 0
-        record_sentinel_run(name, success=True, emitted_count=emitted_count, root=root, now=stamp)
+        record_sentinel_run(name, success=(err is None), emitted_count=emitted_count,
+                            error=err, root=root, now=stamp)
         return summary
     except Exception as e:
         # Record failure

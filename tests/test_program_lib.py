@@ -1438,6 +1438,9 @@ def test_apply_archive_moves_file_and_sets_status(tmp_path):
     assert kind == "completion"
     assert sentinel == "reconciler"
     assert "archived" in claim.lower()
+    # C1 lock: the source is the citation VERBATIM, never re-prefixed with
+    # "meeting:" (citations are also phase names / "sentinel:..." / checkpoint ids).
+    assert source == "meeting:X"
 
 
 def test_apply_archive_version_suffixes_on_collision(tmp_path):
