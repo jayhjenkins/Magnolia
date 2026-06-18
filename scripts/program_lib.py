@@ -775,13 +775,20 @@ def _distinct_source_count(evidence):
     return len(sources)
 
 
-def _find_open_candidate(items, *, anchor=None, title=None, candidate_id=None):
+def _find_open_candidate(items, *, anchor=None, title=None, candidate_id=None,
+                         program_type=None):
     """Return the first OPEN candidate matching by id, anchor, or title key.
 
     Closed/birthed candidates are skipped (a match against one is treated as no
     match, so the caller opens a fresh candidate). Match precedence: explicit
     candidate_id, then anchor (when given), then normalized-title-key. Tolerant
     of malformed items (non-dict entries are skipped); never raises.
+
+    The normalized-title-key path is type-gated: when `program_type` is given,
+    a title match only counts if the existing candidate's `program_type` matches
+    too. (Two different target types can share a normalized title; merging them
+    would silently birth the wrong program type.) The anchor path stays
+    un-gated: anchors are externally unique identifiers across types.
     """
     title_key = _norm_title_key(title) if title else None
     for it in items or []:
@@ -794,6 +801,8 @@ def _find_open_candidate(items, *, anchor=None, title=None, candidate_id=None):
         if anchor and it.get("anchor") and it.get("anchor") == anchor:
             return it
         if title_key and _norm_title_key(it.get("title")) == title_key:
+            if program_type is not None and it.get("program_type") != program_type:
+                continue
             return it
     return None
 
@@ -853,7 +862,8 @@ def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
         fm["items"] = items
 
     # Resolve the merge target (an OPEN candidate) and the resulting action.
-    target = _find_open_candidate(items, anchor=anchor, title=title)
+    target = _find_open_candidate(items, anchor=anchor, title=title,
+                                  program_type=program_type)
     action = "merged" if target is not None else None
     possible_duplicate_of = None
 

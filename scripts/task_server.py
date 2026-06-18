@@ -1214,12 +1214,14 @@ def _enqueue_bootstrap_emissions(program_type, new_id):
         action = em.get("action")
         template = em.get("template")
         if action == "draft-ticket":
-            # An agent task the ticket-creator worker picks up (its match rides
-            # title/description patterns; "create ... tracker" matches). It DRAFTS
-            # only -- no external write until walked through the existing Tier-2.
+            # An agent task routed to the ticket-creator worker deterministically
+            # by task_type (dispatch scores an exact +100 match on the worker's
+            # match.task_type list -- not a fragile title/description substring).
+            # It DRAFTS only -- no external write until the existing Tier-2.
             bid, _ = task_lib.create_task(
                 title=f"Create tracker for {new_id}",
                 queue="agent", creator="cadence", tags=[new_id, "cadence"],
+                task_type="ticket-creator",
                 description=(
                     f"Draft the initial tracker issue for the newly born program "
                     f"{new_id}. Use jira-home to create the tracker initiative. "

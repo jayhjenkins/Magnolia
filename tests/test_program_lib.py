@@ -866,6 +866,45 @@ def test_upsert_candidate_merges_by_title_key(tmp_path):
     assert second["source_count"] == 2
 
 
+def test_upsert_candidate_title_merge_is_type_gated(tmp_path):
+    # Two candidates with the SAME normalized title but DIFFERENT program_type
+    # must NOT merge on the title-key path: birthing the wrong-typed program is
+    # the bug being fixed. The second upsert opens a brand-new candidate.
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart Reconciliation", source="meeting-A", claim="c1",
+        root=str(tmp_path))
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="eos-rock",
+        title="smart reconciliation!", source="meeting-B", claim="c2",
+        root=str(tmp_path))
+    assert second["action"] == "opened"
+    assert second["candidate_id"] != first["candidate_id"]
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = {it["id"]: it for it in prog["frontmatter"]["items"]}
+    assert len(items) == 2
+    assert items[first["candidate_id"]]["program_type"] == "roadmap-initiative"
+    assert items[second["candidate_id"]]["program_type"] == "eos-rock"
+
+
+def test_upsert_candidate_title_merge_same_type_still_merges(tmp_path):
+    # Same normalized title AND same program_type -> still merges (the existing
+    # title-key behavior is preserved by the type gate).
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart Reconciliation", source="meeting-A", claim="c1",
+        root=str(tmp_path))
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="smart reconciliation!", source="meeting-B", claim="c2",
+        root=str(tmp_path))
+    assert second["action"] == "merged"
+    assert second["candidate_id"] == first["candidate_id"]
+    assert second["source_count"] == 2
+
+
 def test_upsert_candidate_merges_by_confident_link(tmp_path):
     ip = _seed_intake(tmp_path)
     first = pl.upsert_candidate(

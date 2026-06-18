@@ -345,6 +345,13 @@ def test_accept_birth_enqueues_bootstrap_emissions(tasks_root, tmp_path, monkeyp
              for b in boot]
     assert "create-tracker-initiative" in types
     assert "add-roadmap-entry" in types
+    # the draft-ticket (agent-queue) task carries task_type=ticket-creator so
+    # dispatch scores an exact +100 match deterministically (not a fragile
+    # title/description substring match).
+    agent_boot = [b for b in boot if b.get("queue") == "agent"]
+    assert len(agent_boot) == 1
+    assert task_lib.read_task(agent_boot[0]["id"])["frontmatter"].get(
+        "task_type") == "ticket-creator"
 
 
 def test_accept_birth_makes_no_git_commit(tasks_root, tmp_path, monkeypatch):
