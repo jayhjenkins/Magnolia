@@ -98,3 +98,13 @@ def test_main_doctor_routes_to_doctor(monkeypatch):
 def test_main_update_failure_returns_nonzero(monkeypatch):
     monkeypatch.setattr(magnolia, "update", lambda: {"status": "failed", "output": "boom"})
     assert magnolia._main(["update"]) == 1
+
+
+def test_main_launch_failure_is_clean(monkeypatch, capsys):
+    def boom(**k):
+        raise TimeoutError("server did not come up")
+    monkeypatch.setattr(magnolia, "launch", boom)
+    rc = magnolia._main([])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "doctor" in out.lower()   # points the user at the remedy

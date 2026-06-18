@@ -5,8 +5,8 @@
 `magnolia update`  pull the latest engine (git pull, fast-forward only).
 `magnolia doctor`  run capability detection and print the summary.
 
-Thin orchestration over server_lib / persist_lib / platform_lib (the OS seam) /
-profile_lib. Profile-agnostic: it always starts the server and opens the browser;
+Thin orchestration over server_lib / persist_lib / platform_lib (the OS seam).
+Profile-agnostic: it always starts the server and opens the browser;
 the server's first-run gate decides whether to serve onboarding or the board. No
 OS branches live here - they belong in platform_lib.
 """
@@ -16,7 +16,6 @@ import sys
 
 import platform_lib
 import persist_lib
-import profile_lib
 import server_lib
 
 PM_OS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -75,7 +74,11 @@ def _main(argv=None):
         res = doctor()
         print(res["output"].rstrip())
         return 0 if res["status"] == "ok" else 1
-    res = launch()
+    try:
+        res = launch()
+    except Exception:
+        print("Magnolia could not start the board. Run: magnolia doctor")
+        return 1
     print(f"Magnolia is live at {res['url']}")
     return 0
 
