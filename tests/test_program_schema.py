@@ -292,3 +292,143 @@ def test_rejects_non_string_exit_checkpoint():
     ])
     errs = ps.validate_doc(reg, tokens={"--accent"})
     assert any("exit_checkpoint" in e for e in errs)
+
+
+# ─── intake block (Task 1: birth path) ───────────────────────────────────────
+
+
+def _type_with_intake(intake):
+    return {"families": [{"id": "x", "label": "X", "order": 1}],
+            "types": [{"id": "t", "label": "T", "family": "x", "state_model": "cycle",
+                       "sources": [], "presentation": {"chip_tokens": {}},
+                       "intake": intake}]}
+
+
+def test_accepts_candidate_intake_with_valid_birth_threshold():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "signals": ["recurring theme across discovery calls"],
+        "birth_threshold": {"min_independent_sources": 2,
+                            "or_explicit_declaration": True},
+        "bootstrap_emissions": [
+            {"action": "draft-ticket", "template": "create-tracker"},
+            {"action": "propose-update", "template": "add-roadmap-entry"},
+        ],
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_accepts_explicit_declaration_only_birth_threshold():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_accepts_capture_route_without_birth_threshold():
+    reg = _type_with_intake({"route": "capture"})
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_rejects_unknown_intake_route():
+    reg = _type_with_intake({"route": "bogus"})
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("route" in e and "bogus" in e for e in errs)
+
+
+def test_rejects_candidate_route_without_birth_threshold():
+    reg = _type_with_intake({"route": "candidate"})
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("birth_threshold" in e for e in errs)
+
+
+def test_rejects_bool_min_independent_sources():
+    # bool is an int subclass in Python; it must be rejected explicitly.
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"min_independent_sources": True},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("min_independent_sources" in e for e in errs)
+
+
+def test_rejects_negative_min_independent_sources():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"min_independent_sources": -1},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("min_independent_sources" in e for e in errs)
+
+
+def test_rejects_empty_birth_threshold():
+    # at least one of the three recognized keys must be present.
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("birth_threshold" in e for e in errs)
+
+
+def test_rejects_non_bool_or_explicit_declaration():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"or_explicit_declaration": "yes"},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("or_explicit_declaration" in e for e in errs)
+
+
+def test_rejects_bootstrap_emission_action_outside_closed_set():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "bootstrap_emissions": [{"action": "frobnicate"}],
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("frobnicate" in e for e in errs)
+
+
+def test_rejects_bootstrap_emissions_not_a_list():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "bootstrap_emissions": {"action": "draft-ticket"},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("bootstrap_emissions" in e for e in errs)
+
+
+def test_rejects_non_dict_bootstrap_emission():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "bootstrap_emissions": ["draft-ticket"],
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("bootstrap_emissions" in e for e in errs)
+
+
+def test_rejects_non_string_signal():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "signals": ["ok", "  "],
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("signal" in e for e in errs)
+
+
+def test_rejects_signals_not_a_list():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "signals": "recurring theme",
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("signals" in e for e in errs)

@@ -9,9 +9,14 @@ theme tokens ONLY, and every source declares a mode.
 As of the reconcile-engine increment this also validates each type's
 `emitters` block (the declarative drift -> action rules the reconciler reads):
 each emitter must name a non-empty `on` trigger and an `action` in the brief's
-closed action set. Still deferred (no producer yet): the read-mode-source ->
-no-write-emitter-target cross-check (there are no emitter targets to name yet),
-sentinel tool-lists, and the intake block. This is the gate the read-only
+closed action set. As of the birth-path increment it also validates each
+type's optional `intake` block (brief §3): a `route` in the closed routing set,
+and for a `candidate` route a `birth_threshold` (min_independent_sources as a
+non-negative int with bool rejected, the two explicit-declaration flags as
+bools, at least one key present), `bootstrap_emissions` actions in CLOSED_ACTIONS,
+and `signals` as non-empty strings. Still deferred (no producer yet): the
+read-mode-source -> no-write-emitter-target cross-check (there are no emitter
+targets to name yet) and sentinel tool-lists. This is the gate the read-only
 Cadence tab and the reconciler both rely on so every row layout and emitter
 rule is well-formed.
 """
@@ -28,6 +33,8 @@ STATE_MODELS = {"pipeline", "cycle", "target", "register"}
 # Brief §3 closed action set — the only actions an emitter may declare.
 CLOSED_ACTIONS = {"escalate", "draft-message", "produce-artifact",
                   "propose-update", "draft-ticket"}
+# Brief §3 closed intake routing set — how a type's exhaust is routed.
+INTAKE_ROUTES = {"observe", "capture", "candidate", "ignore"}
 
 
 def _theme_tokens():
@@ -128,6 +135,81 @@ def validate_doc(reg, tokens):
                                 f"type '{tid}': emitter "
                                 f"max_nudges_per_person_per_week must be a "
                                 f"non-negative int, got {type(v).__name__}")
+
+        # Intake block (brief §3) — how this type's exhaust is routed and,
+        # for a `candidate` route, when accumulated evidence births a program.
+        if "intake" in t:
+            intake = t["intake"]
+            if not isinstance(intake, dict):
+                errors.append(f"type '{tid}': intake must be a dict")
+            else:
+                route = intake.get("route")
+                if route not in INTAKE_ROUTES:
+                    errors.append(
+                        f"type '{tid}': intake route '{route}' not in "
+                        f"closed set {sorted(INTAKE_ROUTES)}")
+
+                bt = intake.get("birth_threshold")
+                if route == "candidate" and not isinstance(bt, dict):
+                    errors.append(
+                        f"type '{tid}': intake route 'candidate' requires a "
+                        f"birth_threshold dict")
+                elif isinstance(bt, dict):
+                    recognized = ("min_independent_sources",
+                                  "or_explicit_declaration",
+                                  "explicit_declaration_only")
+                    if not any(k in bt for k in recognized):
+                        errors.append(
+                            f"type '{tid}': intake birth_threshold must declare "
+                            f"at least one of {list(recognized)}")
+                    if "min_independent_sources" in bt:
+                        v = bt["min_independent_sources"]
+                        # bool is an int subclass; reject it explicitly so a
+                        # True/False cannot pose as a count.
+                        if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                            errors.append(
+                                f"type '{tid}': intake birth_threshold "
+                                f"min_independent_sources must be a non-negative "
+                                f"int, got {type(v).__name__}")
+                    for k in ("or_explicit_declaration",
+                              "explicit_declaration_only"):
+                        if k in bt and not isinstance(bt[k], bool):
+                            errors.append(
+                                f"type '{tid}': intake birth_threshold {k} "
+                                f"must be a bool, got {type(bt[k]).__name__}")
+
+                if "bootstrap_emissions" in intake:
+                    be = intake["bootstrap_emissions"]
+                    if not isinstance(be, list):
+                        errors.append(
+                            f"type '{tid}': intake bootstrap_emissions must be "
+                            f"a list")
+                    else:
+                        for emi in be:
+                            if not isinstance(emi, dict):
+                                errors.append(
+                                    f"type '{tid}': intake bootstrap_emissions "
+                                    f"entry must be a dict, got "
+                                    f"{type(emi).__name__}")
+                                continue
+                            action = emi.get("action")
+                            if action not in CLOSED_ACTIONS:
+                                errors.append(
+                                    f"type '{tid}': intake bootstrap_emissions "
+                                    f"action '{action}' not in closed set "
+                                    f"{sorted(CLOSED_ACTIONS)}")
+
+                if "signals" in intake:
+                    signals = intake["signals"]
+                    if not isinstance(signals, list):
+                        errors.append(
+                            f"type '{tid}': intake signals must be a list")
+                    else:
+                        for sig in signals:
+                            if not isinstance(sig, str) or not sig.strip():
+                                errors.append(
+                                    f"type '{tid}': intake signals entry must "
+                                    f"be a non-empty string")
 
         # Type-level default items (used to seed cycle programs). Optional;
         # when present it must be a list of dicts. Instance items live on
