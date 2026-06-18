@@ -1671,6 +1671,21 @@ def render_view(program, registry, needs_you=0, emissions=None, root=None):
                 }
                 for it in (fm.get("items") or [])
             ]
+        elif type_id == "portfolio-health":
+            # Janitor findings: keep `severity` and `kind` so the UI can tone each
+            # finding by its own severity and label its category. The JS layer owns
+            # color (from severity); render_view derives only the raw values.
+            vm["items"] = [
+                {
+                    "name": it.get("name"),
+                    "owner": it.get("owner"),
+                    "age": it.get("age"),
+                    "status": it.get("status"),
+                    "kind": it.get("kind"),
+                    "severity": it.get("severity"),
+                }
+                for it in (fm.get("items") or [])
+            ]
         else:
             vm["items"] = [
                 {"name": it.get("name"), "owner": it.get("owner"), "age": it.get("age")}

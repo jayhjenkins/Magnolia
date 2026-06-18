@@ -235,6 +235,22 @@ def _verdict_register(fm):
     except (TypeError, ValueError):
         policy = _DEFAULT_POLICY_DAYS
     items = fm.get("items") or []
+
+    # Severity-driven registers (the portfolio-health janitor): when items carry an
+    # explicit `severity` (holding/drifting/broken finding), the worst severity IS
+    # the verdict -- the age/policy math does not apply to health findings. Normal
+    # registers (no severity) fall through to the age window below.
+    severities = [it.get("severity") for it in items
+                  if isinstance(it, dict) and it.get("severity") in _VERDICTS]
+    if severities:
+        worst = "holding"
+        for s in severities:
+            worst = _worse(worst, s)
+        worst_item = next(
+            (it for it in items if it.get("severity") == worst), None)
+        reason = (worst_item or {}).get("name", "findings")
+        return worst, {"reason": reason, "next": "review findings"}
+
     verdict = "holding"
     facts = {"reason": "within policy", "next": "none"}
     for it in items:
@@ -918,6 +934,16 @@ def _period_days(type_entry):
     return _PERIOD_DAYS.get(cadence, 7)
 
 
+def _latest_observation_date(body):
+    """Most recent observation date in a program body, as a date, or None."""
+    latest = None
+    for obs_date, _kind, _source, _claim in _iter_observations(body or ""):
+        parsed = _parse_iso_date(obs_date)
+        if parsed is not None and (latest is None or parsed > latest):
+            latest = parsed
+    return latest
+
+
 def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
     """Propose archive if the program has been silent too long AND the sentinel is live.
 
@@ -940,18 +966,8 @@ def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
     if not silent_cycles:
         return None  # No silent policy configured for this type
 
-    # Latest observation date = the program's last activity signal. Iterate fully
-    # and keep the max date (observations are not guaranteed sorted).
-    latest_obs_date = None
-    for obs_date, _kind, _source, _claim in _iter_observations(body or ""):
-        if not obs_date:
-            continue
-        try:
-            parsed = _parse_iso_date(obs_date)
-        except (ValueError, TypeError):
-            continue
-        if latest_obs_date is None or parsed > latest_obs_date:
-            latest_obs_date = parsed
+    # Latest observation date = the program's last activity signal.
+    latest_obs_date = _latest_observation_date(body)
 
     if not latest_obs_date:
         return None  # No observations, cannot apply silent archive
@@ -1403,6 +1419,126 @@ def _age_candidates(fm, now):
             it["age"] = (today - parsed).days
 
 
+# How long a sentinel that HAS run may go silent before it is "blind" (stale).
+_SENTINEL_STALE_DAYS = 14
+
+
+def _scan_portfolio_health(root, now):
+    """Scan the program store + intake register + telemetry, return findings.
+
+    Each finding is a register item dict shaped for both the severity-aware
+    register verdict and the UI: {name, owner, kind, severity, status, age?}.
+    severity is one of holding/drifting/broken; a broken finding escalates via
+    the type's `drift:broken` emitter. The janitor REPORTS -- it never archives
+    (the per-program archive doors propose that). ASCII-safe (invariant #8).
+
+    Findings:
+      - blind-sentinel (broken): a sentinel that HAS run but is now errored or
+        stale (> _SENTINEL_STALE_DAYS). A never-run sentinel is NOT flagged (that
+        is a cold start, not a regression -- the dead-vs-blind distinction).
+      - stale-active (drifting): an active program silent past its type's
+        archive_after_silent_cycles.
+      - aging-candidate (drifting): an open intake candidate older than the
+        nursery policy.
+      - duplicate (drifting): two active programs with the same normalized title.
+      - supply (drifting): no active programs in the roadmap family (the team has
+        nothing refined in front of it).
+    """
+    today = now.date() if isinstance(now, datetime) else _parse_iso_date(str(now))
+    findings = []
+
+    programs = program_lib.list_programs(status="active", root=root)
+    reg = program_lib.load_registry()
+    types_by_id = {t.get("id"): t for t in reg.get("types", [])}
+
+    telemetry = {}
+    try:
+        import sentinel_runner
+        telemetry = sentinel_runner.read_sentinel_runs(root) or {}
+    except Exception:
+        telemetry = {}
+
+    # 1. Blind sentinels: ran before, now errored or stale.
+    for name, entry in telemetry.items():
+        if not isinstance(entry, dict):
+            continue
+        reason = None
+        if entry.get("last_error"):
+            reason = "error"
+        else:
+            last_run = _parse_iso_date(entry.get("last_run"))
+            if last_run is None or (today and (today - last_run).days > _SENTINEL_STALE_DAYS):
+                reason = "stale"
+        if reason:
+            findings.append({
+                "name": f"sentinel {name} blind ({reason})", "owner": name,
+                "kind": "blind-sentinel", "severity": "broken", "status": "open",
+            })
+
+    # 2. Stale actives + 4. duplicate detection (single pass over actives).
+    norm_titles = {}
+    for p in programs:
+        fm = p["frontmatter"]
+        pid = fm.get("program_id")
+        te = types_by_id.get(fm.get("type"), {})
+        n = te.get("archive_after_silent_cycles")
+        if n:
+            last_obs = _latest_observation_date(p["body"])
+            if last_obs and today:
+                days = (today - last_obs).days
+                if days > n * _period_days(te):
+                    findings.append({
+                        "name": f"{fm.get('title', pid)} silent {days}d",
+                        "owner": pid, "kind": "stale-active",
+                        "severity": "drifting", "status": "open", "age": days,
+                    })
+        key = program_lib._norm_title_key(fm.get("title", ""))
+        if key:
+            norm_titles.setdefault(key, []).append(pid)
+
+    for key, pids in norm_titles.items():
+        if len(pids) > 1:
+            findings.append({
+                "name": f"possible duplicates: {', '.join(pids)}",
+                "owner": pids[0], "kind": "duplicate",
+                "severity": "drifting", "status": "open",
+            })
+
+    # 3. Aging candidates in the intake register(s).
+    for p in programs:
+        fm = p["frontmatter"]
+        if fm.get("type") != "program-intake":
+            continue
+        try:
+            policy = int(fm.get("policy", _DEFAULT_POLICY_DAYS))
+        except (TypeError, ValueError):
+            policy = _DEFAULT_POLICY_DAYS
+        for it in fm.get("items") or []:
+            if not isinstance(it, dict) or it.get("status") not in {"open", "flagged"}:
+                continue
+            opened = _parse_iso_date(it.get("opened"))
+            if opened and today and (today - opened).days > policy:
+                findings.append({
+                    "name": f"candidate aging: {it.get('title', '?')}",
+                    "owner": it.get("id"), "kind": "aging-candidate",
+                    "severity": "drifting", "status": "open",
+                    "age": (today - opened).days,
+                })
+
+    # 5. Supply: nothing refined in the roadmap family.
+    roadmap_actives = [
+        p for p in programs
+        if (types_by_id.get(p["frontmatter"].get("type"), {}).get("family") == "roadmap")
+    ]
+    if not roadmap_actives:
+        findings.append({
+            "name": "no active roadmap programs (supply low)", "owner": "portfolio",
+            "kind": "supply", "severity": "drifting", "status": "open",
+        })
+
+    return findings
+
+
 def reconcile_program(program, registry, now=None, force=False, root=None):
     """Run one program's reconcile cycle. Returns a result dict.
 
@@ -1425,6 +1561,12 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     now = now or datetime.now(timezone.utc)
     fm = program["frontmatter"]
     body = program["body"]
+
+    # The janitor refreshes its findings from a live portfolio scan each cycle,
+    # BEFORE the verdict (the severity-aware register verdict reads them). Self-
+    # hosting: the janitor is just a program whose items are computed, not declared.
+    if fm.get("type") == "portfolio-health":
+        fm["items"] = _scan_portfolio_health(root, now)
 
     # Age open intake candidates from their `opened` date so the register verdict
     # can drift on a stale nursery (4a M-3). No-op for items without `opened`.

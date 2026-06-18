@@ -1548,6 +1548,92 @@ def test_intake_reconcile_ages_open_candidates(tmp_path):
     assert res["verdict"] == "broken"  # age 35 > policy 30
 
 
+# ─── Portfolio-health janitor (Task 8) ──────────────────────────────────────
+
+def test_scan_portfolio_health_flags_blind_sentinel(tmp_path):
+    root = str(tmp_path / "data")
+    import sentinel_runner
+    # A sentinel that ran but errored is BLIND -> broken finding (escalates).
+    sentinel_runner.record_sentinel_run(
+        "movement-watch", success=False, emitted_count=0,
+        error="dispatch failed", root=root, now="2026-06-15")
+    findings = reconcile._scan_portfolio_health(root, NOW)
+    blind = [f for f in findings if f["kind"] == "blind-sentinel"]
+    assert len(blind) == 1
+    assert blind[0]["severity"] == "broken"
+    assert "movement-watch" in blind[0]["owner"]
+
+
+def test_scan_portfolio_health_flags_stale_active(tmp_path):
+    root = str(tmp_path / "data")
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Old initiative", owner_role="pm",
+        frontmatter_extra={"phase": "execution",
+                           "phase_entered": {"execution": "2026-04-01"}},
+        root=root)
+    # one observation ~50 days before NOW; threshold = 6 cycles * 7d = 42d.
+    pl.append_observation(pid, kind="status-signal", sentinel="movement-watch",
+                          source="m.md", claim="early signal.",
+                          date="2026-04-27", root=root)
+    findings = reconcile._scan_portfolio_health(root, NOW)
+    stale = [f for f in findings if f["kind"] == "stale-active"]
+    assert len(stale) == 1
+    assert stale[0]["owner"] == pid
+    assert stale[0]["severity"] == "drifting"
+
+
+def test_scan_portfolio_health_flags_aging_candidate(tmp_path):
+    root = str(tmp_path / "data")
+    pl.create_program(
+        type="program-intake", title="Program intake", owner_role="product",
+        frontmatter_extra={"policy": 30, "items": [
+            {"id": "CAND-0001", "program_type": "roadmap-initiative",
+             "title": "Old candidate", "status": "open", "opened": "2026-04-01",
+             "evidence": [], "source_count": 1}]},
+        root=root)
+    findings = reconcile._scan_portfolio_health(root, NOW)
+    aging = [f for f in findings if f["kind"] == "aging-candidate"]
+    assert len(aging) == 1
+    assert aging[0]["owner"] == "CAND-0001"
+
+
+def test_scan_portfolio_health_flags_duplicates(tmp_path):
+    root = str(tmp_path / "data")
+    pl.create_program(type="roadmap-initiative", title="Smart Reconciliation",
+                      owner_role="pm", root=root)
+    pl.create_program(type="roadmap-initiative", title="smart reconciliation",
+                      owner_role="pm", root=root)
+    findings = reconcile._scan_portfolio_health(root, NOW)
+    dups = [f for f in findings if f["kind"] == "duplicate"]
+    assert len(dups) == 1
+
+
+def test_reconcile_portfolio_health_refreshes_items_and_escalates_blind(tmp_path):
+    root = str(tmp_path / "data")
+    import sentinel_runner
+    sentinel_runner.record_sentinel_run(
+        "movement-watch", success=False, emitted_count=0, error="boom",
+        root=root, now="2026-06-15")
+    pid, _ = pl.create_program(
+        type="portfolio-health", title="Portfolio health", owner_role="product",
+        frontmatter_extra={"items": [], "policy": 30, "last_cycle": OTHER_PERIOD},
+        root=root)
+
+    res = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW, root=root)
+
+    # items refreshed from the live scan; the blind sentinel is among them
+    items = pl.read_program(pid, root=root)["frontmatter"]["items"]
+    assert any(it.get("kind") == "blind-sentinel" for it in items)
+    assert res["verdict"] == "broken"
+    # the drift:broken emitter escalated exactly one human card
+    assert len(task_lib.list_tasks(queue="human", status="open")) == 1
+    # a second reconcile dedupes the escalate card (no duplicate)
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW, force=True, root=root)
+    assert len(task_lib.list_tasks(queue="human", status="open")) == 1
+
+
 def test_birth_proposed_for_ripe_candidate_only(tmp_path):
     root = str(tmp_path / "data")
     # roadmap-initiative birth_threshold: min_independent_sources 2.

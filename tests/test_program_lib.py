@@ -664,8 +664,9 @@ def test_build_payload_emissions_resilient_when_task_lib_raises(tmp_path, monkey
 def test_all_seed_programs_render():
     reg = pl.load_registry()
     progs = pl.list_programs()  # real datasets root
-    # 13 original seeds + PROG-0014 (the program-intake nursery, inc4a).
-    assert len(progs) == 14     # concrete count: a silently-dropped/malformed seed fails here
+    # 13 original seeds + PROG-0014 (program-intake nursery, inc4a) + PROG-0015
+    # (portfolio-health janitor, inc4b).
+    assert len(progs) == 15     # concrete count: a silently-dropped/malformed seed fails here
     for p in progs:
         vm = pl.render_view(p, reg)
         assert vm["model"] in {"pipeline", "target", "cycle", "register"}
