@@ -6,6 +6,7 @@ the read_program shape ({"frontmatter": {...}, "body": ""}); the registry comes
 from the real program_lib.load_registry().
 """
 
+import json
 import os
 from datetime import date, datetime
 
@@ -1804,3 +1805,228 @@ def test_evaluate_emitters_creates_archive_card_and_dedupes(tmp_path):
     # Verify still only one card in queue
     cards = task_lib.list_tasks(queue="human", status="open")
     assert len(cards) == 1
+
+
+# ─── silent archive door (Task 6) ────────────────────────────────────────────
+
+def test_propose_archive_silent_fires_when_silent_and_sentinel_live(tmp_path):
+    """Silent archive: program dormant 42+ days with live sentinel triggers proposal."""
+    root = str(tmp_path / "data")
+    # Create a weekly cadence type with archive_after_silent_cycles = 6 (42 days)
+    type_entry = {
+        "id": "test-silent-type",
+        "cadence": "weekly",
+        "archive_after_silent_cycles": 6,
+    }
+
+    # Create a program with latest observation 50 days ago (> 42 days silent)
+    long_ago = (NOW.toordinal() - 50)
+    old_date = date.fromordinal(long_ago).isoformat()
+
+    program_id, _ = pl.create_program(
+        type="test-silent-type",
+        title="Dormant program",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-01-01"},
+            "checkpoints": [],
+            "last_cycle": OTHER_PERIOD,
+        },
+        root=root,
+    )
+
+    # Append an observation dated 50 days ago
+    body = f"## Observations\n\n### {old_date}\nDormant test observation"
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    pl._write_program_file(program["filepath"], fm, body)
+
+    # Create telemetry showing movement-watch sentinel has live last_run
+    import sentinel_runner
+    sentinel_runs_path = sentinel_runner._sentinel_runs_path(root)
+    os.makedirs(os.path.dirname(sentinel_runs_path), exist_ok=True)
+    with open(sentinel_runs_path, "w") as f:
+        json.dump({
+            "movement-watch": {
+                "last_run": NOW.isoformat(),
+                "last_error": None,
+            }
+        }, f)
+
+    # Call _propose_archive_silent
+    telemetry = sentinel_runner.read_sentinel_runs(root)
+    result = reconcile._propose_archive_silent(fm, type_entry, body, telemetry, NOW.isoformat())
+
+    # Should return archive mutation
+    assert result is not None
+    assert isinstance(result, dict)
+    assert result.get("op") == "archive"
+    assert "dormant" in result.get("reason", "").lower() or "silent" in result.get("reason", "").lower()
+    assert isinstance(result.get("citations"), list)
+
+
+def test_propose_archive_silent_suppressed_when_sentinel_blind(tmp_path):
+    """Silent archive suppressed when sentinel is blind (no run / stale / error)."""
+    root = str(tmp_path / "data")
+    type_entry = {
+        "id": "test-silent-type",
+        "cadence": "weekly",
+        "archive_after_silent_cycles": 6,
+    }
+
+    # Create dormant program (50 days since last observation)
+    long_ago = (NOW.toordinal() - 50)
+    old_date = date.fromordinal(long_ago).isoformat()
+
+    program_id, _ = pl.create_program(
+        type="test-silent-type",
+        title="Dormant program",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-01-01"},
+            "checkpoints": [],
+        },
+        root=root,
+    )
+
+    body = f"## Observations\n\n- **{old_date}** | dormant observation"
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+
+    # Create telemetry with BLIND sentinel (has error)
+    import sentinel_runner
+    sentinel_runs_path = sentinel_runner._sentinel_runs_path(root)
+    os.makedirs(os.path.dirname(sentinel_runs_path), exist_ok=True)
+    with open(sentinel_runs_path, "w") as f:
+        json.dump({
+            "movement-watch": {
+                "last_run": "2026-06-01",  # stale
+                "last_error": "something went wrong",
+            }
+        }, f)
+
+    telemetry = sentinel_runner.read_sentinel_runs(root)
+    result = reconcile._propose_archive_silent(fm, type_entry, body, telemetry, NOW.isoformat())
+
+    # Should return None (suppressed)
+    assert result is None
+
+
+def test_propose_archive_silent_none_when_recently_active(tmp_path):
+    """Silent archive not proposed when program is recently active."""
+    root = str(tmp_path / "data")
+    type_entry = {
+        "id": "test-silent-type",
+        "cadence": "weekly",
+        "archive_after_silent_cycles": 6,
+    }
+
+    # Create program with recent observation (5 days ago, < 42 days)
+    recent = (NOW.toordinal() - 5)
+    recent_date = date.fromordinal(recent).isoformat()
+
+    program_id, _ = pl.create_program(
+        type="test-silent-type",
+        title="Recent program",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-06-01"},
+            "checkpoints": [],
+        },
+        root=root,
+    )
+
+    body = f"## Observations\n\n- **{recent_date}** | recent observation"
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+
+    # Create telemetry with live sentinel
+    import sentinel_runner
+    sentinel_runs_path = sentinel_runner._sentinel_runs_path(root)
+    os.makedirs(os.path.dirname(sentinel_runs_path), exist_ok=True)
+    with open(sentinel_runs_path, "w") as f:
+        json.dump({
+            "movement-watch": {
+                "last_run": NOW.isoformat(),
+                "last_error": None,
+            }
+        }, f)
+
+    telemetry = sentinel_runner.read_sentinel_runs(root)
+    result = reconcile._propose_archive_silent(fm, type_entry, body, telemetry, NOW.isoformat())
+
+    # Should return None (recently active)
+    assert result is None
+
+
+def test_silent_and_fact_dedupe_to_one_archive_card(tmp_path):
+    """Both fact and silent archive doors fire but dedupe to ONE card."""
+    root = str(tmp_path / "data")
+
+    # Create a type with BOTH emitters: completion-verified AND silent-too-long
+    registry = _registry()
+    type_entry = next((t for t in registry["types"] if t["id"] == "roadmap-initiative"), {}).copy()
+    type_entry["archive_after_silent_cycles"] = 6
+
+    if "emitters" not in type_entry:
+        type_entry["emitters"] = []
+    type_entry["emitters"].extend([
+        {"action": "propose-update", "on": "completion-verified"},
+        {"action": "propose-update", "on": "silent-too-long"},
+    ])
+
+    # Create program that meets BOTH conditions:
+    # 1. Terminal phase (triggers fact door)
+    # 2. Silent 50+ days with live sentinel (triggers silent door)
+    long_ago = (NOW.toordinal() - 50)
+    old_date = date.fromordinal(long_ago).isoformat()
+
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Terminal and dormant",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "verified",  # TERMINAL
+            "phase_entered": {"verified": "2026-05-01"},
+            "checkpoints": [],
+        },
+        root=root,
+    )
+
+    # Set body with old observation
+    body = f"## Observations\n\n- **{old_date}** | old observation"
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    pl._write_program_file(program["filepath"], fm, body)
+
+    # Create telemetry with live sentinel
+    import sentinel_runner
+    sentinel_runs_path = sentinel_runner._sentinel_runs_path(root)
+    os.makedirs(os.path.dirname(sentinel_runs_path), exist_ok=True)
+    with open(sentinel_runs_path, "w") as f:
+        json.dump({
+            "movement-watch": {
+                "last_run": NOW.isoformat(),
+                "last_error": None,
+            }
+        }, f)
+
+    # Call _evaluate_emitters
+    program = pl.read_program(program_id, root=root)
+    period = reconcile.current_period("weekly", NOW)
+    emitted = reconcile._evaluate_emitters(
+        program, type_entry, "holding", {}, body=body, root=root,
+        period=period, registry=registry, now=NOW
+    )
+
+    # Should emit exactly ONE archive card (dedupe on op="archive")
+    assert len(emitted) == 1
+    task_id = emitted[0]
+
+    # Verify it's an archive proposal
+    card = task_lib.read_task(task_id)
+    proposal = card["frontmatter"].get("proposal", {})
+    assert proposal.get("op") == "archive"

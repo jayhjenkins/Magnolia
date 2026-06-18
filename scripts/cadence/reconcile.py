@@ -890,8 +890,93 @@ def _propose_archive(fm, type_entry, body):
     return None
 
 
+def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
+    """Propose archive if the program has been silent too long AND the sentinel is live.
+
+    Silent is defined by the type's `archive_after_silent_cycles` (in weeks): if the
+    latest observation is older than (cycles * 7) days AND the movement-watch sentinel
+    is live (has a recent last_run with no error), propose archive.
+
+    Args:
+      fm: program frontmatter dict
+      type_entry: the type dict containing optional `archive_after_silent_cycles`
+      body: program body (contains ## Observations)
+      telemetry: sentinel telemetry dict from sentinel_runner.read_sentinel_runs()
+      now_iso: ISO datetime string (e.g., from date.today().isoformat() or NOW.isoformat())
+
+    Returns:
+      - A dict with op:"archive", reason, citations if silent archive is proposed
+      - None otherwise
+    """
+    silent_cycles = type_entry.get("archive_after_silent_cycles")
+    if not silent_cycles:
+        return None  # No silent policy configured for this type
+
+    # Extract latest observation date from body
+    latest_obs_date = None
+    if body:
+        for obs_date, obs_kind, obs_source, obs_claim in _iter_observations(body):
+            if obs_date and not latest_obs_date:
+                # _iter_observations yields in order (scanning top-to-bottom);
+                # we want the LATEST (most recent) so keep iterating.
+                try:
+                    latest_obs_date = _parse_iso_date(obs_date)
+                except (ValueError, TypeError):
+                    continue
+
+    # Find the actual latest: iterate fully and keep the one with the max date
+    if body:
+        latest_obs_date = None
+        for obs_date, obs_kind, obs_source, obs_claim in _iter_observations(body):
+            if obs_date:
+                try:
+                    parsed = _parse_iso_date(obs_date)
+                    if latest_obs_date is None or parsed > latest_obs_date:
+                        latest_obs_date = parsed
+                except (ValueError, TypeError):
+                    continue
+
+    if not latest_obs_date:
+        return None  # No observations, cannot apply silent archive
+
+    # Check if we're beyond the silent threshold
+    now = _parse_iso_date(now_iso)
+    silent_threshold_days = silent_cycles * 7
+    days_silent = (now - latest_obs_date).days
+    if days_silent < silent_threshold_days:
+        return None  # Still active (within the threshold)
+
+    # Check sentinel health: movement-watch must be LIVE (recent run, no error)
+    if not telemetry:
+        return None  # No telemetry, cannot verify sentinel is live
+    movement_watch = telemetry.get("movement-watch", {})
+    last_error = movement_watch.get("last_error")
+    if last_error:
+        return None  # Sentinel is blind (has error), suppress archive
+
+    last_run_str = movement_watch.get("last_run")
+    if not last_run_str:
+        return None  # No last_run recorded, sentinel never ran
+
+    # Check if sentinel last_run is recent enough (within last 7 days is reasonable)
+    try:
+        last_run = _parse_iso_date(last_run_str)
+        sentinel_staleness = (now - last_run).days
+        if sentinel_staleness > 7:
+            return None  # Sentinel is blind (stale run > 7 days)
+    except (ValueError, TypeError):
+        return None  # Cannot parse last_run
+
+    # All gates passed: propose archive
+    return {
+        "op": "archive",
+        "reason": f"dormant {days_silent} days (threshold {silent_threshold_days})",
+        "citations": ["silent-too-long"],
+    }
+
+
 def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None,
-                       period=None, registry=None):
+                       period=None, registry=None, now=None):
     """Evaluate the type's declarative emitters. Returns created task ids.
 
     Three emitter families fire here, all Tier-1 (LOCAL cards, no external writes,
@@ -931,6 +1016,10 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
     open_prop_ops = None    # lazily computed on the first propose-update fire
     open_agent_types = None  # lazily computed on the first produce-artifact fire
     open_birth_ids = None   # lazily computed on the first candidate-ripe fire
+    # Default now to today if not provided (for testing and background runs)
+    if now is None:
+        now = datetime.now(timezone.utc)
+    now_iso = now.isoformat() if isinstance(now, datetime) else str(now)
 
     for em in emitters:
         action = em.get("action")
@@ -995,6 +1084,36 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             # The mutation function is the real gate: _propose_archive checks terminal
             # phase, verified checkpoints, and tracker-closed observations.
             mutation = _propose_archive(fm, type_entry, body or "")
+            if not mutation:
+                continue
+            import task_lib
+            if open_prop_ops is None:
+                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+            if mutation["op"] in open_prop_ops:
+                continue  # an open proposal for the same op already exists -> dedupe
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: archive?",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                card_type="recommendation",
+                task_type="cadence-propose-update",
+                tags=[program_id, "cadence"],
+                proposal=mutation,
+                description=_build_archive_description(mutation, program_id),
+            )
+            emitted.append(task_id)
+            open_prop_ops.add(mutation["op"])
+
+        elif action == "propose-update" and on == "silent-too-long":
+            # The SILENT ARCHIVE door (inc4b): propose archiving when the program
+            # has been dormant longer than the type's archive_after_silent_cycles
+            # AND the movement-watch sentinel is live (recent, no errors).
+            # The mutation function is the real gate: _propose_archive_silent checks
+            # observation staleness and sentinel health.
+            import sentinel_runner
+            telemetry = sentinel_runner.read_sentinel_runs(root)
+            mutation = _propose_archive_silent(fm, type_entry, body or "", telemetry, now_iso)
             if not mutation:
                 continue
             import task_lib
@@ -1287,7 +1406,7 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     )
     emitted = _evaluate_emitters(
         program, type_entry, verdict, facts, body=body, root=root, period=period,
-        registry=registry
+        registry=registry, now=now
     )
 
     # The FACT door: mutate `fm` in place (phase + checkpoint) when the current
