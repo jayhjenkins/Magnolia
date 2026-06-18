@@ -292,3 +292,216 @@ def test_rejects_non_string_exit_checkpoint():
     ])
     errs = ps.validate_doc(reg, tokens={"--accent"})
     assert any("exit_checkpoint" in e for e in errs)
+
+
+# ─── intake block (Task 1: birth path) ───────────────────────────────────────
+
+
+def _type_with_intake(intake):
+    return {"families": [{"id": "x", "label": "X", "order": 1}],
+            "types": [{"id": "t", "label": "T", "family": "x", "state_model": "cycle",
+                       "sources": [], "presentation": {"chip_tokens": {}},
+                       "intake": intake}]}
+
+
+def test_accepts_candidate_intake_with_valid_birth_threshold():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "signals": ["recurring theme across discovery calls"],
+        "birth_threshold": {"min_independent_sources": 2,
+                            "or_explicit_declaration": True},
+        "bootstrap_emissions": [
+            {"action": "draft-ticket", "template": "create-tracker"},
+            {"action": "propose-update", "template": "add-roadmap-entry"},
+        ],
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_accepts_explicit_declaration_only_birth_threshold():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_accepts_capture_route_without_birth_threshold():
+    reg = _type_with_intake({"route": "capture"})
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_rejects_unknown_intake_route():
+    reg = _type_with_intake({"route": "bogus"})
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("route" in e and "bogus" in e for e in errs)
+
+
+def test_rejects_candidate_route_without_birth_threshold():
+    reg = _type_with_intake({"route": "candidate"})
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("birth_threshold" in e for e in errs)
+
+
+def test_rejects_bool_min_independent_sources():
+    # bool is an int subclass in Python; it must be rejected explicitly.
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"min_independent_sources": True},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("min_independent_sources" in e for e in errs)
+
+
+def test_rejects_negative_min_independent_sources():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"min_independent_sources": -1},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("min_independent_sources" in e for e in errs)
+
+
+def test_rejects_empty_birth_threshold():
+    # at least one of the three recognized keys must be present.
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("birth_threshold" in e for e in errs)
+
+
+def test_rejects_non_bool_or_explicit_declaration():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"or_explicit_declaration": "yes"},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("or_explicit_declaration" in e for e in errs)
+
+
+def test_rejects_bootstrap_emission_action_outside_closed_set():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "bootstrap_emissions": [{"action": "frobnicate"}],
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("frobnicate" in e for e in errs)
+
+
+def test_rejects_bootstrap_emissions_not_a_list():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "bootstrap_emissions": {"action": "draft-ticket"},
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("bootstrap_emissions" in e for e in errs)
+
+
+def test_rejects_non_dict_bootstrap_emission():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "bootstrap_emissions": ["draft-ticket"],
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("bootstrap_emissions" in e for e in errs)
+
+
+def test_rejects_non_string_signal():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "signals": ["ok", "  "],
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("signal" in e for e in errs)
+
+
+def test_rejects_signals_not_a_list():
+    reg = _type_with_intake({
+        "route": "candidate",
+        "birth_threshold": {"explicit_declaration_only": True},
+        "signals": "recurring theme",
+    })
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("signals" in e for e in errs)
+
+
+# ─── Task 2: program-intake type + intake blocks + seeded nursery ────────────
+
+
+def _type(reg, tid):
+    return next(t for t in reg["types"] if t["id"] == tid)
+
+
+def test_shipped_registry_validates_after_intake_edits():
+    """The real shipped registry.json still passes the gate after Task 2 adds
+    the program-intake type, the system family, and the per-type intake blocks."""
+    assert ps.validate() == []
+
+
+def test_program_intake_type_present_and_shaped():
+    with open(ps.REGISTRY, encoding="utf-8") as f:
+        reg = json.load(f)
+    # The system family shelves last (highest order).
+    fams = {f["id"]: f for f in reg["families"]}
+    assert "system" in fams
+    assert fams["system"]["order"] == max(f["order"] for f in reg["families"])
+    pi = _type(reg, "program-intake")
+    assert pi["state_model"] == "register"
+    assert pi["family"] == "system"
+    assert pi["cadence"] == "weekly"
+    # The nursery itself is not a discovered type: no intake block.
+    assert "intake" not in pi
+    actions = {(em["on"], em["action"]) for em in pi["emitters"]}
+    assert ("candidate-ripe", "propose-update") in actions
+    assert ("drift:broken", "escalate") in actions
+
+
+def test_roadmap_initiative_has_full_candidate_intake():
+    with open(ps.REGISTRY, encoding="utf-8") as f:
+        reg = json.load(f)
+    intake = _type(reg, "roadmap-initiative")["intake"]
+    assert intake["route"] == "candidate"
+    assert intake["birth_threshold"] == {"min_independent_sources": 2,
+                                         "or_explicit_declaration": True}
+    assert len(intake["signals"]) == 3
+    boot = {(b["action"], b["template"]) for b in intake["bootstrap_emissions"]}
+    assert ("draft-ticket", "create-tracker-initiative") in boot
+    assert ("propose-update", "add-roadmap-entry") in boot
+
+
+def test_cycle_types_route_capture():
+    with open(ps.REGISTRY, encoding="utf-8") as f:
+        reg = json.load(f)
+    for tid in ("weekly-priorities", "eng-sync-prep", "eos-cycle"):
+        intake = _type(reg, tid)["intake"]
+        assert intake["route"] == "capture"
+        assert "birth_threshold" not in intake
+
+
+def test_eos_rock_is_explicit_declaration_only():
+    with open(ps.REGISTRY, encoding="utf-8") as f:
+        reg = json.load(f)
+    intake = _type(reg, "eos-rock")["intake"]
+    assert intake["route"] == "candidate"
+    assert intake["birth_threshold"] == {"explicit_declaration_only": True}
+    assert intake["signals"]  # non-empty
+
+
+def test_seeded_program_intake_program_parses_active():
+    """The seeded nursery program reads back as type program-intake, active."""
+    prog = program_lib.read_program("PROG-0014")
+    fm = prog["frontmatter"]
+    assert fm["type"] == "program-intake"
+    assert fm["status"] == "active"
+    # role token, never a person/team name (invariant #1).
+    assert fm["owner_role"] == "product"
+    assert fm["items"] == []

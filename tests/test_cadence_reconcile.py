@@ -1467,3 +1467,179 @@ def test_draft_message_cap_is_period_scoped_not_lifetime(tmp_path):
     assert period_counts.get(recipient) == 1
     # The prior period's entry is untouched (per-period scoping is preserved).
     assert (fm.get("nudge_counts") or {}).get(OTHER_PERIOD, {}).get(recipient) == 1
+
+
+# ─── birth proposals (inc4a Task 6, the birth path) ──────────────────────────
+#
+# The reconciler already processes the program-intake register. _propose_births
+# walks its OPEN candidates: a candidate is ripe when its target type's
+# intake.birth_threshold is crossed (source counting, or an explicit-declaration
+# marker for declaration-gated types). A ripe candidate emits ONE recommendation/
+# cadence-propose-update card carrying proposal {op: "birth", ...}, deduped by
+# candidate_id (all births share op "birth", so op-dedupe is WRONG here).
+
+
+def _seed_intake_program(root, items, last_cycle=OTHER_PERIOD):
+    """Seed a program-intake register program carrying `items` candidates."""
+    program_id, _ = pl.create_program(
+        type="program-intake",
+        title="Program intake",
+        owner_role="product",
+        frontmatter_extra={
+            "items": items,
+            "policy": 30,
+            "last_cycle": last_cycle,
+        },
+        root=root,
+    )
+    return program_id
+
+
+def _candidate(cid, program_type, title, sources, *, status="open", declared=None):
+    """Build a candidate register item with one evidence entry per source."""
+    evidence = [
+        {"date": "2026-06-10", "source": s, "claim": f"signal from {s}",
+         "sentinel": "program-intake"}
+        for s in sources
+    ]
+    cand = {
+        "id": cid,
+        "program_type": program_type,
+        "title": title,
+        "anchor": None,
+        "status": status,
+        "evidence": evidence,
+        "source_count": len(set(sources)),
+    }
+    if declared is not None:
+        cand["declared"] = declared
+    return cand
+
+
+def _birth_cards():
+    """Read OPEN human-queue birth proposal cards (cadence-propose-update, op birth)."""
+    out = []
+    for t in task_lib.list_tasks(queue="human", status="open"):
+        fm = task_lib.read_task(t["id"])["frontmatter"]
+        if fm.get("task_type") != "cadence-propose-update":
+            continue
+        prop = fm.get("proposal") or {}
+        if isinstance(prop, dict) and prop.get("op") == "birth":
+            out.append(fm)
+    return out
+
+
+def test_birth_proposed_for_ripe_candidate_only(tmp_path):
+    root = str(tmp_path / "data")
+    # roadmap-initiative birth_threshold: min_independent_sources 2.
+    ripe = _candidate("CAND-0001", "roadmap-initiative", "Smart reconciliation",
+                      ["meeting-a.md", "meeting-b.md"])           # 2 sources -> ripe
+    unripe = _candidate("CAND-0002", "roadmap-initiative", "Maybe later",
+                        ["meeting-c.md"])                          # 1 source -> not ripe
+    pid = _seed_intake_program(root, [ripe, unripe])
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = _birth_cards()
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["card_type"] == "recommendation"
+    assert pid in card["tags"]
+    assert "cadence" in card["tags"]
+    prop = card["proposal"]
+    assert prop["op"] == "birth"
+    assert prop["candidate_id"] == "CAND-0001"
+    assert prop["program_type"] == "roadmap-initiative"
+    assert prop["title"] == "Smart reconciliation"
+    assert prop["checkpoints"] == []
+    assert set(prop["citations"]) == {"meeting-a.md", "meeting-b.md"}
+
+
+def test_birth_dedupes_by_candidate_id(tmp_path):
+    root = str(tmp_path / "data")
+    ripe = _candidate("CAND-0001", "roadmap-initiative", "Smart reconciliation",
+                      ["meeting-a.md", "meeting-b.md"])
+    pid = _seed_intake_program(root, [ripe])
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+    # A second forced reconcile with the birth proposal still open -> no dup.
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW, force=True)
+
+    assert len(_birth_cards()) == 1
+
+
+def test_birth_explicit_declaration_only_ripe_when_declared(tmp_path):
+    root = str(tmp_path / "data")
+    # eos-rock birth_threshold: explicit_declaration_only (never source-counting).
+    declared = _candidate("CAND-0001", "eos-rock", "Q3 rock",
+                          ["leadership-session.md"], declared=True)   # 1 source + declared
+    pid = _seed_intake_program(root, [declared])
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = _birth_cards()
+    assert len(cards) == 1
+    assert cards[0]["proposal"]["candidate_id"] == "CAND-0001"
+    assert cards[0]["proposal"]["program_type"] == "eos-rock"
+
+
+def test_birth_explicit_declaration_only_not_ripe_without_flag(tmp_path):
+    root = str(tmp_path / "data")
+    # Same eos-rock candidate, NOT declared and only 1 source -> never ripe
+    # (declaration-only types never birth by source counting).
+    not_declared = _candidate("CAND-0001", "eos-rock", "Q3 rock",
+                              ["leadership-session.md"])
+    # Even with 2 sources it must not birth (source-counting is disallowed here).
+    two_sources = _candidate("CAND-0002", "eos-rock", "Q4 rock",
+                             ["session-a.md", "session-b.md"])
+    pid = _seed_intake_program(root, [not_declared, two_sources])
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    assert _birth_cards() == []
+
+
+def test_birth_declared_flows_from_upsert_to_ripeness(tmp_path):
+    # Integration: a candidate written via the REAL upsert_candidate carrying
+    # declared=True ripens an explicit-declaration-only type (eos-rock) and births.
+    root = str(tmp_path / "data")
+    pid = _seed_intake_program(root, [])
+    pl.upsert_candidate(
+        pid, candidate_key="k1", program_type="eos-rock", title="Q3 rock",
+        source="leadership-session.md", claim="We are committing to this rock.",
+        declared=True, root=root)
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = _birth_cards()
+    assert len(cards) == 1
+    assert cards[0]["proposal"]["candidate_id"] == "CAND-0001"
+    assert cards[0]["proposal"]["program_type"] == "eos-rock"
+
+
+def test_birth_undeclared_upsert_does_not_birth_declaration_only(tmp_path):
+    # Integration: same path WITHOUT declared -> eos-rock never ripens.
+    root = str(tmp_path / "data")
+    pid = _seed_intake_program(root, [])
+    pl.upsert_candidate(
+        pid, candidate_key="k1", program_type="eos-rock", title="Q3 rock",
+        source="leadership-session.md", claim="Mentioned a possible rock.",
+        root=root)
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    assert _birth_cards() == []
+
+
+def test_birth_skips_closed_and_birthed_candidates(tmp_path):
+    root = str(tmp_path / "data")
+    closed = _candidate("CAND-0001", "roadmap-initiative", "Declined idea",
+                        ["meeting-a.md", "meeting-b.md"], status="closed-with-reason")
+    birthed = _candidate("CAND-0002", "roadmap-initiative", "Already born",
+                         ["meeting-c.md", "meeting-d.md"], status="birthed")
+    pid = _seed_intake_program(root, [closed, birthed])
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    assert _birth_cards() == []

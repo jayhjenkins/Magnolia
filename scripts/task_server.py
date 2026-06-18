@@ -1117,6 +1117,13 @@ def _apply_cadence_proposal(task_id, t):
     if not program_id:
         raise ValueError("This cadence card names no program to update.")
 
+    # ── Birth branch (inc4a) ──────────────────────────────────────────────────
+    # A birth proposal has no existing program to mutate: it CREATES one. Branch
+    # here, before apply_mutation, so the advance-phase/adjust-checkpoint path
+    # below stays byte-identical for every non-birth proposal.
+    if proposal.get("op") == "birth":
+        return _apply_cadence_birth(task_id, t, proposal, program_id)
+
     try:
         result = program_lib.apply_mutation(program_id, proposal)
     except ValueError as e:
@@ -1153,6 +1160,147 @@ def _apply_cadence_proposal(task_id, t):
     task_lib.update_task(receipt_id, changes={
         "receipt_kind": "cadence-apply", "source_recommendation": task_id,
         "program_id": program_id})
+    return receipt_id
+
+
+def _dispatch_bootstrap_task(task_id):
+    """Fire the agent dispatcher for a bootstrap task (detached), best-effort.
+
+    Reuses the reconciler's dispatch idiom (`cadence.reconcile._dispatch_agent_task`):
+    spawn `task_dispatch.py --task {id}` with the Claude-stripped headless env and
+    the platform process-group kwargs. Never raises -- a worker/provider that is
+    not configured simply means the queued task waits (no external write fires on
+    accept; the bootstrap rides the existing Tier-2 path only when later walked).
+    Factored out so a test can monkeypatch it (no real claude spawn under test).
+    """
+    try:
+        from cadence import reconcile as _reconcile
+        _reconcile._dispatch_agent_task(task_id)
+    except Exception as e:
+        sys.stderr.write(f"[cadence] bootstrap dispatch skipped for {task_id}: {e}\n")
+
+
+def _enqueue_bootstrap_emissions(program_type, new_id):
+    """Enqueue the born type's bootstrap_emissions as ordinary tasks (Tier-1).
+
+    Looks the emissions up in the registry by `program_type`. Each emission is a
+    {action, template} dict. Tags every created task [new_id, "cadence"] and carries
+    the template name onto the task (`bootstrap_template`) so the worker knows what
+    to draft. Closed action set:
+      - "draft-ticket"   -> an agent task that routes to the ticket-creator worker
+                            (queue="agent"); it drafts only and rides the existing
+                            Tier-2 path when later walked -- no external write now.
+      - "propose-update" -> a recommendation / cadence-propose-update card (an
+                            ordinary internal proposal, no proposal-mutation yet).
+    An unknown action is skipped (logged), never a crash. Degrades gracefully when
+    a worker/provider is unconfigured (the dispatch is best-effort). Returns the
+    list of created task ids.
+    """
+    try:
+        registry = program_lib.load_registry()
+    except Exception as e:
+        sys.stderr.write(f"[cadence] could not load registry for bootstrap: {e}\n")
+        return []
+    type_entry = next(
+        (ty for ty in registry.get("types", []) if ty.get("id") == program_type),
+        None)
+    intake = (type_entry or {}).get("intake") or {}
+    emissions = intake.get("bootstrap_emissions") or []
+
+    created = []
+    for em in emissions:
+        if not isinstance(em, dict):
+            continue
+        action = em.get("action")
+        template = em.get("template")
+        if action == "draft-ticket":
+            # An agent task routed to the ticket-creator worker deterministically
+            # by task_type (dispatch scores an exact +100 match on the worker's
+            # match.task_type list -- not a fragile title/description substring).
+            # It DRAFTS only -- no external write until the existing Tier-2.
+            bid, _ = task_lib.create_task(
+                title=f"Create tracker for {new_id}",
+                queue="agent", creator="cadence", tags=[new_id, "cadence"],
+                task_type="ticket-creator",
+                description=(
+                    f"Draft the initial tracker issue for the newly born program "
+                    f"{new_id}. Use jira-home to create the tracker initiative. "
+                    f"Draft only -- the human publishes via the board."))
+            task_lib.update_task(bid, changes={"bootstrap_template": template})
+            created.append(bid)
+            _dispatch_bootstrap_task(bid)
+        elif action == "propose-update":
+            # An ordinary internal proposal card (no program mutation attached --
+            # this is a draftable roadmap entry, not a cadence apply).
+            bid, _ = task_lib.create_task(
+                title=f"Add roadmap entry for {new_id}",
+                queue="human", priority="medium", creator="cadence",
+                card_type="recommendation", tags=[new_id, "cadence"],
+                description=(
+                    f"Add a roadmap entry for the newly born program {new_id}."))
+            task_lib.update_task(bid, changes={"bootstrap_template": template})
+            created.append(bid)
+        elif action:
+            sys.stderr.write(
+                f"[cadence] unknown bootstrap action '{action}' for {new_id} "
+                f"-- skipped\n")
+    return created
+
+
+def _apply_cadence_birth(task_id, t, proposal, intake_program_id):
+    """Accept a BIRTH proposal: create the program, enqueue bootstrap, receipt.
+
+    Tier-1 throughout. Builds a birth spec from the proposal, calls
+    program_lib.birth_program (which validates the type, creates the active
+    program, writes ## Intent + one origin observation), marks the intake
+    candidate birthed + linked to the new program, enqueues the born type's
+    bootstrap_emissions as ordinary queued tasks (no external write fires here),
+    completes the proposal card, and spawns an informational cadence-apply receipt
+    (no git revert). Returns the receipt id. Reuses the existing card-completion +
+    receipt machinery (does not reimplement it).
+    """
+    spec = {
+        "program_type": proposal.get("program_type"),
+        "title": proposal.get("title"),
+        "checkpoints": proposal.get("checkpoints") or [],
+        "citations": proposal.get("citations") or [],
+    }
+    try:
+        new_id = program_lib.birth_program(spec)
+    except ValueError as e:
+        raise RuntimeError(f"Could not birth this program: {e}")
+
+    # Mark the intake candidate birthed + linked. Tolerant: a missing/unknown
+    # candidate must not strand a successfully created program.
+    candidate_id = proposal.get("candidate_id")
+    if candidate_id:
+        try:
+            program_lib.mark_candidate_birthed(
+                intake_program_id, candidate_id, new_id)
+        except Exception as e:
+            sys.stderr.write(
+                f"[cadence] could not mark candidate {candidate_id} birthed: {e}\n")
+
+    bootstrap_ids = _enqueue_bootstrap_emissions(spec["program_type"], new_id)
+
+    summary = (f"Born {spec['program_type']} {new_id}: "
+               f"{proposal.get('title', '')}.")
+    if bootstrap_ids:
+        summary += f" Enqueued {len(bootstrap_ids)} bootstrap task(s)."
+
+    # Reuse the existing completion + receipt machinery (same as _apply_cadence_proposal).
+    task_lib.update_task(task_id, comment=f"Accepted: {summary}", actor="human")
+    task_lib.complete_task(task_id, actor="human")
+
+    receipt_id, _ = task_lib.create_task(
+        f"Applied: {t.get('title', '')}", queue="human", domain="ops",
+        creator="agent", card_type="receipt",
+        description=(f"{summary} This created a local program file and queued its "
+                     "bootstrap tasks; nothing was sent externally, so there is "
+                     "nothing to revert automatically."))
+    task_lib.update_task(receipt_id, changes={
+        "receipt_kind": "cadence-apply", "source_recommendation": task_id,
+        "program_id": new_id})
     return receipt_id
 
 
@@ -1297,10 +1445,40 @@ def handle_accept(handler, task_id):
     _json_response(handler, {"ok": True, "receipt_id": receipt_id})
 
 
+def reject_recommendation(task_id):
+    """Dismiss a recommendation (no git). For a BIRTH proposal, also close the
+    intake candidate with a reason so it is not re-proposed.
+
+    A birth proposal carries proposal {op: "birth", candidate_id} and is tagged
+    [intake_program_id, "cadence"]. Closing the candidate (append-only, the
+    "declined" memory) keeps the nursery from re-emitting the same birth. The
+    candidate close is best-effort: a missing candidate/program must not block the
+    card dismissal (the existing reject behavior is preserved either way).
+    """
+    try:
+        t = task_lib.read_task(task_id)["frontmatter"] or {}
+    except Exception:
+        t = {}
+    proposal = t.get("proposal")
+    if isinstance(proposal, dict) and proposal.get("op") == "birth":
+        intake_program_id = _program_id_from_tags(t.get("tags"))
+        candidate_id = proposal.get("candidate_id")
+        if intake_program_id and candidate_id:
+            try:
+                program_lib.close_candidate(
+                    intake_program_id, candidate_id,
+                    reason="rejected at birth proposal")
+            except Exception as e:
+                sys.stderr.write(
+                    f"[cadence] could not close candidate {candidate_id} on "
+                    f"reject: {e}\n")
+    task_lib.cancel_task(task_id, reason="rejected", actor="human")
+
+
 def handle_reject(handler, task_id):
     """POST /api/tasks/{id}/reject — dismiss a recommendation (no git)."""
     try:
-        task_lib.cancel_task(task_id, reason="rejected", actor="human")
+        reject_recommendation(task_id)
     except Exception as e:
         _error_response(handler, f"Reject failed: {e}", status=500)
         return

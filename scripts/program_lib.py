@@ -709,6 +709,382 @@ def iter_recent_artifacts(program_id, n=3, root=None):
     return found[:n]
 
 
+# ─── Candidate nursery (the program-intake register: upsert + close + birth) ──
+#
+# The intake program (type program-intake, state_model register) is a self-hosting
+# nursery: each program-worthy initiative is a register ITEM under `items`,
+# accumulating append-only, source-cited evidence across sentinel scans. The
+# intake sentinel's runner (a later task) returns routing records; for a
+# `candidate` route it calls upsert_candidate, which is the ONE deterministic
+# write path here -- the LLM never writes the file. Append-only (invariant #6):
+# evidence is only ever appended; a declined candidate closes-with-reason and a
+# birthed one is marked birthed -- neither is ever deleted, and neither is ever
+# appended to again (only material new evidence reopens, which is out of scope).
+# ASCII-safe runtime strings (invariant #8); no identity literals (invariant #1).
+
+# Confidence at or above this auto-merges a sentinel-proposed link; below it the
+# incoming evidence opens a NEW candidate carrying possible_duplicate_of instead.
+_CANDIDATE_LINK_CONFIDENCE = 0.8
+
+# Statuses that a candidate can NEVER receive new evidence into. A key/anchor/
+# title that matches only such a candidate is treated as a brand-new candidate.
+_CLOSED_CANDIDATE_STATUSES = frozenset({"closed-with-reason", "birthed"})
+
+# Strip everything that is not a word char or whitespace, for the title key.
+_PUNCT_RE = re.compile(r"[^\w\s]")
+_WS_RE = re.compile(r"\s+")
+
+
+def _norm_title_key(title):
+    """Normalize a title for fuzzy candidate matching.
+
+    Lowercase, strip punctuation, collapse runs of whitespace to one space, and
+    trim. So "Smart Reconciliation!" and "  smart   reconciliation " both yield
+    "smart reconciliation". Empty/whitespace-only -> "" (never raises).
+    """
+    if not title:
+        return ""
+    s = _PUNCT_RE.sub("", str(title)).lower()
+    return _WS_RE.sub(" ", s).strip()
+
+
+def _next_candidate_id(fm):
+    """Mint the next CAND-XXXX id off the intake program's `cand_counter`.
+
+    Deterministic + append-only + collision-safe: the counter only ever
+    increments and is never reused, so a closed/birthed candidate's id is never
+    re-minted (unlike an items-length scheme, which would collide after a close).
+    Seeds the counter at 0 on first use. Mutates `fm` in place (the caller writes
+    the file back under the same write that persists the new item).
+    """
+    n = fm.get("cand_counter")
+    if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+        n = 0
+    fm["cand_counter"] = n + 1
+    return f"CAND-{n + 1:04d}"
+
+
+def _distinct_source_count(evidence):
+    """Count DISTINCT stripped `source` values across a candidate's evidence."""
+    sources = set()
+    for ev in evidence or []:
+        if isinstance(ev, dict):
+            src = (ev.get("source") or "").strip()
+            if src:
+                sources.add(src)
+    return len(sources)
+
+
+def _find_open_candidate(items, *, anchor=None, title=None, candidate_id=None,
+                         program_type=None):
+    """Return the first OPEN candidate matching by id, anchor, or title key.
+
+    Closed/birthed candidates are skipped (a match against one is treated as no
+    match, so the caller opens a fresh candidate). Match precedence: explicit
+    candidate_id, then anchor (when given), then normalized-title-key. Tolerant
+    of malformed items (non-dict entries are skipped); never raises.
+
+    The normalized-title-key path is type-gated: when `program_type` is given,
+    a title match only counts if the existing candidate's `program_type` matches
+    too. (Two different target types can share a normalized title; merging them
+    would silently birth the wrong program type.) The anchor path stays
+    un-gated: anchors are externally unique identifiers across types.
+    """
+    title_key = _norm_title_key(title) if title else None
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        if it.get("status") in _CLOSED_CANDIDATE_STATUSES:
+            continue
+        if candidate_id and it.get("id") == candidate_id:
+            return it
+        if anchor and it.get("anchor") and it.get("anchor") == anchor:
+            return it
+        if title_key and _norm_title_key(it.get("title")) == title_key:
+            if program_type is not None and it.get("program_type") != program_type:
+                continue
+            return it
+    return None
+
+
+def _get_candidate(items, candidate_id):
+    """Return the candidate item with `candidate_id`, or None."""
+    for it in items or []:
+        if isinstance(it, dict) and it.get("id") == candidate_id:
+            return it
+    return None
+
+
+def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
+                     source, claim, anchor=None, link_to=None, confidence=None,
+                     declared=False, sentinel="program-intake", root=None):
+    """Add or merge source-cited candidate evidence in the intake nursery.
+
+    Reads the intake program (a program-intake register), finds or creates a
+    candidate register item under `items`, appends ONE evidence entry, recomputes
+    the distinct-source count, writes the file back, and returns
+    {candidate_id, action, source_count} where action is one of:
+      - "opened"  -- a brand-new candidate was created;
+      - "merged"  -- evidence was appended to an existing OPEN candidate;
+      - "flagged" -- a new candidate was created carrying possible_duplicate_of
+                     (a sentinel-proposed link that was not confident enough).
+
+    Merge logic (the approved middle option):
+      1. `anchor` matches an OPEN candidate's anchor, OR _norm_title_key(title)
+         matches an OPEN candidate's normalized title -> merge.
+      2. else `link_to` resolves to an OPEN candidate AND confidence >= 0.8 -> merge.
+      3. else `link_to` resolves to an OPEN candidate but confidence < 0.8 (or
+         None) -> new candidate carrying possible_duplicate_of = link_to (flagged).
+      4. else -> a new candidate (opened).
+    A key/anchor/title that matches only a closed-with-reason or birthed candidate
+    is treated as a brand-new candidate (those never take new evidence).
+
+    `candidate_key` is the sentinel's stable identity hint; it is stored on the
+    candidate for traceability but the merge decision rides anchor/title/link_to
+    (the design's approved dimensions). Append-only (invariant #6): a candidate's
+    evidence list is only ever appended to; source_count is the count of DISTINCT
+    sources (the birth-threshold input later). ASCII-safe; role/owner tokens only.
+    """
+    if not title or not str(title).strip():
+        raise ValueError("title must be non-empty")
+    if not source or not str(source).strip():
+        raise ValueError("source must be non-empty")
+    if not claim or not str(claim).strip():
+        raise ValueError("claim must be non-empty")
+    if not program_type:
+        raise ValueError("program_type must be non-empty")
+
+    prog = read_program(intake_program_id, root=root)
+    fm = prog["frontmatter"]
+    items = fm.get("items")
+    if not isinstance(items, list):
+        items = []
+        fm["items"] = items
+
+    # Resolve the merge target (an OPEN candidate) and the resulting action.
+    target = _find_open_candidate(items, anchor=anchor, title=title,
+                                  program_type=program_type)
+    action = "merged" if target is not None else None
+    possible_duplicate_of = None
+
+    if target is None and link_to:
+        linked = _find_open_candidate(items, candidate_id=link_to)
+        if linked is not None:
+            # Coerce defensively: a sentinel may emit a non-numeric confidence
+            # (e.g. the string "high"); treat that as below-threshold and fall
+            # through to the flagged branch (mirrors append_observation).
+            try:
+                confident = (confidence is not None
+                             and float(confidence) >= _CANDIDATE_LINK_CONFIDENCE)
+            except (TypeError, ValueError):
+                confident = False
+            if confident:
+                target = linked
+                action = "merged"
+            else:
+                # Resolved but not confident enough -> a new, flagged candidate.
+                possible_duplicate_of = link_to
+                action = "flagged"
+
+    evidence_entry = {
+        "date": _now_iso()[:10],
+        "source": str(source).strip(),
+        "claim": str(claim).strip(),
+        "sentinel": sentinel,
+    }
+
+    if target is not None:
+        # Merge: append evidence (append-only) and recompute the source count.
+        evidence = target.setdefault("evidence", [])
+        evidence.append(evidence_entry)
+        target["source_count"] = _distinct_source_count(evidence)
+        # `declared` is sticky-true: once an explicit declaration marked this
+        # candidate, a later non-declaring mention never un-declares it.
+        target["declared"] = bool(target.get("declared")) or bool(declared)
+        candidate_id = target["id"]
+    else:
+        # Open a new candidate (action "opened" unless a low-confidence link flagged it).
+        if action is None:
+            action = "opened"
+        candidate_id = _next_candidate_id(fm)
+        new_cand = {
+            "id": candidate_id,
+            "candidate_key": candidate_key,
+            "program_type": program_type,
+            "title": str(title).strip(),
+            "anchor": anchor,
+            "status": "open",
+            "declared": bool(declared),
+            "evidence": [evidence_entry],
+            "source_count": _distinct_source_count([evidence_entry]),
+        }
+        if possible_duplicate_of:
+            new_cand["possible_duplicate_of"] = possible_duplicate_of
+        items.append(new_cand)
+
+    _write_program_file(prog["filepath"], fm, prog["body"])
+
+    final = _get_candidate(items, candidate_id)
+    return {
+        "candidate_id": candidate_id,
+        "action": action,
+        "source_count": final.get("source_count", 0) if final else 0,
+    }
+
+
+def close_candidate(intake_program_id, candidate_id, *, reason, root=None):
+    """Close a candidate with a reason (the append-only "declined" memory).
+
+    Sets the candidate's status to "closed-with-reason" and records `reason`.
+    Idempotent: closing an already-closed candidate is a no-op success that
+    preserves the original reason (a retried close must not overwrite it).
+    Raises ValueError for an unknown candidate id. Returns the candidate dict.
+    """
+    prog = read_program(intake_program_id, root=root)
+    fm = prog["frontmatter"]
+    cand = _get_candidate(fm.get("items") or [], candidate_id)
+    if cand is None:
+        raise ValueError(f"no candidate {candidate_id!r} in {intake_program_id}")
+    if cand.get("status") == "closed-with-reason":
+        return cand  # idempotent: keep the original reason, no rewrite
+    cand["status"] = "closed-with-reason"
+    cand["reason"] = reason
+    _write_program_file(prog["filepath"], fm, prog["body"])
+    return cand
+
+
+def mark_candidate_birthed(intake_program_id, candidate_id, born_program_id, root=None):
+    """Mark a candidate birthed, linked to the program it became.
+
+    Sets status to "birthed" and records `born_program_id`. Raises ValueError for
+    an unknown candidate id. Append-only: a birthed candidate never takes new
+    evidence (see _CLOSED_CANDIDATE_STATUSES). Returns the candidate dict.
+    """
+    prog = read_program(intake_program_id, root=root)
+    fm = prog["frontmatter"]
+    cand = _get_candidate(fm.get("items") or [], candidate_id)
+    if cand is None:
+        raise ValueError(f"no candidate {candidate_id!r} in {intake_program_id}")
+    cand["status"] = "birthed"
+    cand["born_program_id"] = born_program_id
+    _write_program_file(prog["filepath"], fm, prog["body"])
+    return cand
+
+
+# ─── Birth path (create an active program from an intake birth spec) ──────────
+#
+# birth_program is the sibling to apply_mutation: apply_mutation MUTATES an
+# existing program; birth_program CREATES one. The accept path (a later task)
+# calls this when a human accepts a birth proposal, then enqueues bootstrap
+# emissions -- so birth_program stays PURE file-creation (no task queue, no
+# external write) to keep it unit-testable in isolation. It reuses create_program
+# for the base file write (DRY), then writes the citations into ## Intent and
+# appends exactly ONE origin observation via append_observation. ASCII-safe
+# runtime strings (invariant #8); owner_role is a ROLE token, never a name
+# (invariant #1); append-only (invariant #6).
+
+# Sane default owner when a spec omits one. A ROLE token, never a person/team
+# name (invariant #1) -- the same token create_program's callers seed with.
+_DEFAULT_OWNER_ROLE = "product"
+
+
+def _first_phase_id(type_entry):
+    """Return the id of the FIRST phase in a pipeline type, or None.
+
+    None for a non-pipeline type (no `phases`) or a malformed/empty phase list,
+    so a register/cycle/target birth simply gets no inferred phase (never raises).
+    """
+    phases = (type_entry or {}).get("phases") or []
+    for p in phases:
+        if isinstance(p, dict) and p.get("id"):
+            return p.get("id")
+    return None
+
+
+def birth_program(spec, root=None):
+    """Create a new active program from an intake birth spec; return its id.
+
+    spec is a dict:
+        program_type : registry type id (ValueError if unknown).
+        title        : program title.
+        checkpoints? : list of checkpoint dicts, carried onto the new program with
+                       each forced to status "pending" (a newborn has met nothing).
+        citations?   : list of source citations that earned the birth; written into
+                       ## Intent as a one-line origin paragraph and the first one
+                       cited as the origin observation's source.
+        owner_role?  : a ROLE token (defaults to "product"); never a name.
+        phase?       : explicit starting phase; defaults to the type's FIRST phase
+                       for a pipeline type, else None (register/cycle/target).
+
+    Pure file-creation (Tier-1): writes the program file, its ## Intent origin
+    paragraph, and ONE origin observation. Does NOT enqueue bootstrap emissions --
+    that is the accept path's job (a later task) -- so this is unit-testable
+    without the task queue. Returns the freshly minted program_id.
+    """
+    program_type = (spec or {}).get("program_type")
+    title = (spec or {}).get("title")
+
+    # Guard a malformed spec here with a birth-specific message instead of
+    # letting it surface from deep inside create_program (symmetry with the
+    # program_type registry check below).
+    if not (title or "").strip():
+        raise ValueError("birth spec requires a title")
+
+    # Validate the type against the registry (ValueError on unknown).
+    registry = load_registry()
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == program_type),
+        None,
+    )
+    if type_entry is None:
+        raise ValueError(f"unknown program_type: {program_type!r}")
+
+    owner_role = (spec or {}).get("owner_role") or _DEFAULT_OWNER_ROLE
+
+    # Phase: explicit spec phase, else the type's first phase for a pipeline
+    # model, else None (a register/cycle/target type has no phase).
+    phase = (spec or {}).get("phase")
+    if phase is None and type_entry.get("state_model") == "pipeline":
+        phase = _first_phase_id(type_entry)
+
+    # Carry the spec's checkpoints, each forced to status "pending" (a newborn has
+    # met nothing). Copy each dict so we never mutate the caller's spec.
+    checkpoints = []
+    for cp in (spec or {}).get("checkpoints") or []:
+        cp = dict(cp)
+        cp["status"] = "pending"
+        checkpoints.append(cp)
+
+    citations = [str(c) for c in ((spec or {}).get("citations") or []) if c]
+
+    frontmatter_extra = {"checkpoints": checkpoints, "drift": "holding"}
+    if phase is not None:
+        frontmatter_extra["phase"] = phase
+        # Stamp the entry date for the newborn's first phase (scalar form = the
+        # date the current phase was entered) so the reconciler can age it and the
+        # UI timeline shows an entry date. A newborn enters its first phase now.
+        frontmatter_extra["phase_entered"] = _now_iso()[:10]
+
+    # Reuse create_program for the base file (status defaults to "active"). It
+    # writes the canonical ## Intent / ## Observations / ## Cycles body.
+    citation_str = ", ".join(citations) if citations else "intake candidate"
+    intent = f"Born from intake evidence: {citation_str}."
+    program_id, _ = create_program(
+        type=program_type, title=title, owner_role=owner_role,
+        intent=intent, frontmatter_extra=frontmatter_extra, root=root,
+    )
+
+    # Exactly ONE origin observation, source-cited to the first citation (or the
+    # generic "intake" when there are none). ASCII-safe claim.
+    append_observation(
+        program_id, kind="status-signal", sentinel="program-intake",
+        source=(citations[0] if citations else "intake"),
+        claim="Program born from intake candidate.", root=root,
+    )
+
+    return program_id
+
+
 # ─── Phase advancement core (shared by the fact door + the proposal applier) ──
 #
 # _next_phase_id + _advance_phase_fm are the ONE place the engine advances a
@@ -1175,10 +1551,28 @@ def render_view(program, registry, needs_you=0, emissions=None, root=None):
         ]
     elif state_model == "register":
         vm["status_line"] = fm.get("status_line")
-        vm["items"] = [
-            {"name": it.get("name"), "owner": it.get("owner"), "age": it.get("age")}
-            for it in (fm.get("items") or [])
-        ]
+        # For program-intake programs, candidates have {title, program_type,
+        # source_count, status, possible_duplicate_of, ...}. Map them to the
+        # register view as {name: title, owner: program_type, age: source_count,
+        # status, possible_duplicate_of}. For other register programs, keep the
+        # existing {name, owner, age} projection. Both shapes are tolerated in
+        # `items` (the client is tolerant of extra fields).
+        if type_id == "program-intake":
+            vm["items"] = [
+                {
+                    "name": it.get("title"),
+                    "owner": it.get("program_type"),
+                    "age": it.get("source_count"),
+                    "status": it.get("status"),
+                    "possible_duplicate_of": it.get("possible_duplicate_of"),
+                }
+                for it in (fm.get("items") or [])
+            ]
+        else:
+            vm["items"] = [
+                {"name": it.get("name"), "owner": it.get("owner"), "age": it.get("age")}
+                for it in (fm.get("items") or [])
+            ]
         vm["policy"] = fm.get("policy")
 
     # Coerce any date/datetime values (from unquoted YAML dates) to ISO strings

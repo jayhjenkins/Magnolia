@@ -157,6 +157,80 @@ def test_render_register(tmp_path):
     assert vm["policy"] == 21
 
 
+def test_render_register_unchanged_for_other_register(tmp_path):
+    # The program-intake projection must NOT change the plain-register projection
+    # for OTHER register programs (eos-issues etc.): they stay {name, owner, age}
+    # exactly, no extra candidate fields leak in.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="eos-issues", title="Issues list", owner_role="ops",
+        root=root, frontmatter_extra={
+            "drift": "holding",
+            "status_line": "14 open - oldest 16 days",
+            "items": [{"name": "Refund timing mismatch", "owner": "ops", "age": 16}],
+            "policy": 21,
+        })
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["model"] == "register"
+    assert vm["items"][0] == {"name": "Refund timing mismatch", "owner": "ops", "age": 16}
+
+
+def test_render_program_intake_surfaces_candidates(tmp_path):
+    # The program-intake nursery (a register) carries CANDIDATE items, not the
+    # plain {name, owner, age} register shape. render_view must surface each
+    # candidate so the Cadence row can list it. Build the candidate the way
+    # upsert_candidate actually writes it (NOT a hand-crafted dict) so the test
+    # asserts on the REAL shape: name <- title, owner <- program_type,
+    # age <- source_count, plus status and possible_duplicate_of when present.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    pid, _ = pl.create_program(
+        type="program-intake", title="Program intake", owner_role="product",
+        root=root, frontmatter_extra={
+            "drift": "holding",
+            "status_line": "1 candidate",
+            "items": [],
+            "policy": 30,
+        })
+    # First evidence opens a candidate; a second source merges (source_count -> 2).
+    r1 = pl.upsert_candidate(
+        pid, candidate_key="smart-recon", program_type="initiative",
+        title="Smart reconciliation", source="meeting:home-standup-0610",
+        claim="Team keeps asking for smarter reconciliation.", root=root)
+    pl.upsert_candidate(
+        pid, candidate_key="smart-recon", program_type="initiative",
+        title="Smart reconciliation", source="meeting:payments-sync-0612",
+        claim="Same ask surfaced again in payments.", root=root)
+    # A second, low-confidence linked candidate -> flagged with possible_duplicate_of.
+    r3 = pl.upsert_candidate(
+        pid, candidate_key="recon-dup", program_type="initiative",
+        title="Reconciliation revamp", source="meeting:platform-0613",
+        claim="Possibly the same reconciliation theme.",
+        link_to=r1["candidate_id"], confidence=0.4, root=root)
+    assert r3["action"] == "flagged"
+
+    vm = pl.render_view(pl.read_program(pid, root=root), reg)
+    assert vm["model"] == "register"
+    assert len(vm["items"]) == 2
+
+    by_name = {it["name"]: it for it in vm["items"]}
+    # name <- title
+    assert "Smart reconciliation" in by_name
+    cand = by_name["Smart reconciliation"]
+    # owner <- program_type
+    assert cand["owner"] == "initiative"
+    # age <- source_count (two distinct sources merged)
+    assert cand["age"] == 2
+    # status is surfaced (open)
+    assert cand["status"] == "open"
+
+    dup = by_name["Reconciliation revamp"]
+    # possible_duplicate_of is surfaced and points at the first candidate.
+    assert dup["possible_duplicate_of"] == r1["candidate_id"]
+    assert dup["owner"] == "initiative"
+
+
 def test_render_view_surfaces_items_for_cycle(tmp_path):
     # A cycle program (weekly-priorities) can declare `items` — the week's
     # priorities. render_view must surface them in the view model so the Cadence
@@ -590,15 +664,17 @@ def test_build_payload_emissions_resilient_when_task_lib_raises(tmp_path, monkey
 def test_all_seed_programs_render():
     reg = pl.load_registry()
     progs = pl.list_programs()  # real datasets root
-    assert len(progs) == 13     # concrete count: a silently-dropped/malformed seed fails here
+    # 13 original seeds + PROG-0014 (the program-intake nursery, inc4a).
+    assert len(progs) == 14     # concrete count: a silently-dropped/malformed seed fails here
     for p in progs:
         vm = pl.render_view(p, reg)
         assert vm["model"] in {"pipeline", "target", "cycle", "register"}
         assert vm["name"]
-    # the family payload groups them and drops no expected family
+    # the family payload groups them and drops no expected family. The nursery
+    # adds the System family, which shelves last (order 99).
     payload = pl.build_cadence_payload()
     fam_ids = [f["id"] for f in payload["families"]]
-    assert fam_ids == ["roadmap", "weekly", "outcomes", "eos"]
+    assert fam_ids == ["roadmap", "weekly", "outcomes", "eos", "system"]
 
 
 # ─── tracker_anchor (Task 5, shared binding resolution) ──────────────────────
@@ -636,3 +712,634 @@ def test_tracker_anchor_robust_to_malformed():
                                             "kind": "project_management"}]}) is None
     assert pl.tracker_anchor({"links": "nope"}) is None
     assert pl.tracker_anchor(None) is None
+
+
+# ─── upsert_candidate + close/birth + _norm_title_key (Task 3, the nursery) ────
+
+def _seed_intake(tmp_path, **extra):
+    """Create a program-intake register program with an empty `items` list.
+
+    Mirrors the seeded PROG-0014 shape. Returns its program_id.
+    """
+    fm_extra = {"drift": "holding", "status_line": "0 candidates",
+                "items": [], "policy": 30}
+    fm_extra.update(extra)
+    pid, _ = pl.create_program(
+        type="program-intake", title="Program intake", owner_role="product",
+        root=str(tmp_path), frontmatter_extra=fm_extra)
+    return pid
+
+
+def test_norm_title_key_normalizes():
+    # lowercase, strip punctuation, collapse whitespace.
+    assert pl._norm_title_key("Smart Reconciliation!") == "smart reconciliation"
+    assert pl._norm_title_key("  Smart   reconciliation  ") == "smart reconciliation"
+    assert pl._norm_title_key("Re-org: the Plan (v2)") == "reorg the plan v2"
+    # Two titles that differ only by punctuation/case/space collapse to the same key.
+    assert pl._norm_title_key("Foo, Bar.") == pl._norm_title_key("foo bar")
+    # Empty / whitespace-only -> empty string (never raises).
+    assert pl._norm_title_key("") == ""
+    assert pl._norm_title_key("   ") == ""
+
+
+def test_upsert_candidate_opens_new(tmp_path):
+    ip = _seed_intake(tmp_path)
+    res = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-A",
+        claim="Mentioned in planning.", root=str(tmp_path))
+    assert res["action"] == "opened"
+    assert res["candidate_id"] == "CAND-0001"
+    assert res["source_count"] == 1
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = prog["frontmatter"]["items"]
+    assert len(items) == 1
+    cand = items[0]
+    assert cand["id"] == "CAND-0001"
+    assert cand["program_type"] == "roadmap-initiative"
+    assert cand["title"] == "Smart reconciliation"
+    assert cand["status"] == "open"
+    assert cand["source_count"] == 1
+    assert len(cand["evidence"]) == 1
+    ev = cand["evidence"][0]
+    assert ev["source"] == "meeting-A"
+    assert ev["claim"] == "Mentioned in planning."
+    assert ev["sentinel"] == "program-intake"  # default
+    assert ev["date"]  # defaulted to today
+
+
+def test_upsert_candidate_default_declared_is_false(tmp_path):
+    ip = _seed_intake(tmp_path)
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="eos-rock",
+        title="Q3 rock", source="meeting-A", claim="Mentioned.",
+        root=str(tmp_path))
+    items = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"]
+    assert items[0].get("declared", False) is False
+
+
+def test_upsert_candidate_declared_true_opens_declared(tmp_path):
+    ip = _seed_intake(tmp_path)
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="eos-rock",
+        title="Q3 rock", source="meeting-A", claim="We are committing to this.",
+        declared=True, root=str(tmp_path))
+    items = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"]
+    assert items[0]["declared"] is True
+
+
+def test_upsert_candidate_declared_is_sticky_true_on_merge(tmp_path):
+    ip = _seed_intake(tmp_path)
+    # First mention declares it.
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="eos-rock",
+        title="Q3 rock", source="meeting-A", claim="We are committing to this.",
+        anchor="ROCK-1", declared=True, root=str(tmp_path))
+    # A later, non-declaring mention merges in (same anchor) but must NOT undeclare.
+    pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="eos-rock",
+        title="Q3 rock again", source="meeting-B", claim="Discussed again.",
+        anchor="ROCK-1", declared=False, root=str(tmp_path))
+    items = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"]
+    assert len(items) == 1
+    assert items[0]["declared"] is True
+
+
+def test_upsert_candidate_declared_set_true_on_later_merge(tmp_path):
+    ip = _seed_intake(tmp_path)
+    # First mention does not declare.
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="eos-rock",
+        title="Q3 rock", source="meeting-A", claim="Mentioned.",
+        anchor="ROCK-2", root=str(tmp_path))
+    # A later declaring mention merges in and flips declared sticky-true.
+    pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="eos-rock",
+        title="Q3 rock", source="meeting-B", claim="Now we commit.",
+        anchor="ROCK-2", declared=True, root=str(tmp_path))
+    items = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"]
+    assert len(items) == 1
+    assert items[0]["declared"] is True
+
+
+def test_upsert_candidate_mints_sequential_ids(tmp_path):
+    ip = _seed_intake(tmp_path)
+    a = pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",
+                            title="Alpha", source="s1", claim="c1", root=str(tmp_path))
+    b = pl.upsert_candidate(ip, candidate_key="k2", program_type="roadmap-initiative",
+                            title="Beta", source="s2", claim="c2", root=str(tmp_path))
+    assert (a["candidate_id"], b["candidate_id"]) == ("CAND-0001", "CAND-0002")
+
+
+def test_upsert_candidate_merges_by_anchor(tmp_path):
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-A", claim="Mentioned.",
+        anchor="EPIC-42", root=str(tmp_path))
+    # Different title, same anchor -> merges into the first candidate.
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="Totally different name", source="meeting-B", claim="Raised again.",
+        anchor="EPIC-42", root=str(tmp_path))
+    assert second["action"] == "merged"
+    assert second["candidate_id"] == first["candidate_id"]
+    assert second["source_count"] == 2
+    prog = pl.read_program(ip, root=str(tmp_path))
+    assert len(prog["frontmatter"]["items"]) == 1
+    assert len(prog["frontmatter"]["items"][0]["evidence"]) == 2
+
+
+def test_upsert_candidate_merges_by_title_key(tmp_path):
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart Reconciliation", source="meeting-A", claim="c1",
+        root=str(tmp_path))
+    # Same normalized title (case/punct differ), no anchor -> merges.
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="smart reconciliation!", source="meeting-B", claim="c2",
+        root=str(tmp_path))
+    assert second["action"] == "merged"
+    assert second["candidate_id"] == first["candidate_id"]
+    assert second["source_count"] == 2
+
+
+def test_upsert_candidate_title_merge_is_type_gated(tmp_path):
+    # Two candidates with the SAME normalized title but DIFFERENT program_type
+    # must NOT merge on the title-key path: birthing the wrong-typed program is
+    # the bug being fixed. The second upsert opens a brand-new candidate.
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart Reconciliation", source="meeting-A", claim="c1",
+        root=str(tmp_path))
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="eos-rock",
+        title="smart reconciliation!", source="meeting-B", claim="c2",
+        root=str(tmp_path))
+    assert second["action"] == "opened"
+    assert second["candidate_id"] != first["candidate_id"]
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = {it["id"]: it for it in prog["frontmatter"]["items"]}
+    assert len(items) == 2
+    assert items[first["candidate_id"]]["program_type"] == "roadmap-initiative"
+    assert items[second["candidate_id"]]["program_type"] == "eos-rock"
+
+
+def test_upsert_candidate_title_merge_same_type_still_merges(tmp_path):
+    # Same normalized title AND same program_type -> still merges (the existing
+    # title-key behavior is preserved by the type gate).
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart Reconciliation", source="meeting-A", claim="c1",
+        root=str(tmp_path))
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="smart reconciliation!", source="meeting-B", claim="c2",
+        root=str(tmp_path))
+    assert second["action"] == "merged"
+    assert second["candidate_id"] == first["candidate_id"]
+    assert second["source_count"] == 2
+
+
+def test_upsert_candidate_merges_by_confident_link(tmp_path):
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Alpha initiative", source="meeting-A", claim="c1", root=str(tmp_path))
+    # link_to resolves to the open candidate, confidence >= 0.8 -> merge.
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="A loosely-related name", source="meeting-B", claim="c2",
+        link_to=first["candidate_id"], confidence=0.85, root=str(tmp_path))
+    assert second["action"] == "merged"
+    assert second["candidate_id"] == first["candidate_id"]
+    assert second["source_count"] == 2
+
+
+def test_upsert_candidate_flags_unsure_link(tmp_path):
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Alpha initiative", source="meeting-A", claim="c1", root=str(tmp_path))
+    # link_to resolves but confidence < 0.8 -> new candidate carrying the marker.
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="Maybe-related name", source="meeting-B", claim="c2",
+        link_to=first["candidate_id"], confidence=0.5, root=str(tmp_path))
+    assert second["action"] == "flagged"
+    assert second["candidate_id"] != first["candidate_id"]
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = {it["id"]: it for it in prog["frontmatter"]["items"]}
+    assert items[second["candidate_id"]]["possible_duplicate_of"] == first["candidate_id"]
+
+
+def test_upsert_candidate_flags_link_without_confidence(tmp_path):
+    # link_to resolves but no confidence at all -> flagged (below threshold).
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Alpha initiative", source="meeting-A", claim="c1", root=str(tmp_path))
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="No-confidence name", source="meeting-B", claim="c2",
+        link_to=first["candidate_id"], root=str(tmp_path))
+    assert second["action"] == "flagged"
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = {it["id"]: it for it in prog["frontmatter"]["items"]}
+    assert items[second["candidate_id"]]["possible_duplicate_of"] == first["candidate_id"]
+
+
+def test_upsert_candidate_non_numeric_confidence_flags(tmp_path):
+    # A sentinel emits a non-numeric confidence (e.g. "high") on a resolvable
+    # link -> defensively treated as below-threshold (flagged), never raises.
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Alpha initiative", source="meeting-A", claim="c1", root=str(tmp_path))
+    second = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="Vague name", source="meeting-B", claim="c2",
+        link_to=first["candidate_id"], confidence="high", root=str(tmp_path))
+    assert second["action"] == "flagged"
+    assert second["candidate_id"] != first["candidate_id"]
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = {it["id"]: it for it in prog["frontmatter"]["items"]}
+    assert items[second["candidate_id"]]["possible_duplicate_of"] == first["candidate_id"]
+
+
+def test_upsert_candidate_anchor_precedence_over_link(tmp_path):
+    # When BOTH a matching anchor AND a link_to (to a different open candidate)
+    # are supplied, the anchor match wins: merged into the anchor candidate, the
+    # link is ignored, and possible_duplicate_of is NOT set.
+    ip = _seed_intake(tmp_path)
+    anchored = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Anchored initiative", source="meeting-A", claim="c1",
+        anchor="EPIC-77", root=str(tmp_path))
+    other = pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="roadmap-initiative",
+        title="Other open candidate", source="meeting-B", claim="c2",
+        root=str(tmp_path))
+    # Same anchor AND a link to the OTHER candidate -> anchor wins.
+    res = pl.upsert_candidate(
+        ip, candidate_key="k3", program_type="roadmap-initiative",
+        title="Different name entirely", source="meeting-C", claim="c3",
+        anchor="EPIC-77", link_to=other["candidate_id"], confidence=0.99,
+        root=str(tmp_path))
+    assert res["action"] == "merged"
+    assert res["candidate_id"] == anchored["candidate_id"]
+    assert res["candidate_id"] != other["candidate_id"]
+    prog = pl.read_program(ip, root=str(tmp_path))
+    items = {it["id"]: it for it in prog["frontmatter"]["items"]}
+    # Merged into the anchored candidate; the link was ignored.
+    assert "possible_duplicate_of" not in items[anchored["candidate_id"]]
+    assert len(items[anchored["candidate_id"]]["evidence"]) == 2
+    # The other candidate is untouched.
+    assert len(items[other["candidate_id"]]["evidence"]) == 1
+
+
+def test_upsert_candidate_distinct_source_counting(tmp_path):
+    # Same source twice -> source_count stays 1 (it counts DISTINCT sources).
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-A", claim="c1",
+        anchor="EPIC-7", root=str(tmp_path))
+    assert first["source_count"] == 1
+    again = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-A", claim="c2 different claim",
+        anchor="EPIC-7", root=str(tmp_path))
+    assert again["action"] == "merged"
+    assert again["source_count"] == 1  # same source -> still one distinct source
+    prog = pl.read_program(ip, root=str(tmp_path))
+    cand = prog["frontmatter"]["items"][0]
+    assert len(cand["evidence"]) == 2  # but the evidence list still appends (append-only)
+    assert cand["source_count"] == 1
+    # A third, distinct source -> 2.
+    third = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-B", claim="c3",
+        anchor="EPIC-7", root=str(tmp_path))
+    assert third["source_count"] == 2
+
+
+def test_upsert_candidate_closed_match_creates_new(tmp_path):
+    # A key/anchor that matches only a CLOSED candidate creates a brand-new one.
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-A", claim="c1",
+        anchor="EPIC-9", root=str(tmp_path))
+    pl.close_candidate(ip, first["candidate_id"], reason="declined",
+                       root=str(tmp_path))
+    # Same anchor + title, but the matching candidate is closed -> a new candidate.
+    second = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-B", claim="c2",
+        anchor="EPIC-9", root=str(tmp_path))
+    assert second["action"] == "opened"
+    assert second["candidate_id"] != first["candidate_id"]
+    prog = pl.read_program(ip, root=str(tmp_path))
+    assert len(prog["frontmatter"]["items"]) == 2
+
+
+def test_upsert_candidate_does_not_append_to_birthed(tmp_path):
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-A", claim="c1",
+        anchor="EPIC-9", root=str(tmp_path))
+    pl.mark_candidate_birthed(ip, first["candidate_id"], "PROG-0099",
+                              root=str(tmp_path))
+    second = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-B", claim="c2",
+        anchor="EPIC-9", root=str(tmp_path))
+    assert second["action"] == "opened"
+    assert second["candidate_id"] != first["candidate_id"]
+
+
+def test_upsert_candidate_evidence_is_append_only(tmp_path):
+    ip = _seed_intake(tmp_path)
+    pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",
+                        title="Alpha", source="s1", claim="first", anchor="E1",
+                        root=str(tmp_path))
+    pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",
+                        title="Alpha", source="s2", claim="second", anchor="E1",
+                        root=str(tmp_path))
+    prog = pl.read_program(ip, root=str(tmp_path))
+    claims = [e["claim"] for e in prog["frontmatter"]["items"][0]["evidence"]]
+    assert claims == ["first", "second"]  # prior evidence never rewritten
+
+
+def test_upsert_candidate_accepts_sentinel_kwarg(tmp_path):
+    ip = _seed_intake(tmp_path)
+    res = pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Alpha", source="s1", claim="c1", sentinel="program-intake-v2",
+        root=str(tmp_path))
+    prog = pl.read_program(ip, root=str(tmp_path))
+    assert prog["frontmatter"]["items"][0]["evidence"][0]["sentinel"] == "program-intake-v2"
+    assert res["action"] == "opened"
+
+
+def test_close_candidate_sets_status_and_reason(tmp_path):
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",
+                                title="Alpha", source="s1", claim="c1", root=str(tmp_path))
+    pl.close_candidate(ip, first["candidate_id"], reason="not worth it",
+                       root=str(tmp_path))
+    prog = pl.read_program(ip, root=str(tmp_path))
+    cand = prog["frontmatter"]["items"][0]
+    assert cand["status"] == "closed-with-reason"
+    assert cand["reason"] == "not worth it"
+
+
+def test_close_candidate_idempotent(tmp_path):
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",
+                                title="Alpha", source="s1", claim="c1", root=str(tmp_path))
+    pl.close_candidate(ip, first["candidate_id"], reason="r1", root=str(tmp_path))
+    # Closing again is a no-op success (reason preserved, no raise).
+    pl.close_candidate(ip, first["candidate_id"], reason="r2", root=str(tmp_path))
+    prog = pl.read_program(ip, root=str(tmp_path))
+    cand = prog["frontmatter"]["items"][0]
+    assert cand["status"] == "closed-with-reason"
+    assert cand["reason"] == "r1"  # first reason retained (idempotent)
+
+
+def test_mark_candidate_birthed_sets_status_and_link(tmp_path):
+    ip = _seed_intake(tmp_path)
+    first = pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",
+                                title="Alpha", source="s1", claim="c1", root=str(tmp_path))
+    pl.mark_candidate_birthed(ip, first["candidate_id"], "PROG-0050",
+                              root=str(tmp_path))
+    prog = pl.read_program(ip, root=str(tmp_path))
+    cand = prog["frontmatter"]["items"][0]
+    assert cand["status"] == "birthed"
+    assert cand["born_program_id"] == "PROG-0050"
+
+
+def test_close_and_mark_unknown_candidate_raises(tmp_path):
+    ip = _seed_intake(tmp_path)
+    import pytest
+    with pytest.raises(ValueError):
+        pl.close_candidate(ip, "CAND-9999", reason="x", root=str(tmp_path))
+    with pytest.raises(ValueError):
+        pl.mark_candidate_birthed(ip, "CAND-9999", "PROG-1", root=str(tmp_path))
+
+
+def test_upsert_candidate_empty_title_raises(tmp_path):
+    ip = _seed_intake(tmp_path)
+    import pytest
+    with pytest.raises(ValueError):
+        pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",
+                            title="", source="s1", claim="c1", root=str(tmp_path))
+
+
+def test_upsert_candidate_no_anchor_no_link_opens_when_no_title_match(tmp_path):
+    # Missing both anchor AND link_to, and no title-key match -> a fresh candidate.
+    ip = _seed_intake(tmp_path)
+    a = pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",
+                            title="Alpha", source="s1", claim="c1", root=str(tmp_path))
+    b = pl.upsert_candidate(ip, candidate_key="k2", program_type="roadmap-initiative",
+                            title="Beta", source="s2", claim="c2", root=str(tmp_path))
+    assert a["action"] == "opened" and b["action"] == "opened"
+    assert a["candidate_id"] != b["candidate_id"]
+
+
+# ─── birth_program (Task 4, the birth path: pure file-creation) ───────────────
+
+def test_birth_program_pipeline_creates_active_at_first_phase(tmp_path):
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {
+            "program_type": "roadmap-initiative",
+            "title": "Smart reconciliation",
+            "checkpoints": [
+                {"id": "discovery-exit", "label": "Discovery exit", "due": "2026-07-01"},
+            ],
+            "citations": ["meeting-A", "meeting-B"],
+        },
+        root=root,
+    )
+    prog = pl.read_program(new_id, root=root)
+    fm = prog["frontmatter"]
+    assert fm["program_id"] == new_id
+    assert fm["status"] == "active"
+    assert fm["type"] == "roadmap-initiative"
+    assert fm["title"] == "Smart reconciliation"
+    # First phase of roadmap-initiative is `discovery`.
+    assert fm["phase"] == "discovery"
+    # The newborn's first phase is stamped with an entry date so it can be aged.
+    assert fm.get("phase_entered")
+    # owner_role defaults to a role token (never a name).
+    assert fm["owner_role"] == "product"
+    # Carried checkpoint, forced to status pending.
+    assert len(fm["checkpoints"]) == 1
+    cp = fm["checkpoints"][0]
+    assert cp["id"] == "discovery-exit"
+    assert cp["status"] == "pending"
+    # Exactly one origin observation, stamped by the intake sentinel.
+    obs = list(pl.iter_observations(prog["body"]))
+    assert len(obs) == 1
+    date, kind, sentinel, source, claim = obs[0]
+    assert kind == "status-signal"
+    assert sentinel == "program-intake"
+    assert source == "meeting-A"  # first citation
+    assert claim  # non-empty
+    # Intent is non-empty and carries the citations.
+    intent = pl._parse_intent(prog["body"])
+    assert intent
+    assert "meeting-A" in intent and "meeting-B" in intent
+
+
+def test_birth_program_unknown_type_raises(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        pl.birth_program(
+            {"program_type": "not-a-real-type", "title": "Nope"},
+            root=str(tmp_path),
+        )
+
+
+def test_birth_program_blank_title_raises_birth_specific(tmp_path):
+    # A missing/blank title fails with the birth-specific message rather than
+    # surfacing from deep inside create_program.
+    import pytest
+    with pytest.raises(ValueError, match="birth spec requires a title"):
+        pl.birth_program(
+            {"program_type": "roadmap-initiative", "title": "   "},
+            root=str(tmp_path),
+        )
+    with pytest.raises(ValueError, match="birth spec requires a title"):
+        pl.birth_program(
+            {"program_type": "roadmap-initiative"},
+            root=str(tmp_path),
+        )
+
+
+def test_birth_program_returns_freshly_minted_id(tmp_path):
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {"program_type": "roadmap-initiative", "title": "Fresh one"},
+        root=root,
+    )
+    # The returned id round-trips through read_program.
+    prog = pl.read_program(new_id, root=root)
+    assert prog["frontmatter"]["program_id"] == new_id
+    # A second birth mints a distinct id.
+    second = pl.birth_program(
+        {"program_type": "roadmap-initiative", "title": "Second one"},
+        root=root,
+    )
+    assert second != new_id
+
+
+def test_birth_program_citations_land_in_intent(tmp_path):
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {
+            "program_type": "roadmap-initiative",
+            "title": "Cited birth",
+            "citations": ["GONG-123", "ZD-456"],
+        },
+        root=root,
+    )
+    intent = pl._parse_intent(pl.read_program(new_id, root=root)["body"])
+    assert "GONG-123" in intent
+    assert "ZD-456" in intent
+
+
+def test_birth_program_register_type_does_not_crash_on_phase(tmp_path):
+    # A non-pipeline (register / cycle) type has no phases; birth must not
+    # try to infer a phase or crash.
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {"program_type": "program-intake", "title": "Nursery 2"},
+        root=root,
+    )
+    fm = pl.read_program(new_id, root=root)["frontmatter"]
+    assert fm["status"] == "active"
+    assert fm["type"] == "program-intake"
+    # No phase inferred for a register-model type.
+    assert fm.get("phase") is None
+    assert fm["checkpoints"] == []
+
+
+def test_birth_program_owner_role_from_spec(tmp_path):
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {
+            "program_type": "roadmap-initiative",
+            "title": "Owned",
+            "owner_role": "engineering",
+        },
+        root=root,
+    )
+    assert pl.read_program(new_id, root=root)["frontmatter"]["owner_role"] == "engineering"
+
+
+def test_birth_program_empty_citations_still_births(tmp_path):
+    # No citations at all -> Intent + observation still land (source falls back).
+    root = str(tmp_path)
+    new_id = pl.birth_program(
+        {"program_type": "roadmap-initiative", "title": "Uncited"},
+        root=root,
+    )
+    prog = pl.read_program(new_id, root=root)
+    obs = list(pl.iter_observations(prog["body"]))
+    assert len(obs) == 1
+    assert obs[0][3] == "intake"  # source falls back to "intake"
+
+
+def test_render_view_projects_intake_candidates_with_extra_fields(tmp_path):
+    # Task 8: render_view on a program-intake program surfaces its candidates
+    # with the mapped fields: name <- title, owner <- program_type,
+    # age <- source_count, and status + possible_duplicate_of.
+    root = str(tmp_path)
+    reg = pl.load_registry()
+    ip = _seed_intake(tmp_path)
+
+    # Upsert a candidate: two sources.
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-A", claim="Mentioned.",
+        root=root)
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Smart reconciliation", source="meeting-B", claim="Raised again.",
+        root=root)
+
+    # Upsert a flagged candidate (possible duplicate).
+    pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="eos-rock",
+        title="Revenue sync", source="meeting-C", claim="Epic ROCK idea.",
+        link_to="CAND-0001", confidence=0.5, root=root)
+
+    prog = pl.read_program(ip, root=root)
+    vm = pl.render_view(prog, reg)
+
+    assert vm["model"] == "register"
+    assert len(vm["items"]) == 2
+
+    # First candidate: 2 sources, no duplicate marker.
+    item0 = vm["items"][0]
+    assert item0["name"] == "Smart reconciliation"
+    assert item0["owner"] == "roadmap-initiative"
+    assert item0["age"] == 2
+    assert item0["status"] == "open"
+    assert item0.get("possible_duplicate_of") is None
+
+    # Second candidate: 1 source, marked as possible duplicate.
+    item1 = vm["items"][1]
+    assert item1["name"] == "Revenue sync"
+    assert item1["owner"] == "eos-rock"
+    assert item1["age"] == 1
+    assert item1["status"] == "open"
+    assert item1["possible_duplicate_of"] == "CAND-0001"

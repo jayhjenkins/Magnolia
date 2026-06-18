@@ -4,7 +4,8 @@ description: Jira issue drafting — Features, Units, Bugs, Regression Defects, 
 priority: 15
 tier: standard
 match:
-  task_type: []
+  task_type:
+    - "ticket-creator"
   domains: []
   title_patterns:
     - "(?i)\\bjira\\b"
