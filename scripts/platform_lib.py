@@ -201,3 +201,14 @@ def unlock(fd):
             fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
     except OSError:
         pass
+
+
+def move_file(src, dst):
+    """The single cross-platform file-move seam. Mirrors lock/resolve_tool.
+
+    Creates parent directory if needed, then moves src to dst using
+    shutil.move. Both paths should be absolute or relative to cwd. A raw
+    shell `mv`/`move` is a portability bug; route all file moves through here.
+    """
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.move(src, dst)

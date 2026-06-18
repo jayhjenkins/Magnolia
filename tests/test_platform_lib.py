@@ -160,3 +160,30 @@ def test_open_file_cmd_windows(monkeypatch):
 def test_open_file_cmd_linux(monkeypatch):
     monkeypatch.setattr(platform_lib, "os_kind", lambda: "linux")
     assert platform_lib.open_file_cmd("/x/y.docx") == ["xdg-open", "/x/y.docx"]
+
+
+# ─── file-move seam (cross-platform replacement for shutil.move) ──────────────
+
+def test_move_file_renames_within_tree(tmp_path):
+    src = tmp_path / "source.txt"
+    dst = tmp_path / "destination.txt"
+    src.write_text("content here")
+
+    platform_lib.move_file(str(src), str(dst))
+
+    assert not src.exists()
+    assert dst.exists()
+    assert dst.read_text() == "content here"
+
+
+def test_move_file_creates_parent_dir(tmp_path):
+    src = tmp_path / "src.txt"
+    dst = tmp_path / "subdir1" / "subdir2" / "dst.txt"
+    src.write_text("nested content")
+
+    platform_lib.move_file(str(src), str(dst))
+
+    assert not src.exists()
+    assert dst.exists()
+    assert dst.read_text() == "nested content"
+    assert dst.parent.exists()
