@@ -42,6 +42,14 @@ user later opens interactive Claude in the folder — not a hard requirement for
 to run. Seed it anyway; it's trivial. (Note: qmd enablement does NOT travel with a clone —
 `settings.local.json` is gitignored — so the installer must seed it regardless.)
 
+**Spike finding (2026-06-18): CONFIRMED.** A `claude -p "Reply with exactly: OK"
+--max-turns 1` run in a fresh temp dir that is NOT in `~/.claude.json` `projects`
+completed successfully (`is_error: false`, `result: "OK"`, zero `permission_denials`) with
+no trust prompt. Headless `-p` does NOT require folder trust. Consequence: the onboarding
+agent will run regardless of trust state, so Layer-2 seeding is **insurance for later
+interactive Claude use**, not a blocker — but qmd enablement is still seeded (gitignored
+`settings.local.json` means a fresh clone lacks it).
+
 ## Architecture — six surfaces (mostly assembly of existing parts)
 
 | # | Surface | New/extend | Role |
