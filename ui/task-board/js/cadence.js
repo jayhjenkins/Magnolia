@@ -329,8 +329,23 @@ function cadenceItems(p) {
     const age = it.age;
     const hasAge = age != null;
     const hasStatus = it.status != null && it.status !== '';
+    // A program-intake CANDIDATE carries BOTH a source count (in `age`) AND a
+    // `status` (open/closed-with-reason/birthed) — unlike a plain register item
+    // (age only) or a cycle item (status only). When both are present, render
+    // the source count as "N src" (NOT "Nd days") plus the status word, so a
+    // candidate row reads "<type> · N src · <status>". A missing field never
+    // blanks the row (mirrors the inc3b cycle/register tolerance).
+    const isCandidate = hasAge && hasStatus;
     let trailing;
-    if (hasAge) {
+    if (isCandidate) {
+      // Source count is a tally, not an age, so no policy/age color comparison.
+      const n = String(age);
+      const st = String(it.status);
+      const stColor = (st === 'birthed') ? 'var(--success)'
+        : (st === 'closed-with-reason') ? 'var(--text-dim)' : 'var(--text)';
+      trailing = `<span class="cadence-item-srccount" style="color:var(--text-dim);">${escapeHtml(n)} src</span>`
+        + ` · <span class="cadence-item-status" style="color:${stColor};">${escapeHtml(st)}</span>`;
+    } else if (hasAge) {
       // Missing age → neutral --text-dim and a bare '-' (no trailing 'd');
       // a present age (incl. 0) keeps its color comparison and 'Nd' label.
       let ageColor = 'var(--text-dim)';
@@ -347,8 +362,9 @@ function cadenceItems(p) {
       trailing = `<span class="cadence-item-age" style="color:var(--text-dim);">-</span>`;
     }
     // Optional possible_duplicate_of marker (program-intake candidates only).
+    // ASCII-safe label, tokenized warning color.
     const dupMarker = it.possible_duplicate_of
-      ? ` <span class="cadence-item-dup-marker" style="color:var(--warning);">⇄ ${escapeHtml(it.possible_duplicate_of)}</span>`
+      ? ` <span class="cadence-item-dup-marker" style="color:var(--warning);">possible duplicate of ${escapeHtml(it.possible_duplicate_of)}</span>`
       : '';
     rows += `<div class="cadence-item">
       <span class="cadence-item-name">${escapeHtml(it.name || '')}</span>
