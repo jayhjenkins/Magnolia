@@ -1293,3 +1293,111 @@ def test_produce_artifact_deduped_within_period(tmp_path, monkeypatch):
 
     cards = task_lib.list_tasks(queue="agent", status="open")
     assert len(cards) == 1  # still just the one
+
+
+# ─── draft-message emitter (Task 4, the rate-capped nudge door) ──────────────
+#
+# On a FRESH cycle, a `draft-message` emitter creates a send-message COLLAB card
+# from a template, ENFORCING max_nudges_per_person_per_week per recipient and
+# recording a per-period response-rate counter on the program frontmatter. The
+# recipient is resolved profile-driven (degrades to a role-based target from the
+# program's owner_role) -- never a person/company literal. Tier-1: a local
+# collab card only; the actual send is the existing Tier-2 path. The registry
+# emitter wiring is a later task; these tests build a minimal cycle-type
+# registry inline so the branch is exercised alone.
+
+
+def _nudge_registry(cap=1):
+    """A minimal cycle-type registry whose only emitter is a draft-message nudge.
+
+    Carries ONLY the draft-message emitter so escalate/produce-artifact never
+    co-fire. `cap` sets max_nudges_per_person_per_week (None -> unlimited)."""
+    emitter = {"on": "cycle-fresh", "action": "draft-message", "template": "nudge"}
+    if cap is not None:
+        emitter["max_nudges_per_person_per_week"] = cap
+    return {
+        "types": [
+            {
+                "id": "weekly-priorities",
+                "label": "Weekly priorities",
+                "state_model": "cycle",
+                "cadence": "weekly",
+                "emitters": [emitter],
+            }
+        ]
+    }
+
+
+def test_draft_message_creates_send_message_collab_card(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _nudge_registry(cap=1), now=NOW, force=True
+    )
+
+    assert len(result["emitted"]) == 1
+    task_id = result["emitted"][0]
+
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["id"] == task_id
+    assert card["task_type"] == "send-message"
+    assert program_id in card["tags"]
+    assert "cadence" in card["tags"]
+
+    # The recipient is a role-based target (no literal); the body re-reads it.
+    fm_card = task_lib.read_task(task_id)["frontmatter"]
+    assert fm_card.get("message_to")  # a recipient string is set
+    # owner_role was "product" -> the role-based target references it.
+    assert "product" in fm_card["message_to"]
+
+
+def test_draft_message_respects_nudge_cap_and_suppresses(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    # First fresh cycle: one send-message collab card created for the recipient.
+    program = pl.read_program(program_id, root=root)
+    first = reconcile.reconcile_program(
+        program, _nudge_registry(cap=1), now=NOW, force=True
+    )
+    assert len(first["emitted"]) == 1
+
+    # A second forced run in the SAME period: the recipient is already at the
+    # cap (1/wk) -> SUPPRESSED. No new card; the suppression is recorded.
+    program = pl.read_program(program_id, root=root)
+    second = reconcile.reconcile_program(
+        program, _nudge_registry(cap=1), now=NOW, force=True
+    )
+
+    # No real card id was created on the second run.
+    real_ids = [e for e in second["emitted"] if e and e.startswith("TASK-")]
+    assert real_ids == []
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 1  # still just the one from the first cycle
+
+    # The suppression is visible in the cycle log (the emitted: clause).
+    body = pl.read_program(program_id, root=root)["body"]
+    cycles_section = body.split("## Cycles", 1)[1]
+    assert "nudge suppressed (cap 1/wk)" in cycles_section
+
+
+def test_draft_message_records_nudge_counter(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    program = pl.read_program(program_id, root=root)
+    reconcile.reconcile_program(program, _nudge_registry(cap=1), now=NOW, force=True)
+
+    fm = pl.read_program(program_id, root=root)["frontmatter"]
+    counts = fm.get("nudge_counts") or {}
+    period_counts = counts.get(PERIOD) or {}
+    # Exactly one recipient counted, with a count of 1 this period.
+    assert period_counts
+    assert sum(period_counts.values()) == 1
+    assert all(v == 1 for v in period_counts.values())
+    # A response_rate stub is present for the UI to read.
+    assert "response_rate" in fm

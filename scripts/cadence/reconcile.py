@@ -452,6 +452,87 @@ def _open_propose_update_ops(task_lib, program_id):
     return ops
 
 
+def _resolve_nudge_target(fm, root=None):
+    """Resolve a (channel, recipient) nudge target -- profile-driven, NO literal.
+
+    The recipient must never be a person/company literal (invariant #1,
+    test_engine_no_jay). We resolve the messaging CHANNEL from the profile's
+    messaging integration (e.g. `m365`), degrading to `none` when unset, and the
+    RECIPIENT to a generic ROLE-BASED target built from the program's
+    `owner_role` (e.g. `product team`). owner_role is itself a role token, not an
+    identity, so the resulting string carries no name. When a program declares no
+    owner_role we fall back to a generic `program owner` target. ASCII-safe.
+    """
+    import profile_lib
+    try:
+        channel = profile_lib.provider("messaging", root=root)
+    except Exception:
+        channel = "none"
+    role = (fm.get("owner_role") or "").strip()
+    recipient = f"{role} team" if role else "program owner"
+    return channel, recipient
+
+
+def _count_period_nudges(task_lib, program_id, recipient):
+    """Count send-message cards already created THIS period for `recipient`.
+
+    Scans OPEN tasks tagged with this program_id whose task_type is
+    `send-message`, re-reading each card's frontmatter for `message_to` (which
+    list_tasks does not project -- mirrors _open_propose_update_ops's re-read).
+    Returns how many of them target `recipient`. The per-period scope is provided
+    by the caller: reconcile_program runs at most once per cadence period (the
+    fresh-cycle guard), so cards still open this period are this period's nudges.
+    Never raises -- an unreadable card is simply skipped.
+    """
+    count = 0
+    for t in task_lib.list_tasks(status="open"):
+        if t.get("task_type") != "send-message":
+            continue
+        if program_id not in (t.get("tags") or []):
+            continue
+        try:
+            fm = task_lib.read_task(t["id"])["frontmatter"]
+        except Exception:
+            continue
+        if (fm.get("message_to") or "") == recipient:
+            count += 1
+    return count
+
+
+def _build_nudge_description(facts, program_id, recipient):
+    """Build a <=2-sentence ASCII nudge body (invariant #8).
+
+    A polite, role-addressed nudge that cites the program backlink and the worst
+    signal so the recipient knows why they are being pinged. ASCII, no em-dash.
+    """
+    reason = (facts or {}).get("reason", "needs a look")
+    nxt = (facts or {}).get("next", "review")
+    return (
+        f"Nudge for {recipient}: {program_id} {reason}. Next: {nxt}. "
+        f"Reply or update the program to clear this."
+    )
+
+
+def _record_nudge_count(fm, period, recipient):
+    """Bump the per-period nudge counter on `fm` in place (append-only per period).
+
+    fm["nudge_counts"][period][recipient] += 1, plus a `response_rate` stub the UI
+    reads (acked/sent; acked starts at 0 -- a later task wires acknowledgement).
+    Mutating the passed fm is deliberate: reconcile_program persists this same fm
+    dict in its single _write_program_file, so the counter rides that one write
+    (no second file write). Idempotent within a period only insofar as each fired
+    nudge increments once -- a suppressed nudge never reaches here.
+    """
+    counts = fm.setdefault("nudge_counts", {})
+    period_counts = counts.setdefault(period, {})
+    period_counts[recipient] = period_counts.get(recipient, 0) + 1
+    sent = sum(v for pc in counts.values() for v in pc.values())
+    rr = fm.setdefault("response_rate", {})
+    if isinstance(rr, dict):
+        rr["sent"] = sent
+        rr.setdefault("acked", 0)
+
+
 def _open_agent_task_types(task_lib, program_id):
     """Return the set of task_types carried by OPEN agent-queue tasks tagged with
     `program_id` (the produce-artifact dedupe fence).
@@ -723,6 +804,43 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             # in the same evaluation cannot double-fire for this worker.
             open_agent_types.add(worker)
             _dispatch_agent_task(task_id)
+
+        elif action == "draft-message":
+            # The rate-capped nudge primitive. Fresh-cycle scoped like
+            # produce-artifact (this function only runs on a fresh cycle). Resolve
+            # the recipient profile-driven (role-based, never a literal), enforce
+            # max_nudges_per_person_per_week per recipient, and record a per-period
+            # response-rate counter on the in-memory fm (reconcile_program persists
+            # it in its single write). A capped recipient is SUPPRESSED: no card,
+            # and a suppression marker rides the cycle log's `emitted:` clause.
+            if on and on != "cycle-fresh":
+                continue
+            import task_lib
+            channel, recipient = _resolve_nudge_target(fm, root=root)
+            cap = em.get("max_nudges_per_person_per_week")
+            if cap is not None:
+                try:
+                    cap = int(cap)
+                except (TypeError, ValueError):
+                    cap = None
+            if cap is not None:
+                already = _count_period_nudges(task_lib, program_id, recipient)
+                if already >= cap:
+                    # Suppress: surface it in the cycle log (no card created).
+                    emitted.append(f"nudge suppressed (cap {cap}/wk)")
+                    continue
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: nudge {recipient}",
+                queue="collab",
+                creator="cadence",
+                task_type="send-message",
+                tags=[program_id, "cadence"],
+                description=_build_nudge_description(facts, program_id, recipient),
+                message_channel=channel,
+                message_to=recipient,
+            )
+            emitted.append(task_id)
+            _record_nudge_count(fm, period, recipient)
 
         elif action:
             sys.stderr.write(
