@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import subprocess
 import sys
 
@@ -76,6 +77,15 @@ def test_seed_trust_skips_when_config_absent(tmp_path):
     res = trust_seed.seed_trust("/repo/Magnolia", path=str(missing))
     assert res["status"] == "skipped"
     assert not missing.exists()
+
+
+def test_seed_trust_preserves_file_mode(tmp_path):
+    cfg = tmp_path / ".claude.json"
+    cfg.write_text(json.dumps({"oauthAccount": {"x": 1}, "projects": {}}))
+    os.chmod(cfg, 0o644)
+    trust_seed.seed_trust("/repo/Magnolia", path=str(cfg))
+    mode = stat.S_IMODE(os.stat(cfg).st_mode)
+    assert mode == 0o644
 
 
 def test_cli_detect_prints_json(tmp_path):

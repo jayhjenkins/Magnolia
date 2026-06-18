@@ -5,6 +5,7 @@ target projects[<abs path>] entry and preserves everything else.
 """
 import json
 import os
+import shutil
 import tempfile
 
 
@@ -34,11 +35,20 @@ def read_state(path=None):
 
 
 def _atomic_write(path, data):
+    """Atomically replace `path` with `data` as indented JSON.
+
+    Preserves the target file's existing permission mode: mkstemp creates the
+    temp at 0600, so without this copy the os.replace would silently downgrade
+    an existing 0644 ~/.claude.json to 0600. A brand-new file (no existing
+    target) keeps the default 0600.
+    """
     d = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
+        if os.path.exists(path):
+            shutil.copymode(path, tmp)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
@@ -49,7 +59,16 @@ def _atomic_write(path, data):
 def seed_trust(project_path, path=None):
     """Seed Layer-2 folder trust for project_path. Mutates ONLY that project
     entry; preserves all other config. If ~/.claude.json is absent (login not
-    done) we skip gracefully rather than fabricate it. Returns a result dict."""
+    done) we skip gracefully rather than fabricate it. Returns a result dict.
+
+    Caveats - ~/.claude.json is owned and co-written by Claude Code itself:
+    - This is a non-locking read-modify-write, so it must run when NO live
+      interactive Claude Code session is writing the file (the installer's
+      window: after `claude login`, before the board's first session). Full
+      locking is intentionally deferred; worst case is a lost concurrent write.
+    - It preserves the file's existing permission mode (see _atomic_write), so
+      the auth material the file carries does not get its mode downgraded.
+    """
     cfg_path = path or claude_config_path()
     data = _load(cfg_path)
     if not isinstance(data, dict):
@@ -70,8 +89,11 @@ def _main(argv=None):
     import argparse
     p = argparse.ArgumentParser(prog="trust_seed")
     sub = p.add_subparsers(dest="cmd", required=True)
-    d = sub.add_parser("detect"); d.add_argument("--path", default=None)
-    s = sub.add_parser("seed"); s.add_argument("project_path"); s.add_argument("--path", default=None)
+    d = sub.add_parser("detect")
+    d.add_argument("--path", default=None)
+    s = sub.add_parser("seed")
+    s.add_argument("project_path")
+    s.add_argument("--path", default=None)
     args = p.parse_args(argv)
     if args.cmd == "detect":
         print(json.dumps(read_state(path=args.path)))
