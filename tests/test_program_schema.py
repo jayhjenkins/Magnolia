@@ -160,6 +160,67 @@ def test_rejects_emitter_not_a_dict():
     assert any("emitter" in e for e in errs)
 
 
+# ─── nudge cap + type-level default items (Task 2) ───────────────────────────
+
+
+def test_rejects_non_int_nudge_cap():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "max_nudges_per_person_per_week": "lots"}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("max_nudges_per_person_per_week" in e for e in errs)
+
+
+def test_accepts_int_nudge_cap():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "max_nudges_per_person_per_week": 1}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_rejects_negative_nudge_cap():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "max_nudges_per_person_per_week": -1}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("max_nudges_per_person_per_week" in e for e in errs)
+
+
+def test_rejects_bool_nudge_cap():
+    # bool is an int subclass in Python; it must be rejected explicitly.
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "max_nudges_per_person_per_week": True}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("max_nudges_per_person_per_week" in e for e in errs)
+
+
+def _type_with_items(items):
+    return {"families": [{"id": "x", "label": "X", "order": 1}],
+            "types": [{"id": "t", "label": "T", "family": "x", "state_model": "cycle",
+                       "sources": [], "presentation": {"chip_tokens": {}},
+                       "items": items}]}
+
+
+def test_rejects_non_list_default_items():
+    reg = _type_with_items("nope")
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("items" in e for e in errs)
+
+
+def test_rejects_non_dict_default_item():
+    reg = _type_with_items([{"ok": True}, "bad"])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("items" in e for e in errs)
+
+
+def test_accepts_list_of_dict_default_items():
+    reg = _type_with_items([{"id": "a"}, {"id": "b"}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
 # ─── exit_checkpoint on pipeline phases (Task 5) ─────────────────────────────
 
 

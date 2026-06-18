@@ -119,6 +119,31 @@ def validate_doc(reg, tokens):
                         errors.append(
                             f"type '{tid}': emitter action '{action}' not in "
                             f"closed set {sorted(CLOSED_ACTIONS)}")
+                    if "max_nudges_per_person_per_week" in em:
+                        v = em["max_nudges_per_person_per_week"]
+                        # bool is an int subclass; reject it explicitly so a
+                        # True/False cannot pose as a count.
+                        if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                            errors.append(
+                                f"type '{tid}': emitter "
+                                f"max_nudges_per_person_per_week must be a "
+                                f"non-negative int, got {type(v).__name__}")
+
+        # Type-level default items (used to seed cycle programs). Optional;
+        # when present it must be a list of dicts. Instance items live on
+        # program files and are not gated here.
+        if "items" in t:
+            items = t["items"]
+            if not isinstance(items, list):
+                errors.append(
+                    f"type '{tid}': items must be a list, got "
+                    f"{type(items).__name__}")
+            else:
+                for it in items:
+                    if not isinstance(it, dict):
+                        errors.append(
+                            f"type '{tid}': items entry must be a dict, got "
+                            f"{type(it).__name__}")
 
     return errors
 
