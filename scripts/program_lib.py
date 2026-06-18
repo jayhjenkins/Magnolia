@@ -709,6 +709,246 @@ def iter_recent_artifacts(program_id, n=3, root=None):
     return found[:n]
 
 
+# ─── Candidate nursery (the program-intake register: upsert + close + birth) ──
+#
+# The intake program (type program-intake, state_model register) is a self-hosting
+# nursery: each program-worthy initiative is a register ITEM under `items`,
+# accumulating append-only, source-cited evidence across sentinel scans. The
+# intake sentinel's runner (a later task) returns routing records; for a
+# `candidate` route it calls upsert_candidate, which is the ONE deterministic
+# write path here -- the LLM never writes the file. Append-only (invariant #6):
+# evidence is only ever appended; a declined candidate closes-with-reason and a
+# birthed one is marked birthed -- neither is ever deleted, and neither is ever
+# appended to again (only material new evidence reopens, which is out of scope).
+# ASCII-safe runtime strings (invariant #8); no identity literals (invariant #1).
+
+# Confidence at or above this auto-merges a sentinel-proposed link; below it the
+# incoming evidence opens a NEW candidate carrying possible_duplicate_of instead.
+_CANDIDATE_LINK_CONFIDENCE = 0.8
+
+# Statuses that a candidate can NEVER receive new evidence into. A key/anchor/
+# title that matches only such a candidate is treated as a brand-new candidate.
+_CLOSED_CANDIDATE_STATUSES = frozenset({"closed-with-reason", "birthed"})
+
+# Strip everything that is not a word char or whitespace, for the title key.
+_PUNCT_RE = re.compile(r"[^\w\s]")
+_WS_RE = re.compile(r"\s+")
+
+
+def _norm_title_key(title):
+    """Normalize a title for fuzzy candidate matching.
+
+    Lowercase, strip punctuation, collapse runs of whitespace to one space, and
+    trim. So "Smart Reconciliation!" and "  smart   reconciliation " both yield
+    "smart reconciliation". Empty/whitespace-only -> "" (never raises).
+    """
+    if not title:
+        return ""
+    s = _PUNCT_RE.sub("", str(title)).lower()
+    return _WS_RE.sub(" ", s).strip()
+
+
+def _next_candidate_id(fm):
+    """Mint the next CAND-XXXX id off the intake program's `cand_counter`.
+
+    Deterministic + append-only + collision-safe: the counter only ever
+    increments and is never reused, so a closed/birthed candidate's id is never
+    re-minted (unlike an items-length scheme, which would collide after a close).
+    Seeds the counter at 0 on first use. Mutates `fm` in place (the caller writes
+    the file back under the same write that persists the new item).
+    """
+    n = fm.get("cand_counter")
+    if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+        n = 0
+    fm["cand_counter"] = n + 1
+    return f"CAND-{n + 1:04d}"
+
+
+def _distinct_source_count(evidence):
+    """Count DISTINCT stripped `source` values across a candidate's evidence."""
+    sources = set()
+    for ev in evidence or []:
+        if isinstance(ev, dict):
+            src = (ev.get("source") or "").strip()
+            if src:
+                sources.add(src)
+    return len(sources)
+
+
+def _find_open_candidate(items, *, anchor=None, title=None, candidate_id=None):
+    """Return the first OPEN candidate matching by id, anchor, or title key.
+
+    Closed/birthed candidates are skipped (a match against one is treated as no
+    match, so the caller opens a fresh candidate). Match precedence: explicit
+    candidate_id, then anchor (when given), then normalized-title-key. Tolerant
+    of malformed items (non-dict entries are skipped); never raises.
+    """
+    title_key = _norm_title_key(title) if title else None
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        if it.get("status") in _CLOSED_CANDIDATE_STATUSES:
+            continue
+        if candidate_id and it.get("id") == candidate_id:
+            return it
+        if anchor and it.get("anchor") and it.get("anchor") == anchor:
+            return it
+        if title_key and _norm_title_key(it.get("title")) == title_key:
+            return it
+    return None
+
+
+def _get_candidate(items, candidate_id):
+    """Return the candidate item with `candidate_id`, or None."""
+    for it in items or []:
+        if isinstance(it, dict) and it.get("id") == candidate_id:
+            return it
+    return None
+
+
+def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
+                     source, claim, anchor=None, link_to=None, confidence=None,
+                     sentinel="program-intake", root=None):
+    """Add or merge source-cited candidate evidence in the intake nursery.
+
+    Reads the intake program (a program-intake register), finds or creates a
+    candidate register item under `items`, appends ONE evidence entry, recomputes
+    the distinct-source count, writes the file back, and returns
+    {candidate_id, action, source_count} where action is one of:
+      - "opened"  -- a brand-new candidate was created;
+      - "merged"  -- evidence was appended to an existing OPEN candidate;
+      - "flagged" -- a new candidate was created carrying possible_duplicate_of
+                     (a sentinel-proposed link that was not confident enough).
+
+    Merge logic (the approved middle option):
+      1. `anchor` matches an OPEN candidate's anchor, OR _norm_title_key(title)
+         matches an OPEN candidate's normalized title -> merge.
+      2. else `link_to` resolves to an OPEN candidate AND confidence >= 0.8 -> merge.
+      3. else `link_to` resolves to an OPEN candidate but confidence < 0.8 (or
+         None) -> new candidate carrying possible_duplicate_of = link_to (flagged).
+      4. else -> a new candidate (opened).
+    A key/anchor/title that matches only a closed-with-reason or birthed candidate
+    is treated as a brand-new candidate (those never take new evidence).
+
+    `candidate_key` is the sentinel's stable identity hint; it is stored on the
+    candidate for traceability but the merge decision rides anchor/title/link_to
+    (the design's approved dimensions). Append-only (invariant #6): a candidate's
+    evidence list is only ever appended to; source_count is the count of DISTINCT
+    sources (the birth-threshold input later). ASCII-safe; role/owner tokens only.
+    """
+    if not title or not str(title).strip():
+        raise ValueError("title must be non-empty")
+    if not source or not str(source).strip():
+        raise ValueError("source must be non-empty")
+    if not claim or not str(claim).strip():
+        raise ValueError("claim must be non-empty")
+    if not program_type:
+        raise ValueError("program_type must be non-empty")
+
+    prog = read_program(intake_program_id, root=root)
+    fm = prog["frontmatter"]
+    items = fm.get("items")
+    if not isinstance(items, list):
+        items = []
+        fm["items"] = items
+
+    # Resolve the merge target (an OPEN candidate) and the resulting action.
+    target = _find_open_candidate(items, anchor=anchor, title=title)
+    action = "merged" if target is not None else None
+    possible_duplicate_of = None
+
+    if target is None and link_to:
+        linked = _find_open_candidate(items, candidate_id=link_to)
+        if linked is not None:
+            if confidence is not None and float(confidence) >= _CANDIDATE_LINK_CONFIDENCE:
+                target = linked
+                action = "merged"
+            else:
+                # Resolved but not confident enough -> a new, flagged candidate.
+                possible_duplicate_of = link_to
+                action = "flagged"
+
+    evidence_entry = {
+        "date": _now_iso()[:10],
+        "source": str(source).strip(),
+        "claim": str(claim).strip(),
+        "sentinel": sentinel,
+    }
+
+    if target is not None:
+        # Merge: append evidence (append-only) and recompute the source count.
+        evidence = target.setdefault("evidence", [])
+        evidence.append(evidence_entry)
+        target["source_count"] = _distinct_source_count(evidence)
+        candidate_id = target["id"]
+    else:
+        # Open a new candidate (action "opened" unless a low-confidence link flagged it).
+        if action is None:
+            action = "opened"
+        candidate_id = _next_candidate_id(fm)
+        new_cand = {
+            "id": candidate_id,
+            "candidate_key": candidate_key,
+            "program_type": program_type,
+            "title": str(title).strip(),
+            "anchor": anchor,
+            "status": "open",
+            "evidence": [evidence_entry],
+            "source_count": _distinct_source_count([evidence_entry]),
+        }
+        if possible_duplicate_of:
+            new_cand["possible_duplicate_of"] = possible_duplicate_of
+        items.append(new_cand)
+
+    _write_program_file(prog["filepath"], fm, prog["body"])
+
+    final = _get_candidate(items, candidate_id)
+    return {
+        "candidate_id": candidate_id,
+        "action": action,
+        "source_count": final.get("source_count", 0) if final else 0,
+    }
+
+
+def close_candidate(intake_program_id, candidate_id, *, reason, root=None):
+    """Close a candidate with a reason (the append-only "declined" memory).
+
+    Sets the candidate's status to "closed-with-reason" and records `reason`.
+    Idempotent: closing an already-closed candidate is a no-op success that
+    preserves the original reason (a retried close must not overwrite it).
+    Raises ValueError for an unknown candidate id. Returns the candidate dict.
+    """
+    prog = read_program(intake_program_id, root=root)
+    fm = prog["frontmatter"]
+    cand = _get_candidate(fm.get("items") or [], candidate_id)
+    if cand is None:
+        raise ValueError(f"no candidate {candidate_id!r} in {intake_program_id}")
+    if cand.get("status") == "closed-with-reason":
+        return cand  # idempotent: keep the original reason, no rewrite
+    cand["status"] = "closed-with-reason"
+    cand["reason"] = reason
+    _write_program_file(prog["filepath"], fm, prog["body"])
+    return cand
+
+
+def mark_candidate_birthed(intake_program_id, candidate_id, born_program_id, root=None):
+    """Mark a candidate birthed, linked to the program it became.
+
+    Sets status to "birthed" and records `born_program_id`. Raises ValueError for
+    an unknown candidate id. Append-only: a birthed candidate never takes new
+    evidence (see _CLOSED_CANDIDATE_STATUSES). Returns the candidate dict.
+    """
+    prog = read_program(intake_program_id, root=root)
+    fm = prog["frontmatter"]
+    cand = _get_candidate(fm.get("items") or [], candidate_id)
+    if cand is None:
+        raise ValueError(f"no candidate {candidate_id!r} in {intake_program_id}")
+    cand["status"] = "birthed"
+    cand["born_program_id"] = born_program_id
+    _write_program_file(prog["filepath"], fm, prog["body"])
+    return cand
+
+
 # ─── Phase advancement core (shared by the fact door + the proposal applier) ──
 #
 # _next_phase_id + _advance_phase_fm are the ONE place the engine advances a
