@@ -768,6 +768,22 @@ def test_upsert_candidate_opens_new(tmp_path):
     assert ev["date"]  # defaulted to today
 
 
+def test_upsert_candidate_stamps_opened(tmp_path):
+    # A newly opened candidate carries an `opened` ISO date -- the basis for
+    # nursery aging (4a M-3). Format is YYYY-MM-DD.
+    ip = _seed_intake(tmp_path)
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="roadmap-initiative",
+        title="Aging-aware candidate", source="meeting-A",
+        claim="Mentioned in planning.", root=str(tmp_path))
+    cand = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"][0]
+    assert "opened" in cand
+    assert len(cand["opened"]) == len("2026-06-18")
+    # parseable as a date
+    from datetime import date
+    date.fromisoformat(cand["opened"])
+
+
 def test_upsert_candidate_default_declared_is_false(tmp_path):
     ip = _seed_intake(tmp_path)
     pl.upsert_candidate(

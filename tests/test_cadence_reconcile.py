@@ -1530,6 +1530,24 @@ def _birth_cards():
     return out
 
 
+def test_intake_reconcile_ages_open_candidates(tmp_path):
+    # 4a M-3: an open candidate carries `opened`, not `age`. Reconcile must derive
+    # `age` from `opened` so the register verdict can drift on a stale nursery.
+    root = str(tmp_path / "data")
+    # opened 35 days before NOW (2026-06-16) -> 2026-05-12; policy 30 -> broken.
+    stale = _candidate("CAND-0001", "roadmap-initiative", "Stale candidate",
+                       ["meeting-a.md"], status="open")  # 1 source -> no birth
+    stale["opened"] = "2026-05-12"
+    pid = _seed_intake_program(root, [stale])
+
+    res = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    item = pl.read_program(pid, root=root)["frontmatter"]["items"][0]
+    assert item["age"] == 35  # derived from opened
+    assert res["verdict"] == "broken"  # age 35 > policy 30
+
+
 def test_birth_proposed_for_ripe_candidate_only(tmp_path):
     root = str(tmp_path / "data")
     # roadmap-initiative birth_threshold: min_independent_sources 2.
