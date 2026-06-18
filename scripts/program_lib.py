@@ -202,8 +202,30 @@ def create_program(type, title, owner_role, intent="",
 
 
 def read_program(program_id, root=None):
-    """Read and parse a program file. Returns dict with frontmatter + body."""
+    """Read and parse a program file. Returns dict with frontmatter + body.
+
+    Looks first in datasets/programs/, then in datasets/programs/archive/ if not
+    found. For archived files with version suffixes (e.g., PROG-0001-v2.md), picks
+    the highest version number.
+    """
     filepath = os.path.join(_program_dir(root), f"{program_id}.md")
+    if not os.path.isfile(filepath):
+        # Look in archive directory
+        archive_dir = os.path.join(_program_dir(root), "archive")
+        if os.path.isdir(archive_dir):
+            # Find <pid>.md or <pid>-v*.md, pick highest version
+            candidates = []
+            for fn in os.listdir(archive_dir):
+                if fn == f"{program_id}.md":
+                    candidates.append((0, os.path.join(archive_dir, fn)))
+                elif fn.startswith(f"{program_id}-v") and fn.endswith(".md"):
+                    version = _extract_version_suffix(fn)
+                    candidates.append((version, os.path.join(archive_dir, fn)))
+            if candidates:
+                # Sort by version (highest first), then take the path
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                filepath = candidates[0][1]
+
     if not os.path.isfile(filepath):
         raise FileNotFoundError(f"Program {program_id} not found")
 
@@ -1132,6 +1154,20 @@ def _advance_phase_fm(fm, next_phase, today):
         fm["phase_entered"] = today  # scalar form = the current phase's entry date
 
 
+def _extract_version_suffix(filename):
+    """Extract version number from filename like 'PROG-0001-v3.md' or 'PROG-0001.md'.
+
+    Returns the version as an int (0 for no suffix, or the v number).
+    """
+    base = filename.replace(".md", "")
+    if "-v" in base:
+        try:
+            return int(base.split("-v")[-1])
+        except ValueError:
+            return 0
+    return 0
+
+
 # ─── Proposal applier (the closed mutation set behind a human accept) ─────────
 #
 # apply_mutation is the human-side counterpart to the reconciler's fact door:
@@ -1142,7 +1178,62 @@ def _advance_phase_fm(fm, next_phase, today):
 # #6): an advance appends a completion observation and never deletes. ASCII-safe
 # runtime strings (invariant #8).
 
-_MUTATION_OPS = frozenset({"advance-phase", "adjust-checkpoint"})
+_MUTATION_OPS = frozenset({"advance-phase", "adjust-checkpoint", "archive"})
+
+
+def _apply_archive(program_id, mutation, fm, type_entry, filepath, body, root):
+    """Archive a program: move to archive/, version-suffix on collision.
+
+    Returns a dict with keys: applied, program_id, to (the new path).
+    Or noop status if already archived.
+    """
+    # Check if already archived
+    if fm.get("status") == "archived":
+        return {"applied": None, "status": "noop", "reason": "already archived", "program_id": program_id}
+
+    reason = mutation.get("reason") or "archived"
+    citations = mutation.get("citations") or []
+
+    # Set status to archived in memory
+    fm["status"] = "archived"
+
+    # Write the updated frontmatter
+    _write_program_file(filepath, fm, body)
+
+    # Append a completion observation
+    source = f"meeting:{citations[0]}" if citations else "proposal"
+    append_observation(
+        program_id, kind="completion", sentinel="reconciler", source=source,
+        claim=f"Program archived: {reason}.", root=root)
+
+    # Re-read to get updated body with the observation
+    prog = read_program(program_id, root=root)
+    updated_body = prog["body"]
+
+    # Compute archive target path with version-suffix collision handling
+    archive_dir = os.path.join(_program_dir(root), "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    archive_base = os.path.join(archive_dir, f"{program_id}.md")
+
+    target_path = archive_base
+    if os.path.exists(target_path):
+        # Collision: version-suffix
+        version = 2
+        while os.path.exists(os.path.join(archive_dir, f"{program_id}-v{version}.md")):
+            version += 1
+        target_path = os.path.join(archive_dir, f"{program_id}-v{version}.md")
+
+    # Move file
+    platform_lib.move_file(filepath, target_path)
+
+    # Return relative path from programs dir
+    rel_path = os.path.relpath(target_path, _program_dir(root))
+
+    return {
+        "applied": "archive",
+        "program_id": program_id,
+        "to": rel_path
+    }
 
 
 def apply_mutation(program_id, mutation, root=None):
@@ -1158,6 +1249,9 @@ def apply_mutation(program_id, mutation, root=None):
         Changes that checkpoint's `due` and/or `status`. Setting the CURRENT
         phase's exit_checkpoint to met cascades to advance the phase via the same
         advance path.
+      - {"op": "archive", "reason": <str>?, "citations": [...]?}
+        Moves the program file from datasets/programs/ to datasets/programs/archive/,
+        sets status to "archived", and appends a completion observation.
 
     An out-of-set or missing `op` raises ValueError with NO mutation. An
     adjust-checkpoint naming an unknown checkpoint id is refused (no mutation,
@@ -1166,7 +1260,9 @@ def apply_mutation(program_id, mutation, root=None):
     Returns one of:
       {"applied": "advance-phase", "program_id", "from", "to", "checkpoint"}
       {"applied": "adjust-checkpoint", "program_id", "id", "advanced": {...}|None}
+      {"applied": "archive", "program_id", "to": <path>}
       {"applied": None, "status": "refused", "reason": <ascii>, "program_id"}
+      {"applied": None, "status": "noop", "reason": <ascii>, "program_id"}
     """
     if not isinstance(mutation, dict):
         raise ValueError("mutation must be a dict carrying an 'op'")
@@ -1186,6 +1282,9 @@ def apply_mutation(program_id, mutation, root=None):
     if op == "advance-phase":
         return _apply_advance_phase(program_id, mutation, fm, type_entry,
                                     prog["filepath"], prog["body"], root)
+    if op == "archive":
+        return _apply_archive(program_id, mutation, fm, type_entry,
+                             prog["filepath"], prog["body"], root)
     return _apply_adjust_checkpoint(program_id, mutation, fm, type_entry,
                                     prog["filepath"], prog["body"], root)
 

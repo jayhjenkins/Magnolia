@@ -1343,3 +1343,164 @@ def test_render_view_projects_intake_candidates_with_extra_fields(tmp_path):
     assert item1["age"] == 1
     assert item1["status"] == "open"
     assert item1["possible_duplicate_of"] == "CAND-0001"
+
+
+# ─── archive mutation op (Task 2) ──────────────────────────────────────────────
+
+def test_apply_archive_moves_file_and_sets_status(tmp_path):
+    """Archive moves program to archive/, sets status, and appends observation."""
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="To archive", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+
+    result = pl.apply_mutation(pid, {
+        "op": "archive",
+        "reason": "terminal phase reached",
+        "citations": ["meeting:X"]
+    }, root=root)
+
+    # Check return value
+    assert result["applied"] == "archive"
+    assert result["program_id"] == pid
+    assert "to" in result
+    assert result["to"].startswith(f"archive/{pid}")
+
+    # Check file no longer exists at active path
+    active_path = os.path.join(pl._program_dir(root), f"{pid}.md")
+    assert not os.path.isfile(active_path)
+
+    # Check file exists at archive path
+    archive_path = os.path.join(pl._program_dir(root), result["to"])
+    assert os.path.isfile(archive_path)
+
+    # Check frontmatter has status == "archived"
+    prog = pl.read_program(pid, root=root)
+    assert prog["frontmatter"]["status"] == "archived"
+
+    # Check body has appended completion observation
+    obs_list = list(pl.iter_observations(prog["body"]))
+    assert len(obs_list) > 0
+    # The last observation should be the completion entry
+    last_obs = obs_list[-1]
+    date, kind, sentinel, source, claim = last_obs
+    assert kind == "completion"
+    assert sentinel == "reconciler"
+    assert "archived" in claim.lower()
+
+
+def test_apply_archive_version_suffixes_on_collision(tmp_path):
+    """Archive with collision creates versioned filename."""
+    root = str(tmp_path)
+    archive_dir = os.path.join(pl._program_dir(root), "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+
+    # Pre-create archive/<pid>.md
+    existing_archive = os.path.join(archive_dir, "PROG-0001.md")
+    with open(existing_archive, "w") as f:
+        f.write("---\nstatus: archived\n---\nPre-existing archive\n")
+
+    # Create a fresh active program with same pid (by manually creating it)
+    # Since create_program uses _next_id, we need to seed the counter
+    counter_path = pl._counter_path(root)
+    os.makedirs(pl._program_dir(root), exist_ok=True)
+    with open(counter_path, "w") as f:
+        f.write("1")  # Next id will be PROG-0001
+
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="New one", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+    assert pid == "PROG-0001"
+
+    # Archive it
+    result = pl.apply_mutation(pid, {
+        "op": "archive",
+        "reason": "done",
+        "citations": []
+    }, root=root)
+
+    # Check it lands at -v2
+    assert result["to"] == f"archive/{pid}-v2.md"
+    assert os.path.isfile(os.path.join(archive_dir, f"{pid}-v2.md"))
+
+    # Check original is unchanged
+    with open(existing_archive) as f:
+        content = f.read()
+    assert "Pre-existing archive" in content
+
+
+def test_apply_archive_idempotent_when_already_archived(tmp_path):
+    """Archive twice on same pid is idempotent (no -v2 created)."""
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="To archive twice", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+
+    # Archive once
+    result1 = pl.apply_mutation(pid, {
+        "op": "archive",
+        "reason": "done",
+        "citations": []
+    }, root=root)
+    assert result1["applied"] == "archive"
+
+    # Archive again (should be read from archive)
+    result2 = pl.apply_mutation(pid, {
+        "op": "archive",
+        "reason": "done again",
+        "citations": []
+    }, root=root)
+
+    # Should be noop/success
+    assert result2["applied"] is None
+    assert result2["status"] == "noop"
+
+    # Check no -v2 was created
+    archive_dir = os.path.join(pl._program_dir(root), "archive")
+    files = os.listdir(archive_dir)
+    versioned = [f for f in files if "-v2" in f]
+    assert len(versioned) == 0
+
+    # Check only ONE observation entry (not appended twice)
+    prog = pl.read_program(pid, root=root)
+    obs_list = list(pl.iter_observations(prog["body"]))
+    assert len(obs_list) == 1
+
+
+def test_read_program_resolves_archived_file(tmp_path):
+    """read_program finds archived files and returns them."""
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="To find in archive", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+
+    # Archive it
+    pl.apply_mutation(pid, {
+        "op": "archive",
+        "reason": "done",
+        "citations": []
+    }, root=root)
+
+    # Read it back (should find in archive)
+    prog = pl.read_program(pid, root=root)
+    assert prog["frontmatter"]["status"] == "archived"
+    assert prog["frontmatter"]["title"] == "To find in archive"
+
+
+def test_apply_archive_defaults_reason_when_missing(tmp_path):
+    """Archive without reason defaults to 'archived' (does NOT refuse)."""
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="No reason", owner_role="product",
+        root=root, frontmatter_extra={"phase": "execution", "drift": "holding"})
+
+    # Archive with no reason
+    result = pl.apply_mutation(pid, {
+        "op": "archive"
+        # no reason field
+    }, root=root)
+
+    # Should still archive (reason defaults)
+    assert result["applied"] == "archive"
+    prog = pl.read_program(pid, root=root)
+    assert prog["frontmatter"]["status"] == "archived"
