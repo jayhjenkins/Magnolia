@@ -56,3 +56,29 @@ def doctor():
     """Run capability detection (scripts/doctor.py detect) and return its output."""
     rc, out = _run([sys.executable, os.path.join(PM_OS_DIR, "scripts", "doctor.py"), "detect"])
     return {"status": "ok" if rc == 0 else "failed", "output": out}
+
+
+def _main(argv=None):
+    import argparse
+    p = argparse.ArgumentParser(prog="magnolia",
+                                description="Boot the Magnolia board and open it.")
+    sub = p.add_subparsers(dest="cmd")
+    sub.add_parser("update", help="pull the latest engine (fast-forward only)")
+    sub.add_parser("doctor", help="run capability detection")
+    args = p.parse_args(argv)
+
+    if args.cmd == "update":
+        res = update()
+        print(res["output"].rstrip())
+        return 0 if res["status"] == "ok" else 1
+    if args.cmd == "doctor":
+        res = doctor()
+        print(res["output"].rstrip())
+        return 0 if res["status"] == "ok" else 1
+    res = launch()
+    print(f"Magnolia is live at {res['url']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

@@ -72,3 +72,29 @@ def test_doctor_runs_detection(monkeypatch):
     assert seen["cmd"][1].endswith("doctor.py")
     assert seen["cmd"][2] == "detect"
     assert res["status"] == "ok"
+
+
+def test_main_no_subcommand_launches(monkeypatch):
+    hit = {}
+    monkeypatch.setattr(magnolia, "launch", lambda **k: (hit.__setitem__("launch", True), {"url": "x", "started": True})[1])
+    assert magnolia._main([]) == 0
+    assert hit.get("launch") is True
+
+
+def test_main_update_routes_to_update(monkeypatch):
+    hit = {}
+    monkeypatch.setattr(magnolia, "update", lambda: (hit.__setitem__("update", True), {"status": "ok", "output": ""})[1])
+    assert magnolia._main(["update"]) == 0
+    assert hit.get("update") is True
+
+
+def test_main_doctor_routes_to_doctor(monkeypatch):
+    hit = {}
+    monkeypatch.setattr(magnolia, "doctor", lambda: (hit.__setitem__("doctor", True), {"status": "ok", "output": ""})[1])
+    assert magnolia._main(["doctor"]) == 0
+    assert hit.get("doctor") is True
+
+
+def test_main_update_failure_returns_nonzero(monkeypatch):
+    monkeypatch.setattr(magnolia, "update", lambda: {"status": "failed", "output": "boom"})
+    assert magnolia._main(["update"]) == 1
