@@ -349,6 +349,62 @@ def test_intake_candidate_route_upserts_into_nursery(tmp_path, monkeypatch):
     assert cand["status"] == "open"
 
 
+def test_intake_candidate_declared_flows_to_nursery(tmp_path, monkeypatch):
+    intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
+    records = [
+        {"route": "candidate", "program_type": "roadmap-initiative",
+         "title": "Q3 platform rock", "declared": True,
+         "source": "datasets/meetings/c.md (#Discussion)",
+         "claim": "Leadership declared this as a Q3 rock."},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary["appended"] == 1
+    items = program_lib.read_program(intake_id, root=str(tmp_path))["frontmatter"]["items"]
+    assert items[0]["declared"] is True
+
+
+def test_intake_candidate_without_declared_is_false(tmp_path, monkeypatch):
+    intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
+    records = [
+        {"route": "candidate", "program_type": "roadmap-initiative",
+         "title": "Some initiative",
+         "source": "datasets/meetings/c.md (#Discussion)",
+         "claim": "Mentioned in passing."},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary["appended"] == 1
+    items = program_lib.read_program(intake_id, root=str(tmp_path))["frontmatter"]["items"]
+    assert items[0].get("declared", False) is False
+
+
+def test_intake_candidate_non_bool_declared_does_not_raise(tmp_path, monkeypatch):
+    intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
+    records = [
+        {"route": "candidate", "program_type": "roadmap-initiative",
+         "title": "Some initiative", "declared": "yes",
+         "source": "datasets/meetings/c.md (#Discussion)",
+         "claim": "Garbled declared field."},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    # Must not raise; the candidate lands with a coerced bool declared.
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary["appended"] == 1
+    items = program_lib.read_program(intake_id, root=str(tmp_path))["frontmatter"]["items"]
+    assert isinstance(items[0].get("declared", False), bool)
+    assert items[0]["declared"] is True  # non-empty string -> truthy -> True
+
+
 def test_intake_ignore_route_is_noop(tmp_path, monkeypatch):
     intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
     records = [

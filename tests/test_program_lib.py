@@ -768,6 +768,60 @@ def test_upsert_candidate_opens_new(tmp_path):
     assert ev["date"]  # defaulted to today
 
 
+def test_upsert_candidate_default_declared_is_false(tmp_path):
+    ip = _seed_intake(tmp_path)
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="eos-rock",
+        title="Q3 rock", source="meeting-A", claim="Mentioned.",
+        root=str(tmp_path))
+    items = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"]
+    assert items[0].get("declared", False) is False
+
+
+def test_upsert_candidate_declared_true_opens_declared(tmp_path):
+    ip = _seed_intake(tmp_path)
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="eos-rock",
+        title="Q3 rock", source="meeting-A", claim="We are committing to this.",
+        declared=True, root=str(tmp_path))
+    items = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"]
+    assert items[0]["declared"] is True
+
+
+def test_upsert_candidate_declared_is_sticky_true_on_merge(tmp_path):
+    ip = _seed_intake(tmp_path)
+    # First mention declares it.
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="eos-rock",
+        title="Q3 rock", source="meeting-A", claim="We are committing to this.",
+        anchor="ROCK-1", declared=True, root=str(tmp_path))
+    # A later, non-declaring mention merges in (same anchor) but must NOT undeclare.
+    pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="eos-rock",
+        title="Q3 rock again", source="meeting-B", claim="Discussed again.",
+        anchor="ROCK-1", declared=False, root=str(tmp_path))
+    items = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"]
+    assert len(items) == 1
+    assert items[0]["declared"] is True
+
+
+def test_upsert_candidate_declared_set_true_on_later_merge(tmp_path):
+    ip = _seed_intake(tmp_path)
+    # First mention does not declare.
+    pl.upsert_candidate(
+        ip, candidate_key="k1", program_type="eos-rock",
+        title="Q3 rock", source="meeting-A", claim="Mentioned.",
+        anchor="ROCK-2", root=str(tmp_path))
+    # A later declaring mention merges in and flips declared sticky-true.
+    pl.upsert_candidate(
+        ip, candidate_key="k2", program_type="eos-rock",
+        title="Q3 rock", source="meeting-B", claim="Now we commit.",
+        anchor="ROCK-2", declared=True, root=str(tmp_path))
+    items = pl.read_program(ip, root=str(tmp_path))["frontmatter"]["items"]
+    assert len(items) == 1
+    assert items[0]["declared"] is True
+
+
 def test_upsert_candidate_mints_sequential_ids(tmp_path):
     ip = _seed_intake(tmp_path)
     a = pl.upsert_candidate(ip, candidate_key="k1", program_type="roadmap-initiative",

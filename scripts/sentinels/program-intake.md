@@ -42,7 +42,11 @@ For each NEW item you find in the exhaust, decide ONE route:
    `program_type` (a type id from the registry) and a short `title`. Add an
    `anchor` (a stable external ref like a tracker epic) when there is one. If the
    item clearly matches one of the OPEN candidates you were handed, give its id as
-   `link_to` plus a `confidence` (0 to 1) that they are the same thing.
+   `link_to` plus a `confidence` (0 to 1) that they are the same thing. Set
+   `declared: true` ONLY when the item is an explicit commitment or kickoff (for
+   example "we are committing to X", "we are kicking off Y", or a quarterly rock
+   declared in a leadership session). Otherwise omit it (a passing mention,
+   recurring chatter, or a maybe is NOT a declaration).
 4. `ignore` - the item is not cadence-level (routine chatter, a one-off task,
    nothing that belongs to a program or type). Drop it here.
 
@@ -60,6 +64,8 @@ Return ONLY a JSON array of routing records and nothing else. Each record:
 - `anchor` - optional for candidate (a stable external ref).
 - `link_to` - optional for candidate (an open candidate id this matches).
 - `confidence` - optional (0 to 1); for candidate, how sure the link_to match is.
+- `declared` - optional boolean for candidate; set true ONLY for an explicit
+  commitment or kickoff (default false / omit it otherwise).
 - `kind` - for observe, the observation kind (status-signal, completion,
   commitment). For capture the harness uses the capture kind.
 - `source` - the file and location you read it from (required for every kept

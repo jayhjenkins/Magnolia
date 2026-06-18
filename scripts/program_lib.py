@@ -808,7 +808,7 @@ def _get_candidate(items, candidate_id):
 
 def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
                      source, claim, anchor=None, link_to=None, confidence=None,
-                     sentinel="program-intake", root=None):
+                     declared=False, sentinel="program-intake", root=None):
     """Add or merge source-cited candidate evidence in the intake nursery.
 
     Reads the intake program (a program-intake register), finds or creates a
@@ -888,6 +888,9 @@ def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
         evidence = target.setdefault("evidence", [])
         evidence.append(evidence_entry)
         target["source_count"] = _distinct_source_count(evidence)
+        # `declared` is sticky-true: once an explicit declaration marked this
+        # candidate, a later non-declaring mention never un-declares it.
+        target["declared"] = bool(target.get("declared")) or bool(declared)
         candidate_id = target["id"]
     else:
         # Open a new candidate (action "opened" unless a low-confidence link flagged it).
@@ -901,6 +904,7 @@ def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
             "title": str(title).strip(),
             "anchor": anchor,
             "status": "open",
+            "declared": bool(declared),
             "evidence": [evidence_entry],
             "source_count": _distinct_source_count([evidence_entry]),
         }

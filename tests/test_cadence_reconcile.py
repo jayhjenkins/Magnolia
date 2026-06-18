@@ -1600,6 +1600,38 @@ def test_birth_explicit_declaration_only_not_ripe_without_flag(tmp_path):
     assert _birth_cards() == []
 
 
+def test_birth_declared_flows_from_upsert_to_ripeness(tmp_path):
+    # Integration: a candidate written via the REAL upsert_candidate carrying
+    # declared=True ripens an explicit-declaration-only type (eos-rock) and births.
+    root = str(tmp_path / "data")
+    pid = _seed_intake_program(root, [])
+    pl.upsert_candidate(
+        pid, candidate_key="k1", program_type="eos-rock", title="Q3 rock",
+        source="leadership-session.md", claim="We are committing to this rock.",
+        declared=True, root=root)
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = _birth_cards()
+    assert len(cards) == 1
+    assert cards[0]["proposal"]["candidate_id"] == "CAND-0001"
+    assert cards[0]["proposal"]["program_type"] == "eos-rock"
+
+
+def test_birth_undeclared_upsert_does_not_birth_declaration_only(tmp_path):
+    # Integration: same path WITHOUT declared -> eos-rock never ripens.
+    root = str(tmp_path / "data")
+    pid = _seed_intake_program(root, [])
+    pl.upsert_candidate(
+        pid, candidate_key="k1", program_type="eos-rock", title="Q3 rock",
+        source="leadership-session.md", claim="Mentioned a possible rock.",
+        root=root)
+
+    reconcile.reconcile_program(pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    assert _birth_cards() == []
+
+
 def test_birth_skips_closed_and_birthed_candidates(tmp_path):
     root = str(tmp_path / "data")
     closed = _candidate("CAND-0001", "roadmap-initiative", "Declined idea",

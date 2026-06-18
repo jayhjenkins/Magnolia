@@ -442,6 +442,9 @@ def _run_intake(name, programs, text, root=None, now=None):
                 anchor=record.get("anchor"),
                 link_to=record.get("link_to"),
                 confidence=record.get("confidence"),
+                # Optional explicit-declaration flag; coerce defensively so a
+                # missing or non-bool field never raises (just truthy/falsey).
+                declared=bool(record.get("declared")),
                 sentinel=name,
                 root=root,
             )
