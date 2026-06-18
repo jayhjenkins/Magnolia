@@ -937,6 +937,10 @@ def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
             "anchor": anchor,
             "status": "open",
             "declared": bool(declared),
+            # When the candidate first appeared -- the basis for nursery aging
+            # (the register verdict ages an item by its `age` field; intake
+            # reconcile derives `age` from `opened`). See reconcile._age_candidates.
+            "opened": _now_iso()[:10],
             "evidence": [evidence_entry],
             "source_count": _distinct_source_count([evidence_entry]),
         }

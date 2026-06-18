@@ -1378,6 +1378,31 @@ def _maybe_advance_phase(fm, type_entry, body, now):
     return body, {"from": phase, "to": next_phase, "checkpoint": cp_id}
 
 
+def _age_candidates(fm, now):
+    """Derive each OPEN candidate's `age` (days since `opened`) in place.
+
+    The register verdict (_verdict_register) ages an item by its numeric `age`
+    field, but intake candidates carry `opened`, not `age` (4a M-3). Deriving it
+    here lets the nursery drift on stale candidates and gives the janitor a real
+    age to report. Only open/flagged candidates with a parseable `opened` are
+    aged; closed-with-reason / birthed candidates are left untouched.
+    """
+    today = now.date() if isinstance(now, datetime) else _parse_iso_date(str(now))
+    if today is None:
+        return
+    for it in fm.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        if it.get("status", "open") not in {"open", "flagged"}:
+            continue
+        opened = it.get("opened")
+        if not opened:
+            continue
+        parsed = _parse_iso_date(opened)
+        if parsed is not None:
+            it["age"] = (today - parsed).days
+
+
 def reconcile_program(program, registry, now=None, force=False, root=None):
     """Run one program's reconcile cycle. Returns a result dict.
 
@@ -1400,6 +1425,10 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     now = now or datetime.now(timezone.utc)
     fm = program["frontmatter"]
     body = program["body"]
+
+    # Age open intake candidates from their `opened` date so the register verdict
+    # can drift on a stale nursery (4a M-3). No-op for items without `opened`.
+    _age_candidates(fm, now)
 
     verdict, facts = compute_verdict(program, registry, now)
 
