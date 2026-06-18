@@ -340,7 +340,7 @@ function cadenceItems(p) {
     // A portfolio-health JANITOR finding carries an explicit `severity`
     // (holding/drifting/broken) and a `kind` (blind-sentinel/stale-active/...).
     // Tone by severity, label by kind, so a finding row reads
-    // "<finding text> · <owner> · <kind>". Checked first: findings never carry
+    // "<finding text> - <owner> - <kind>". Checked first: findings never carry
     // the candidate/cycle/register shapes, and severity is the discriminator.
     const hasSeverity = it.severity != null && it.severity !== '';
     let trailing;
