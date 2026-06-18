@@ -71,6 +71,18 @@ _ADAPTER_FAMILY = "project_management"
 # observation. Anything else maps to `status-signal`. No interpretation.
 _DONE_STATUSES = {"done", "closed", "complete", "completed", "resolved", "shipped"}
 
+# The intake sentinel: it returns ROUTING records (observe/capture/candidate/
+# ignore) instead of program-attributed observations, so run_sentinel routes it
+# through the apply-routes branch. Matched by name (the simplest detector that
+# leaves movement-watch/tracker-truth untouched).
+_INTAKE_SENTINEL = "program-intake"
+# The program type whose single active program is the candidate nursery. The
+# intake sentinel's `candidate` route upserts into it.
+_INTAKE_PROGRAM_TYPE = "program-intake"
+# The closed routing verb set the intake sentinel may emit. Anything else is a
+# bad record and is dropped (counted, never raised).
+_INTAKE_ROUTES = {"observe", "capture", "candidate", "ignore"}
+
 
 def log(msg):
     """ASCII-safe stderr log line (invariant #8)."""
@@ -325,6 +337,125 @@ def _run_tracker_truth(name, programs, root=None, now=None):
     return summary
 
 
+# --- The intake (routing) path -----------------------------------------------
+
+def _candidate_key(record):
+    """A stable identity hint for a candidate record (anchor preferred, else title).
+
+    Stored on the candidate for traceability only - the merge decision in
+    program_lib.upsert_candidate rides anchor/title/link_to. ASCII-safe; never
+    raises (empty title/anchor -> empty string).
+    """
+    anchor = str(record.get("anchor") or "").strip()
+    if anchor:
+        return anchor
+    return str(record.get("title") or "").strip()
+
+
+def _resolve_intake_program_id(programs):
+    """The id of the single active program of type program-intake, or None.
+
+    `programs` is the active-program list (already filtered to status=active).
+    Robust to zero (no nursery -> None, the caller drops candidate routes) and to
+    more than one (the first by program_id wins - list_programs is id-sorted, so
+    this is deterministic, and a second intake program is a registry bug, not a
+    crash). Reads type from frontmatter. Never raises.
+    """
+    for prog in programs:
+        fm = prog.get("frontmatter") or {}
+        if fm.get("type") == _INTAKE_PROGRAM_TYPE:
+            return prog.get("program_id")
+    return None
+
+
+def _run_intake(name, programs, text, root=None, now=None):
+    """Apply the intake sentinel's routing records deterministically.
+
+    Parses the dispatch output exactly like the observation path (defensively,
+    bad records dropped + counted, never raised). For each record, route by its
+    `route` verb:
+      - observe   -> append_observation(program_id, kind=<record kind>, ...);
+                     DROP if program_id is empty or not an active program.
+      - capture   -> append_observation(program_id, kind="capture", ...);
+                     DROP if program_id is empty or not an active program.
+      - candidate -> upsert_candidate on the resolved intake program; DROP (never
+                     raise) if no program-intake program exists.
+      - ignore    -> no-op (counted as neither appended nor dropped).
+    An unknown route, or a record append_observation/upsert_candidate rejects
+    (e.g. empty source/claim), is counted as dropped - one bad record never stops
+    the run. The LLM never writes; this runner is the only writer (same fence as
+    movement-watch).
+    """
+    summary = {"sentinel": name, "appended": 0, "dropped": 0}
+    records = _parse_records(text)
+    if not records:
+        log(f"sentinel '{name}': no parseable records - 0 observations recorded")
+        return summary
+
+    active_ids = {p.get("program_id") for p in programs}
+    intake_id = _resolve_intake_program_id(programs)
+    obs_date = now or program_lib._now_iso()[:10]
+
+    for record in records:
+        route = record.get("route")
+        if route == "ignore":
+            continue  # no-op: neither appended nor dropped
+        if route not in _INTAKE_ROUTES:
+            summary["dropped"] += 1
+            continue
+
+        if route in ("observe", "capture"):
+            pid = record.get("program_id")
+            # Never force-attribute: drop unattributed or unknown-program records
+            # (the same active-program fence the observation path uses).
+            if not pid or pid not in active_ids:
+                summary["dropped"] += 1
+                continue
+            kind = "capture" if route == "capture" else record.get("kind")
+            try:
+                appended = program_lib.append_observation(
+                    pid, kind=kind, sentinel=name,
+                    source=record.get("source"), claim=record.get("claim"),
+                    confidence=record.get("confidence"), date=obs_date, root=root,
+                )
+            except (ValueError, TypeError, FileNotFoundError) as exc:
+                log(f"sentinel '{name}': {route} record for {pid} rejected: {exc}")
+                summary["dropped"] += 1
+                continue
+            summary["appended" if appended else "dropped"] += 1
+            continue
+
+        # route == "candidate": upsert into the nursery. No intake program -> drop.
+        if not intake_id:
+            log(f"sentinel '{name}': candidate dropped - no {_INTAKE_PROGRAM_TYPE} "
+                "program exists")
+            summary["dropped"] += 1
+            continue
+        try:
+            program_lib.upsert_candidate(
+                intake_id,
+                candidate_key=_candidate_key(record),
+                program_type=record.get("program_type"),
+                title=record.get("title"),
+                source=record.get("source"),
+                claim=record.get("claim"),
+                anchor=record.get("anchor"),
+                link_to=record.get("link_to"),
+                confidence=record.get("confidence"),
+                sentinel=name,
+                root=root,
+            )
+        except (ValueError, TypeError, FileNotFoundError) as exc:
+            log(f"sentinel '{name}': candidate rejected: {exc}")
+            summary["dropped"] += 1
+            continue
+        summary["appended"] += 1
+
+    log(f"sentinel '{name}': appended {summary['appended']}, "
+        f"dropped {summary['dropped']} (intake)")
+    return summary
+
+
 # --- The run -----------------------------------------------------------------
 
 def run_sentinel(name, root=None, now=None):
@@ -386,6 +517,15 @@ def run_sentinel(name, root=None, now=None):
     prompt = _build_prompt(definition, programs, source_digest)
 
     text = _dispatch(prompt, tier=definition.get("model_tier"))
+
+    # The intake sentinel returns ROUTING records (observe/capture/candidate/
+    # ignore) instead of program-attributed observations. It dispatches the LLM
+    # exactly like movement-watch (transcript source), but the runner applies its
+    # records by route rather than attributing each to a program. movement-watch
+    # and tracker-truth are untouched by this branch.
+    if name == _INTAKE_SENTINEL:
+        return _run_intake(name, programs, text, root=root, now=now)
+
     records = _parse_records(text)
     if not records:
         log(f"sentinel '{name}': no parseable records - 0 observations recorded")

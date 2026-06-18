@@ -261,3 +261,148 @@ def test_tracker_truth_unconfigured_via_fetch_status_none(tmp_path, monkeypatch)
     assert summary == {"sentinel": "tracker-truth", "appended": 0, "dropped": 0}
     body1 = program_lib.read_program(pid1, root=str(tmp_path))["body"]
     assert "sentinel:tracker-truth" not in body1
+
+
+# ── The program-intake sentinel (the birth-path routing branch) ───────────────
+#
+# program-intake is the intake sentinel: it returns ROUTING records the runner
+# applies deterministically by route (observe/capture/candidate/ignore). Same
+# fence as movement-watch: the LLM never writes; bad records are dropped and
+# counted, never raised. The intake (program-intake type) program is the
+# candidate nursery; candidate routes upsert into it.
+
+
+def _seed_intake_and_active(tmp_path, monkeypatch):
+    """Seed the intake nursery plus one active (non-intake) program.
+
+    Returns (intake_id, active_id).
+    """
+    _pin_programs(tmp_path, monkeypatch)
+    intake_id, _ = program_lib.create_program(
+        type="program-intake", title="Program intake", owner_role="product",
+        intent="The nursery.", frontmatter_extra={"items": []}, root=str(tmp_path))
+    active_id, _ = program_lib.create_program(
+        type="roadmap-initiative", title="Alpha", owner_role="product",
+        intent="Ship the alpha discovery spike.", root=str(tmp_path))
+    return intake_id, active_id
+
+
+def test_intake_observe_route_appends_observation(tmp_path, monkeypatch):
+    intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
+    records = [
+        {"route": "observe", "program_id": active_id, "kind": "status-signal",
+         "source": "datasets/meetings/a.md (#Summary)",
+         "claim": "Alpha spike progressing.", "confidence": 0.9},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary["appended"] == 1
+    assert summary["dropped"] == 0
+    body = program_lib.read_program(active_id, root=str(tmp_path))["body"]
+    assert "Alpha spike progressing." in body
+    assert "[status-signal]" in body
+
+
+def test_intake_capture_route_appends_capture_observation(tmp_path, monkeypatch):
+    intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
+    records = [
+        {"route": "capture", "program_id": active_id,
+         "source": "datasets/meetings/b.md (#Action Items)",
+         "claim": "New inbox item for the cycle.", "confidence": 0.7},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary["appended"] == 1
+    body = program_lib.read_program(active_id, root=str(tmp_path))["body"]
+    assert "New inbox item for the cycle." in body
+    assert "[capture]" in body
+
+
+def test_intake_candidate_route_upserts_into_nursery(tmp_path, monkeypatch):
+    intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
+    records = [
+        {"route": "candidate", "program_type": "roadmap-initiative",
+         "title": "Smart reconciliation", "anchor": "EPIC-77",
+         "source": "datasets/meetings/c.md (#Discussion)",
+         "claim": "Repeated ask for smart reconciliation.", "confidence": 0.6},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary["appended"] == 1
+    assert summary["dropped"] == 0
+    intake_fm = program_lib.read_program(intake_id, root=str(tmp_path))["frontmatter"]
+    items = intake_fm.get("items") or []
+    assert len(items) == 1
+    cand = items[0]
+    assert cand["title"] == "Smart reconciliation"
+    assert cand["program_type"] == "roadmap-initiative"
+    assert cand["anchor"] == "EPIC-77"
+    assert cand["status"] == "open"
+
+
+def test_intake_ignore_route_is_noop(tmp_path, monkeypatch):
+    intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
+    records = [
+        {"route": "ignore", "source": "datasets/meetings/d.md",
+         "claim": "Not cadence-level chatter."},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary == {"sentinel": "program-intake", "appended": 0, "dropped": 0}
+    intake_fm = program_lib.read_program(intake_id, root=str(tmp_path))["frontmatter"]
+    assert (intake_fm.get("items") or []) == []
+    body = program_lib.read_program(active_id, root=str(tmp_path))["body"]
+    assert "sentinel:program-intake" not in body
+
+
+def test_intake_candidate_dropped_when_no_intake_program(tmp_path, monkeypatch):
+    # No program-intake program exists -> a candidate route is DROPPED, not raised.
+    _pin_programs(tmp_path, monkeypatch)
+    active_id, _ = program_lib.create_program(
+        type="roadmap-initiative", title="Alpha", owner_role="product",
+        intent="Has no nursery to land a candidate in.", root=str(tmp_path))
+    records = [
+        {"route": "candidate", "program_type": "roadmap-initiative",
+         "title": "Orphan candidate",
+         "source": "datasets/meetings/e.md", "claim": "Program-worthy ask."},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary["appended"] == 0
+    assert summary["dropped"] == 1
+
+
+def test_intake_observe_unknown_program_dropped(tmp_path, monkeypatch):
+    intake_id, active_id = _seed_intake_and_active(tmp_path, monkeypatch)
+    records = [
+        {"route": "observe", "program_id": "PROG-9999", "kind": "status-signal",
+         "source": "datasets/meetings/f.md", "claim": "Belongs to nobody."},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
+
+    assert summary["appended"] == 0
+    assert summary["dropped"] == 1
+
+
+def test_program_intake_definition_passes_validate_sentinel():
+    import sentinel_lib
+    definition = sentinel_lib.load_sentinel("program-intake")
+    assert sentinel_lib.validate_sentinel(definition) == []
