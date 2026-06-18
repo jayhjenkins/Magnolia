@@ -64,3 +64,21 @@ def seed_trust(project_path, path=None):
     entry["enabledMcpjsonServers"] = enabled
     _atomic_write(cfg_path, data)
     return {"status": "seeded", "project": project_path}
+
+
+def _main(argv=None):
+    import argparse
+    p = argparse.ArgumentParser(prog="trust_seed")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    d = sub.add_parser("detect"); d.add_argument("--path", default=None)
+    s = sub.add_parser("seed"); s.add_argument("project_path"); s.add_argument("--path", default=None)
+    args = p.parse_args(argv)
+    if args.cmd == "detect":
+        print(json.dumps(read_state(path=args.path)))
+    else:
+        print(json.dumps(seed_trust(args.project_path, path=args.path)))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

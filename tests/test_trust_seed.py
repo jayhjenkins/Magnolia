@@ -1,4 +1,8 @@
 import json
+import os
+import subprocess
+import sys
+
 import trust_seed
 
 
@@ -72,3 +76,23 @@ def test_seed_trust_skips_when_config_absent(tmp_path):
     res = trust_seed.seed_trust("/repo/Magnolia", path=str(missing))
     assert res["status"] == "skipped"
     assert not missing.exists()
+
+
+def test_cli_detect_prints_json(tmp_path):
+    cfg = tmp_path / ".claude.json"
+    cfg.write_text(json.dumps({"oauthAccount": {"x": 1}, "claudeAiMcpEverConnected": ["claude.ai Jira"]}))
+    script = os.path.join(os.path.dirname(trust_seed.__file__), "trust_seed.py")
+    out = subprocess.check_output(
+        [sys.executable, script, "detect", "--path", str(cfg)], text=True)
+    parsed = json.loads(out)
+    assert parsed["logged_in"] is True
+    assert parsed["connectors"] == ["claude.ai Jira"]
+
+
+def test_cli_seed_reports_status(tmp_path):
+    cfg = tmp_path / ".claude.json"
+    cfg.write_text(json.dumps({"oauthAccount": {"x": 1}, "projects": {}}))
+    script = os.path.join(os.path.dirname(trust_seed.__file__), "trust_seed.py")
+    out = subprocess.check_output(
+        [sys.executable, script, "seed", "/repo/Magnolia", "--path", str(cfg)], text=True)
+    assert json.loads(out)["status"] == "seeded"
