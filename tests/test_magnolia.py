@@ -41,3 +41,21 @@ def test_launch_can_skip_browser(monkeypatch):
     calls = _patch(monkeypatch, running=True)
     magnolia.launch(open_browser=False)
     assert calls["opened"] is None
+
+
+def test_update_runs_ff_only_pull_in_repo(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(magnolia, "_run",
+                        lambda cmd: seen.update(cmd=cmd) or (0, "Already up to date.\n"))
+    res = magnolia.update()
+    assert seen["cmd"][:3] == ["git", "-C", magnolia.PM_OS_DIR]
+    assert "pull" in seen["cmd"] and "--ff-only" in seen["cmd"]
+    assert res["status"] == "ok"
+    assert "up to date" in res["output"].lower()
+
+
+def test_update_reports_failure(monkeypatch):
+    monkeypatch.setattr(magnolia, "_run", lambda cmd: (1, "fatal: not possible to fast-forward\n"))
+    res = magnolia.update()
+    assert res["status"] == "failed"
+    assert "fast-forward" in res["output"]

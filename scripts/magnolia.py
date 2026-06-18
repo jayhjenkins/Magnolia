@@ -38,3 +38,15 @@ def launch(open_browser=True):
     if open_browser:
         platform_lib.open_url(url)
     return {"started": started, "url": url}
+
+
+def _run(cmd):
+    """Mockable seam: run a command, return (returncode, combined_output)."""
+    p = subprocess.run(cmd, cwd=PM_OS_DIR, capture_output=True, text=True)
+    return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def update():
+    """Pull the latest engine, fast-forward only (never auto-merge over local edits)."""
+    rc, out = _run(["git", "-C", PM_OS_DIR, "pull", "--ff-only"])
+    return {"status": "ok" if rc == 0 else "failed", "output": out}
