@@ -95,3 +95,4 @@ docs/*
 !docs/INSTALL.md
 !docs/INSTALL-macos.md
 !docs/INSTALL-windows.md
+!docs/INSTALL-smoke-checklist.md
