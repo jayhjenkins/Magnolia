@@ -1060,6 +1060,10 @@ def birth_program(spec, root=None):
     frontmatter_extra = {"checkpoints": checkpoints, "drift": "holding"}
     if phase is not None:
         frontmatter_extra["phase"] = phase
+        # Stamp the entry date for the newborn's first phase (scalar form = the
+        # date the current phase was entered) so the reconciler can age it and the
+        # UI timeline shows an entry date. A newborn enters its first phase now.
+        frontmatter_extra["phase_entered"] = _now_iso()[:10]
 
     # Reuse create_program for the base file (status defaults to "active"). It
     # writes the canonical ## Intent / ## Observations / ## Cycles body.

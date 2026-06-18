@@ -1176,6 +1176,8 @@ def test_birth_program_pipeline_creates_active_at_first_phase(tmp_path):
     assert fm["title"] == "Smart reconciliation"
     # First phase of roadmap-initiative is `discovery`.
     assert fm["phase"] == "discovery"
+    # The newborn's first phase is stamped with an entry date so it can be aged.
+    assert fm.get("phase_entered")
     # owner_role defaults to a role token (never a name).
     assert fm["owner_role"] == "product"
     # Carried checkpoint, forced to status pending.
