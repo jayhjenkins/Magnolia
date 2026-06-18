@@ -459,10 +459,80 @@ def _run_intake(name, programs, text, root=None, now=None):
     return summary
 
 
+# --- Sentinel run telemetry --------------------------------------------------
+
+def _sentinel_runs_path(root):
+    """Return path to the sentinel-runs.json telemetry file."""
+    return os.path.join(root or os.getcwd(), "datasets", "cadence", "sentinel-runs.json")
+
+
+def read_sentinel_runs(root=None):
+    """Read sentinel run telemetry from sentinel-runs.json.
+
+    Returns a dict: {sentinel_name: {last_run, last_success, last_emitted_count, last_error}}.
+    Returns empty dict if file missing or malformed.
+    """
+    path = _sentinel_runs_path(root)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def record_sentinel_run(name, *, success, emitted_count, error=None, root=None, now=None):
+    """Record a sentinel run in telemetry.
+
+    Args:
+        name: Sentinel name (e.g., "movement-watch")
+        success: True if the run succeeded, False if errored
+        emitted_count: Number of items emitted/processed in this run
+        error: Error message if success=False
+        root: Root directory (defaults to os.getcwd())
+        now: ISO timestamp (defaults to current time)
+
+    Atomically updates sentinel-runs.json with:
+    - last_run: always updated to now
+    - last_success: updated only if success=True
+    - last_emitted_count: always updated to emitted_count
+    - last_error: updated if error is provided
+    """
+    root = root or os.getcwd()
+    now = now or program_lib._now_iso()
+
+    # Read current telemetry
+    telemetry = read_sentinel_runs(root)
+
+    # Update or create entry for this sentinel
+    if name not in telemetry:
+        telemetry[name] = {}
+
+    entry = telemetry[name]
+    entry["last_run"] = now
+    if success:
+        entry["last_success"] = now
+    entry["last_emitted_count"] = emitted_count
+    if error is not None:
+        entry["last_error"] = error
+    else:
+        entry.pop("last_error", None)  # clear error if success
+
+    # Atomic write
+    path = _sentinel_runs_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    temp_path = path + ".tmp"
+    with open(temp_path, "w") as f:
+        json.dump(telemetry, f, indent=2)
+    os.replace(temp_path, path)
+
+
 # --- The run -----------------------------------------------------------------
 
-def run_sentinel(name, root=None, now=None):
-    """Run one sentinel: dispatch, parse records, append the attributed ones.
+def _run_sentinel_impl(name, root=None, now=None):
+    """Internal implementation of sentinel run. Handles dispatch and execution.
 
     Returns a summary {"sentinel": name, "appended": N, "dropped": M}. Never
     raises out of a single bad record or a bad run - the program file is the
@@ -568,6 +638,33 @@ def run_sentinel(name, root=None, now=None):
     log(f"sentinel '{name}': appended {summary['appended']}, "
         f"dropped {summary['dropped']}")
     return summary
+
+
+def run_sentinel(name, root=None, now=None):
+    """Run a sentinel and record telemetry.
+
+    Args:
+        name: Sentinel name
+        root: Root directory
+        now: Optional timestamp override (for testing)
+
+    Returns the summary dict from the sentinel run.
+    Telemetry is always recorded (success or error).
+    """
+    root = root or os.getcwd()
+    now = now or program_lib._now_iso()
+
+    try:
+        summary = _run_sentinel_impl(name, root=root, now=now)
+        # Record success
+        emitted_count = summary.get("appended", 0) if summary else 0
+        record_sentinel_run(name, success=True, emitted_count=emitted_count, root=root, now=now)
+        return summary
+    except Exception as e:
+        # Record failure
+        record_sentinel_run(name, success=False, emitted_count=0, error=str(e), root=root, now=now)
+        # Return summary indicating failure (preserve "never raises" contract)
+        return {"sentinel": name, "appended": 0, "dropped": 0, "error": str(e)}
 
 
 def main(argv=None):

@@ -462,3 +462,97 @@ def test_program_intake_definition_passes_validate_sentinel():
     import sentinel_lib
     definition = sentinel_lib.load_sentinel("program-intake")
     assert sentinel_lib.validate_sentinel(definition) == []
+
+
+# ── Blind-Sentinel Telemetry (Task 5) ──────────────────────────────────────
+#
+# Telemetry tracking for sentinels: record when a sentinel last ran, whether it
+# succeeded, how many items it emitted, and any errors. Detect blind sentinels
+# (hasn't run recently, or has errors).
+
+
+def test_record_and_read_sentinel_run_roundtrip(tmp_path, monkeypatch):
+    """Record a successful sentinel run and read it back."""
+    root = str(tmp_path)
+
+    # Record a successful run with 3 emitted items.
+    sentinel_runner.record_sentinel_run(
+        "movement-watch", success=True, emitted_count=3, root=root)
+
+    # Read back the telemetry.
+    telemetry = sentinel_runner.read_sentinel_runs(root)
+
+    # Assert the sentinel's entry exists and has the right shape.
+    assert "movement-watch" in telemetry
+    entry = telemetry["movement-watch"]
+    assert "last_run" in entry
+    assert "last_success" in entry
+    assert entry["last_success"] == entry["last_run"]  # success=True
+    assert entry["last_emitted_count"] == 3
+    assert entry.get("last_error") is None
+
+
+def test_record_sentinel_run_error_sets_last_error_keeps_last_success(tmp_path, monkeypatch):
+    """Error run updates last_error and last_run, but preserves last_success."""
+    root = str(tmp_path)
+
+    # Record a successful run with an explicit timestamp.
+    first_now = "2026-06-18T18:00:00Z"
+    sentinel_runner.record_sentinel_run(
+        "movement-watch", success=True, emitted_count=0, root=root, now=first_now)
+    telemetry = sentinel_runner.read_sentinel_runs(root)
+    first_success = telemetry["movement-watch"]["last_success"]
+    assert first_success == first_now
+
+    # Record a failed run with a later timestamp.
+    error_now = "2026-06-18T18:00:01Z"
+    sentinel_runner.record_sentinel_run(
+        "movement-watch", success=False, error="Connection failed",
+        emitted_count=0, root=root, now=error_now)
+
+    # Read back the telemetry.
+    telemetry = sentinel_runner.read_sentinel_runs(root)
+    entry = telemetry["movement-watch"]
+
+    # Assert the error is recorded.
+    assert entry["last_error"] == "Connection failed"
+    # last_run was updated to the latest call.
+    assert entry["last_run"] == error_now
+    assert entry["last_run"] > first_success
+    # last_success is unchanged (from the first successful run).
+    assert entry["last_success"] == first_success
+    # last_emitted_count from the latest call.
+    assert entry["last_emitted_count"] == 0
+
+
+def test_run_sentinel_stamps_telemetry(tmp_path, monkeypatch):
+    """run_sentinel wraps the implementation and records telemetry."""
+    root = str(tmp_path)
+
+    # Seed a simple program so the sentinel has something to work with.
+    _pin_programs(tmp_path, monkeypatch)
+    pid1, _ = program_lib.create_program(
+        type="roadmap-initiative", title="Alpha", owner_role="product",
+        intent="Test.", root=root)
+
+    # Mock dispatch to return one observation.
+    records = [
+        {"program_id": pid1, "kind": "status-signal",
+         "source": "test.md", "claim": "Test observation.", "confidence": 0.9},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None: json.dumps(records))
+
+    # Run the sentinel.
+    summary = sentinel_runner.run_sentinel("movement-watch", root=root)
+
+    # Assert the sentinel succeeded and recorded 1 observation.
+    assert summary["appended"] == 1
+
+    # Check that telemetry was stamped.
+    telemetry = sentinel_runner.read_sentinel_runs(root)
+    assert "movement-watch" in telemetry
+    entry = telemetry["movement-watch"]
+    assert "last_run" in entry
+    assert entry["last_success"] == entry["last_run"]  # success
+    assert entry["last_emitted_count"] == 1
