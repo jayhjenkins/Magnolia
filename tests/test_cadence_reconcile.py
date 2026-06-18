@@ -1401,3 +1401,65 @@ def test_draft_message_records_nudge_counter(tmp_path):
     assert all(v == 1 for v in period_counts.values())
     # A response_rate stub is present for the UI to read.
     assert "response_rate" in fm
+
+
+def test_draft_message_cap_is_period_scoped_not_lifetime(tmp_path):
+    """The cap is N-per-recipient-PER-PERIOD, never N-per-recipient-ever.
+
+    Regression for the rate-cap scoping bug: the cap was enforced by scanning
+    OPEN send-message cards for the recipient, with NO period filter. In this
+    system messaging is normally unconfigured (channel `none`), so a created
+    send-message card never sends and stays `open` indefinitely. That meant the
+    FIRST period's nudge card suppressed EVERY later period's nudge -- turning
+    "max 1 per week" into "max 1 ever".
+
+    Here we plant a stale OPEN send-message card for the recipient from a PRIOR
+    period (it never sent), AND a prior-period entry in nudge_counts already at
+    the cap. Then we run a draft-message in a NEW period whose counter is 0. A
+    card MUST be created: the prior period's open card / count does not suppress
+    the new period. Fails against the open-card scan; passes once the cap reads
+    the period-keyed counter.
+    """
+    root = str(tmp_path / "data")
+    # Program last reconciled in OTHER_PERIOD, with a prior-period nudge already
+    # recorded at the cap for the role-based recipient ("product team").
+    recipient = "product team"
+    program_id, _ = pl.create_program(
+        type="weekly-priorities",
+        title="Weekly priorities",
+        owner_role="product",
+        frontmatter_extra={
+            "last_cycle": OTHER_PERIOD,
+            "nudge_counts": {OTHER_PERIOD: {recipient: 1}},
+        },
+        root=root,
+    )
+
+    # A stale OPEN send-message card from the prior period that never sent.
+    task_lib.create_task(
+        title="prior-period nudge",
+        queue="collab",
+        creator="cadence",
+        task_type="send-message",
+        tags=[program_id, "cadence"],
+        message_channel="none",
+        message_to=recipient,
+    )
+
+    # Run a fresh cycle in the CURRENT period (NOW -> PERIOD != OTHER_PERIOD).
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _nudge_registry(cap=1), now=NOW, force=True
+    )
+
+    # A new card IS created -- the prior period's open card / count does not
+    # suppress this period's nudge.
+    real_ids = [e for e in result["emitted"] if e and e.startswith("TASK-")]
+    assert len(real_ids) == 1, "prior-period nudge wrongly suppressed this period"
+
+    # The counter for THIS period now reflects the one new nudge.
+    fm = pl.read_program(program_id, root=root)["frontmatter"]
+    period_counts = (fm.get("nudge_counts") or {}).get(PERIOD) or {}
+    assert period_counts.get(recipient) == 1
+    # The prior period's entry is untouched (per-period scoping is preserved).
+    assert (fm.get("nudge_counts") or {}).get(OTHER_PERIOD, {}).get(recipient) == 1

@@ -79,7 +79,15 @@ class CadenceScheduler:
             return
 
         total = len(results)
-        emitted = sum(len(r.get("emitted") or []) for r in results)
+        # `emitted` carries real card ids AND non-card markers (e.g. a
+        # `nudge suppressed (cap N/wk)` string). Count only real cards (TASK-*)
+        # so the log reports cards emitted, not suppressions, accurately.
+        emitted = sum(
+            1
+            for r in results
+            for e in (r.get("emitted") or [])
+            if isinstance(e, str) and e.startswith("TASK-")
+        )
         broke = sum(1 for r in results if r.get("verdict") == "broken")
         errored = sum(1 for r in results if "error" in r)
         # Only log when something actually happened (mirrors cron_scheduler's

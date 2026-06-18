@@ -473,32 +473,6 @@ def _resolve_nudge_target(fm, root=None):
     return channel, recipient
 
 
-def _count_period_nudges(task_lib, program_id, recipient):
-    """Count send-message cards already created THIS period for `recipient`.
-
-    Scans OPEN tasks tagged with this program_id whose task_type is
-    `send-message`, re-reading each card's frontmatter for `message_to` (which
-    list_tasks does not project -- mirrors _open_propose_update_ops's re-read).
-    Returns how many of them target `recipient`. The per-period scope is provided
-    by the caller: reconcile_program runs at most once per cadence period (the
-    fresh-cycle guard), so cards still open this period are this period's nudges.
-    Never raises -- an unreadable card is simply skipped.
-    """
-    count = 0
-    for t in task_lib.list_tasks(status="open"):
-        if t.get("task_type") != "send-message":
-            continue
-        if program_id not in (t.get("tags") or []):
-            continue
-        try:
-            fm = task_lib.read_task(t["id"])["frontmatter"]
-        except Exception:
-            continue
-        if (fm.get("message_to") or "") == recipient:
-            count += 1
-    return count
-
-
 def _build_nudge_description(facts, program_id, recipient):
     """Build a <=2-sentence ASCII nudge body (invariant #8).
 
@@ -824,7 +798,14 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 except (TypeError, ValueError):
                     cap = None
             if cap is not None:
-                already = _count_period_nudges(task_lib, program_id, recipient)
+                # Enforce the cap off the PERIOD-KEYED counter on the program
+                # frontmatter, not a cross-period open-card scan. In this system
+                # messaging is normally unconfigured, so a created send-message
+                # card never sends and stays `open` indefinitely; an open-card
+                # scan would let the first period's nudge suppress every later
+                # period's. nudge_counts is period-scoped, so the cap is correctly
+                # "N per recipient per period".
+                already = (fm.get("nudge_counts") or {}).get(period, {}).get(recipient, 0)
                 if already >= cap:
                     # Suppress: surface it in the cycle log (no card created).
                     emitted.append(f"nudge suppressed (cap {cap}/wk)")
