@@ -190,6 +190,23 @@ Each finding lands at the top of your board as a **one-tap recommendation.** Ove
 
 ---
 
+## The other half: your standing programs (Cadence)
+
+Everything above is about **verbs** — the discrete work that comes out of your meetings and flows across your board. But a chief of staff also holds the **state of your standing commitments**: the roadmap initiative that's supposed to move discovery → planning → execution on time, the weekly priorities drumbeat, the "did the feature we shipped actually move the metric," the EOS rocks and L10 prep. These aren't tasks you finish — they're loops you *hold*, week after week.
+
+That's the second half of Magnolia, called **Cadence**. The distinction is the whole point:
+
+- The **board** is the verbs of your life — items routed through your attention.
+- **Cadence** is the state of your programs — standing loops that quietly compare what you *declared* (the dates, the targets, the commitments) against what's *actually happening* (your transcripts, your tracker, your metrics), on a schedule.
+
+A Cadence program sits there and watches. It does **not** add to your pile. It only puts a verb on your board when something genuinely needs you — a date is about to slip, a commitment has gone quiet, a metric is diverging, an L10 is coming and the prep isn't done. The rest of the time it's calm confirmation: *"W24 digest sent, 9/9 priorities verified done."* A healthy program is a quiet one.
+
+It's the same discipline as the rest of the system. Cadence never reaches out into the world on its own — when it wants to nudge someone or send a digest, it drafts a card and routes it through the **exact same trust ladder and Tier-2 confirm** as everything else. It proposes; you dispose. And it's self-maintaining: it notices when a new initiative is worth tracking and proposes starting a program, notices when one is complete and proposes archiving it, and runs a janitor that keeps the whole portfolio honest (including catching when one of its own watchers has gone blind). You see all of it on a calm, read-only **Cadence tab**, grouped by the kinds of work you run.
+
+The throughline with the board is identical: *the routine legwork of keeping your commitments on track happens quietly, and only what truly needs your judgment ever crosses your desk.*
+
+---
+
 ## Putting it together — a day inside Magnolia
 
 You sit down. At the top of the board is a short stack of **proposals** — "this task has sat 7 days, kill it?", "3 human tasks look like message drafts, let agents take them?", "the PRD draft scored 4/10, review before it ships", "rubric change proposed, here's the diff." You tap through them: dispose, don't do.

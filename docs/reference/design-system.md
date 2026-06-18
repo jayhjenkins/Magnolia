@@ -8,6 +8,8 @@ A card definition references **theme tokens only** — never a hardcoded color, 
 
 This is invariant #3 — see [`invariants.md`](./invariants.md). The gate is `scripts/card_schema.py`; run it and expect `registry.json OK`.
 
+> The same token-only rule extends to **Cadence** program-type presentation chips (`cadence/programtypes/registry.json` → `presentation.chip_tokens`), enforced by the sibling gate `scripts/program_schema.py` (invariant #9). When you edit a program type's chips, the rule and the boundary below apply identically. See [`cadence.md`](./cadence.md).
+
 ## 2. The card schema
 
 A card type is a declarative entry in `ui/task-board/cardtypes/registry.json` of shape `{ signals, actions, body }`. Slots render in a fixed order (`SLOT_ORDER` in `card_schema.py`):

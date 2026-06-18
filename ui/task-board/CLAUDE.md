@@ -35,3 +35,22 @@ adding a mood. Copy `themes/_TEMPLATE.css` to start.
   `index.html`'s `:root` from those primitives — a mood file never repeats them.
 - Use absolute paths (`/themes/...`, `/js/...`) in `index.html` to match how the
   server serves static files.
+
+## The Cadence tab
+
+A top-level board tab (sibling to the task views) rendering the **Cadence**
+subsystem — the standing-loop "second organ". It is **read-only**: nothing on it
+performs an external action. The whole tab renders from the program-type registry
++ program frontmatter (theme tokens only, exactly like cards render from their
+registry) — there is no per-type hardcoded UI.
+
+- **Data:** `GET /api/cadence` → `program_lib.build_cadence_payload()`. The payload
+  is families (presentation-only shelves) → `programs[]` rows; only non-empty
+  families render.
+- **Render:** `js/cadence.js`. Rows carry a state chip, a `holding/drifting/broken`
+  drift badge, next checkpoint, a last-cycle one-liner, and a needs-you count;
+  expansion shows the observation ledger, emission history, and a grounding block.
+  Four row layouts, one per state model (pipeline/cycle/target/register).
+- **Rules:** token-only and ASCII-safe like the rest of the UI; never add an action
+  that writes externally here. The subsystem map is
+  [`docs/reference/cadence.md`](../../docs/reference/cadence.md).

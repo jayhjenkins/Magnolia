@@ -21,6 +21,7 @@ Full laws + enforcing commands: [`docs/reference/invariants.md`](docs/reference/
 | Build a new feature or epic | run **`/magnolia-build`** — loads the operating context and runs the brainstorm→plan→build→ship loop |
 | Know the rules that must never break | [`docs/reference/invariants.md`](docs/reference/invariants.md) |
 | Understand how the system fits together | [`docs/reference/architecture.md`](docs/reference/architecture.md) |
+| Understand or extend **Cadence** (the standing-loop "second organ": programs, sentinels, the reconciler, lifecycle, the tab) | [`docs/reference/cadence.md`](docs/reference/cadence.md) |
 | Work the right way (the loop, git mechanics, timing) | [`docs/reference/conventions.md`](docs/reference/conventions.md) |
 | Add or change a card type / theme (the rules) | [`docs/reference/design-system.md`](docs/reference/design-system.md) |
 | `.claude/` config (skills, packs, commands, hooks) | [`.claude/CLAUDE.md`](.claude/CLAUDE.md) |
@@ -36,8 +37,11 @@ Full laws + enforcing commands: [`docs/reference/invariants.md`](docs/reference/
 - `datasets/strategy/` — Strategy sessions and formal memos
 - `datasets/meetings/` — Meeting transcripts (Customers/, Internal/) with YAML frontmatter
 - `datasets/tasks/` — Unified task queues (human, agent, collab, waiting)
+- `datasets/programs/` — Cadence program instances (`PROG-NNNN.md`); `archive/` holds retired programs (version-suffixed)
 - `datasets/cron/` — Recurring job definitions
+- `cadence/programtypes/registry.json` — Cadence program-type registry (gated by `program_schema.py`); `cadence/starter-sets.yaml` — onboarding bundles
 - `scripts/workers/` — Worker definitions for agent task dispatch
+- `scripts/sentinels/` — Cadence sentinel definitions (read-only observers)
 - `logs/` — Automation execution logs
 
 ## Search Tool Selection
