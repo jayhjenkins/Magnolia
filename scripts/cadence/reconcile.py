@@ -974,7 +974,11 @@ def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
 
     # Threshold = the type's cadence-period length * N cycles (period-aware per the
     # approved design; defaults to weekly when a type declares no cadence).
-    now = _parse_iso_date(now_iso)
+    # now_iso may be a full datetime isoformat (the scheduler) OR a date string
+    # (tests); _parse_iso_date accepts only YYYY-MM-DD, so take the date part.
+    now = _parse_iso_date(str(now_iso)[:10])
+    if now is None:
+        return None  # unparseable clock -> cannot judge silence (never crash)
     silent_threshold_days = silent_cycles * _period_days(type_entry)
     days_silent = (now - latest_obs_date).days
     if days_silent < silent_threshold_days:

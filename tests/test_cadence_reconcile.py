@@ -2004,6 +2004,29 @@ def test_propose_archive_silent_fires_when_silent_and_sentinel_live(tmp_path):
     assert isinstance(result.get("citations"), list)
 
 
+def test_propose_archive_silent_accepts_datetime_isoformat_clock(tmp_path):
+    """Regression: the scheduler passes now_iso as a FULL datetime isoformat
+    (e.g. '2026-06-18T19:05:48+00:00'), not a date. _propose_archive_silent must
+    parse the date part rather than crash on None - date (the live-board bug)."""
+    root = str(tmp_path / "data")
+    type_entry = {"id": "test-silent-type", "cadence": "weekly",
+                  "archive_after_silent_cycles": 6}
+    old_date = date.fromordinal(NOW.toordinal() - 50).isoformat()
+    pid, _ = pl.create_program(
+        type="test-silent-type", title="Dormant", owner_role="pm",
+        frontmatter_extra={"phase": "execution", "checkpoints": []}, root=root)
+    body = f"## Observations\n\n### {old_date}\ndormant observation"
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    telemetry = {"movement-watch": {"last_run": NOW.isoformat(), "last_error": None}}
+
+    # full datetime isoformat with tz offset, exactly as the scheduler builds it
+    result = reconcile._propose_archive_silent(
+        fm, type_entry, body, telemetry, "2026-06-16T19:05:48+00:00")
+
+    assert result is not None  # parsed the date part, did not crash
+    assert result["op"] == "archive"
+
+
 def test_propose_archive_silent_suppressed_when_sentinel_blind(tmp_path):
     """Silent archive suppressed when sentinel is blind (no run / stale / error)."""
     root = str(tmp_path / "data")

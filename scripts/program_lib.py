@@ -1531,16 +1531,19 @@ def _grounding(fm, body, type_entry, root):
     dates = [o.get("date") for o in obs if o.get("date")]
     last_observation = max(dates) if dates else None  # ISO dates sort lexically
 
+    # Read telemetry even when root is None: read_sentinel_runs(None) resolves to
+    # the default datasets location (the production board passes root=None). Stays
+    # "unknown" only when the telemetry file is missing or has no movement-watch
+    # entry. Never raises (degrades to "unknown").
     sentinel_live = "unknown"
-    if root:
-        try:
-            import sentinel_runner  # lazy: sentinel_runner imports program_lib
-            tele = sentinel_runner.read_sentinel_runs(root) or {}
-            mw = tele.get("movement-watch")
-            if isinstance(mw, dict) and mw.get("last_run"):
-                sentinel_live = not mw.get("last_error")
-        except Exception:
-            sentinel_live = "unknown"
+    try:
+        import sentinel_runner  # lazy: sentinel_runner imports program_lib
+        tele = sentinel_runner.read_sentinel_runs(root) or {}
+        mw = tele.get("movement-watch")
+        if isinstance(mw, dict) and mw.get("last_run"):
+            sentinel_live = not mw.get("last_error")
+    except Exception:
+        sentinel_live = "unknown"
 
     warnings = []
     sm = (type_entry or {}).get("state_model")
