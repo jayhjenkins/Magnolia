@@ -1145,6 +1145,8 @@ def _apply_cadence_proposal(task_id, t):
         if result.get("advanced"):
             summary += (f" Cascaded to advance phase to "
                         f"{result['advanced'].get('to')}.")
+    elif op == "archive":
+        summary = f"Archived {program_id} (moved to programs/archive)."
 
     # Record the applied mutation on the proposal card, then archive it.
     task_lib.update_task(task_id, comment=f"Accepted: {summary}", actor="human")

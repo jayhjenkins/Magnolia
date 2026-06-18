@@ -202,8 +202,30 @@ def create_program(type, title, owner_role, intent="",
 
 
 def read_program(program_id, root=None):
-    """Read and parse a program file. Returns dict with frontmatter + body."""
+    """Read and parse a program file. Returns dict with frontmatter + body.
+
+    Looks first in datasets/programs/, then in datasets/programs/archive/ if not
+    found. For archived files with version suffixes (e.g., PROG-0001-v2.md), picks
+    the highest version number.
+    """
     filepath = os.path.join(_program_dir(root), f"{program_id}.md")
+    if not os.path.isfile(filepath):
+        # Look in archive directory
+        archive_dir = os.path.join(_program_dir(root), "archive")
+        if os.path.isdir(archive_dir):
+            # Find <pid>.md or <pid>-v*.md, pick highest version
+            candidates = []
+            for fn in os.listdir(archive_dir):
+                if fn == f"{program_id}.md":
+                    candidates.append((0, os.path.join(archive_dir, fn)))
+                elif fn.startswith(f"{program_id}-v") and fn.endswith(".md"):
+                    version = _extract_version_suffix(fn)
+                    candidates.append((version, os.path.join(archive_dir, fn)))
+            if candidates:
+                # Sort by version (highest first), then take the path
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                filepath = candidates[0][1]
+
     if not os.path.isfile(filepath):
         raise FileNotFoundError(f"Program {program_id} not found")
 
@@ -915,6 +937,10 @@ def upsert_candidate(intake_program_id, *, candidate_key, program_type, title,
             "anchor": anchor,
             "status": "open",
             "declared": bool(declared),
+            # When the candidate first appeared -- the basis for nursery aging
+            # (the register verdict ages an item by its `age` field; intake
+            # reconcile derives `age` from `opened`). See reconcile._age_candidates.
+            "opened": _now_iso()[:10],
             "evidence": [evidence_entry],
             "source_count": _distinct_source_count([evidence_entry]),
         }
@@ -1132,6 +1158,20 @@ def _advance_phase_fm(fm, next_phase, today):
         fm["phase_entered"] = today  # scalar form = the current phase's entry date
 
 
+def _extract_version_suffix(filename):
+    """Extract version number from filename like 'PROG-0001-v3.md' or 'PROG-0001.md'.
+
+    Returns the version as an int (0 for no suffix, or the v number).
+    """
+    base = filename.replace(".md", "")
+    if "-v" in base:
+        try:
+            return int(base.split("-v")[-1])
+        except ValueError:
+            return 0
+    return 0
+
+
 # ─── Proposal applier (the closed mutation set behind a human accept) ─────────
 #
 # apply_mutation is the human-side counterpart to the reconciler's fact door:
@@ -1142,7 +1182,64 @@ def _advance_phase_fm(fm, next_phase, today):
 # #6): an advance appends a completion observation and never deletes. ASCII-safe
 # runtime strings (invariant #8).
 
-_MUTATION_OPS = frozenset({"advance-phase", "adjust-checkpoint"})
+_MUTATION_OPS = frozenset({"advance-phase", "adjust-checkpoint", "archive"})
+
+
+def _apply_archive(program_id, mutation, fm, type_entry, filepath, body, root):
+    """Archive a program: move to archive/, version-suffix on collision.
+
+    Returns a dict with keys: applied, program_id, to (the new path).
+    Or noop status if already archived.
+    """
+    # Check if already archived
+    if fm.get("status") == "archived":
+        return {"applied": None, "status": "noop", "reason": "already archived", "program_id": program_id}
+
+    reason = mutation.get("reason") or "archived"
+    citations = mutation.get("citations") or []
+
+    # Set status to archived in memory
+    fm["status"] = "archived"
+
+    # Write the updated frontmatter
+    _write_program_file(filepath, fm, body)
+
+    # Append a completion observation
+    # Cite the first citation VERBATIM (a terminal-phase name, a checkpoint id, a
+    # "sentinel:..." token, or a "meeting:..." id) -- never re-prefix it.
+    source = str(citations[0]) if citations else "proposal"
+    append_observation(
+        program_id, kind="completion", sentinel="reconciler", source=source,
+        claim=f"Program archived: {reason}.", root=root)
+
+    # Re-read to get updated body with the observation
+    prog = read_program(program_id, root=root)
+    updated_body = prog["body"]
+
+    # Compute archive target path with version-suffix collision handling
+    archive_dir = os.path.join(_program_dir(root), "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    archive_base = os.path.join(archive_dir, f"{program_id}.md")
+
+    target_path = archive_base
+    if os.path.exists(target_path):
+        # Collision: version-suffix
+        version = 2
+        while os.path.exists(os.path.join(archive_dir, f"{program_id}-v{version}.md")):
+            version += 1
+        target_path = os.path.join(archive_dir, f"{program_id}-v{version}.md")
+
+    # Move file
+    platform_lib.move_file(filepath, target_path)
+
+    # Return relative path from programs dir
+    rel_path = os.path.relpath(target_path, _program_dir(root))
+
+    return {
+        "applied": "archive",
+        "program_id": program_id,
+        "to": rel_path
+    }
 
 
 def apply_mutation(program_id, mutation, root=None):
@@ -1158,6 +1255,9 @@ def apply_mutation(program_id, mutation, root=None):
         Changes that checkpoint's `due` and/or `status`. Setting the CURRENT
         phase's exit_checkpoint to met cascades to advance the phase via the same
         advance path.
+      - {"op": "archive", "reason": <str>?, "citations": [...]?}
+        Moves the program file from datasets/programs/ to datasets/programs/archive/,
+        sets status to "archived", and appends a completion observation.
 
     An out-of-set or missing `op` raises ValueError with NO mutation. An
     adjust-checkpoint naming an unknown checkpoint id is refused (no mutation,
@@ -1166,7 +1266,9 @@ def apply_mutation(program_id, mutation, root=None):
     Returns one of:
       {"applied": "advance-phase", "program_id", "from", "to", "checkpoint"}
       {"applied": "adjust-checkpoint", "program_id", "id", "advanced": {...}|None}
+      {"applied": "archive", "program_id", "to": <path>}
       {"applied": None, "status": "refused", "reason": <ascii>, "program_id"}
+      {"applied": None, "status": "noop", "reason": <ascii>, "program_id"}
     """
     if not isinstance(mutation, dict):
         raise ValueError("mutation must be a dict carrying an 'op'")
@@ -1186,6 +1288,9 @@ def apply_mutation(program_id, mutation, root=None):
     if op == "advance-phase":
         return _apply_advance_phase(program_id, mutation, fm, type_entry,
                                     prog["filepath"], prog["body"], root)
+    if op == "archive":
+        return _apply_archive(program_id, mutation, fm, type_entry,
+                             prog["filepath"], prog["body"], root)
     return _apply_adjust_checkpoint(program_id, mutation, fm, type_entry,
                                     prog["filepath"], prog["body"], root)
 
@@ -1410,6 +1515,51 @@ def _project_observations(body):
     return entries
 
 
+def _grounding(fm, body, type_entry, root):
+    """Render-only grounding summary for a program (slice 8). DATA ONLY.
+
+    Surfaces how well-grounded a program is, with no external calls:
+      - citations: number of source-cited observations,
+      - last_observation: the most recent observation date (ISO) or None,
+      - sentinel_live: whether the movement-watch sentinel is live per telemetry
+        (True/False), or "unknown" when telemetry is unavailable,
+      - binding_warnings: ASCII binding-health notes (a target program with no
+        metric instrument, a pipeline program with no tracker binding).
+    """
+    obs = _project_observations(body)
+    citations = sum(1 for o in obs if o.get("source"))
+    dates = [o.get("date") for o in obs if o.get("date")]
+    last_observation = max(dates) if dates else None  # ISO dates sort lexically
+
+    # Read telemetry even when root is None: read_sentinel_runs(None) resolves to
+    # the default datasets location (the production board passes root=None). Stays
+    # "unknown" only when the telemetry file is missing or has no movement-watch
+    # entry. Never raises (degrades to "unknown").
+    sentinel_live = "unknown"
+    try:
+        import sentinel_runner  # lazy: sentinel_runner imports program_lib
+        tele = sentinel_runner.read_sentinel_runs(root) or {}
+        mw = tele.get("movement-watch")
+        if isinstance(mw, dict) and mw.get("last_run"):
+            sentinel_live = not mw.get("last_error")
+    except Exception:
+        sentinel_live = "unknown"
+
+    warnings = []
+    sm = (type_entry or {}).get("state_model")
+    if sm == "target" and not (fm.get("metric") or {}).get("instrument"):
+        warnings.append("metric instrument not set")
+    if sm == "pipeline" and not tracker_anchor(fm):
+        warnings.append("no tracker binding")
+
+    return {
+        "citations": citations,
+        "last_observation": last_observation,
+        "sentinel_live": sentinel_live,
+        "binding_warnings": warnings,
+    }
+
+
 def render_view(program, registry, needs_you=0, emissions=None, root=None):
     """Map a program dict (frontmatter + body) into the render contract.
 
@@ -1446,6 +1596,7 @@ def render_view(program, registry, needs_you=0, emissions=None, root=None):
         "intent": _parse_intent(body),
         "family": family,
         "type_label": type_label,
+        "grounding": _grounding(fm, body, type_entry, root),
         "activity": _parse_observations(body),
         # The richer ledger: same entries as `activity` but keeping the source
         # citation + sentinel/kind that `activity` drops. `activity` stays for
@@ -1565,6 +1716,21 @@ def render_view(program, registry, needs_you=0, emissions=None, root=None):
                     "age": it.get("source_count"),
                     "status": it.get("status"),
                     "possible_duplicate_of": it.get("possible_duplicate_of"),
+                }
+                for it in (fm.get("items") or [])
+            ]
+        elif type_id == "portfolio-health":
+            # Janitor findings: keep `severity` and `kind` so the UI can tone each
+            # finding by its own severity and label its category. The JS layer owns
+            # color (from severity); render_view derives only the raw values.
+            vm["items"] = [
+                {
+                    "name": it.get("name"),
+                    "owner": it.get("owner"),
+                    "age": it.get("age"),
+                    "status": it.get("status"),
+                    "kind": it.get("kind"),
+                    "severity": it.get("severity"),
                 }
                 for it in (fm.get("items") or [])
             ]

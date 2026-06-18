@@ -19,6 +19,7 @@ invariant #8.
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -234,6 +235,22 @@ def _verdict_register(fm):
     except (TypeError, ValueError):
         policy = _DEFAULT_POLICY_DAYS
     items = fm.get("items") or []
+
+    # Severity-driven registers (the portfolio-health janitor): when items carry an
+    # explicit `severity` (holding/drifting/broken finding), the worst severity IS
+    # the verdict -- the age/policy math does not apply to health findings. Normal
+    # registers (no severity) fall through to the age window below.
+    severities = [it.get("severity") for it in items
+                  if isinstance(it, dict) and it.get("severity") in _VERDICTS]
+    if severities:
+        worst = "holding"
+        for s in severities:
+            worst = _worse(worst, s)
+        worst_item = next(
+            (it for it in items if it.get("severity") == worst), None)
+        reason = (worst_item or {}).get("name", "findings")
+        return worst, {"reason": reason, "next": "review findings"}
+
     verdict = "holding"
     facts = {"reason": "within policy", "next": "none"}
     for it in items:
@@ -818,8 +835,186 @@ def _latest_interpretive_claim(body):
     return claim
 
 
+def _build_archive_description(mutation, program_id):
+    """Build a one-line description for an archive proposal card.
+
+    Format: reason + citations + program backlink.
+    """
+    reason = mutation.get("reason", "unknown")
+    citations = mutation.get("citations", [])
+    cite_str = "; ".join(str(c) for c in citations) if citations else "none"
+    # Plain-text backlink, matching _build_birth_description / _build_proposal_description
+    # (no markdown link to a nonexistent route). ASCII only, no em-dash.
+    return (
+        f"Cadence proposes archiving {program_id}: {reason}. "
+        f"Evidence: {cite_str}."
+    )
+
+
+def _propose_archive(fm, type_entry, body):
+    """Propose archive mutation if ANY fact indicates completion.
+
+    Facts checked:
+    1. Program phase is terminal
+    2. A "did-it-work" checkpoint is verified/met
+    3. A completion observation cites a tracker as closed
+
+    Returns:
+      - A dict with op:"archive", reason, citations if archive is proposed
+      - None otherwise
+    """
+    # Fact 1: Terminal phase
+    phase = fm.get("phase")
+    if phase and program_lib._terminal_phase(type_entry, phase):
+        return {
+            "op": "archive",
+            "reason": f"reached terminal phase: {phase}",
+            "citations": [phase]  # cite the phase name
+        }
+
+    # Fact 2: did-it-work checkpoint verified
+    checkpoints = fm.get("checkpoints") or []
+    for cp in checkpoints:
+        if "did-it-work" in (cp.get("id", "") + cp.get("kind", "")):
+            if cp.get("status") in {"verified", "met"}:
+                return {
+                    "op": "archive",
+                    "reason": f"did-it-work verified: {cp.get('id', 'unnamed')}",
+                    "citations": [cp.get("id", "unknown")]
+                }
+
+    # Fact 3: a `completion` observation reporting a tracker/epic closed.
+    # Observations are "### <date> - sentinel:NAME [kind] (confidence X)" headers
+    # followed by the claim text on the next line(s) -- NOT "- " bullets. Scan for
+    # a [completion] header whose following claim mentions "closed", and cite the
+    # observation's sentinel/source from the header.
+    if body:
+        in_obs = False
+        current_hdr = None
+        for line in body.split("\n"):
+            s = line.strip()
+            if s.startswith("## Observations"):
+                in_obs = True
+                continue
+            if in_obs and s.startswith("## "):
+                break  # end of the observations section
+            if not in_obs:
+                continue
+            if s.startswith("### "):
+                current_hdr = s
+                continue
+            if current_hdr and "[completion]" in current_hdr and "closed" in s.lower():
+                return {
+                    "op": "archive",
+                    "reason": "tracker reported closed (completion observation)",
+                    "citations": [_obs_source_from_header(current_hdr)],
+                }
+
+    return None
+
+
+def _obs_source_from_header(header):
+    """Extract a citation from an observation header line.
+
+    Returns the `sentinel:NAME` token when present (e.g. "sentinel:tracker-truth"),
+    else a generic "tracker" citation. ASCII only.
+    """
+    m = re.search(r"sentinel:([\w-]+)", header or "")
+    return f"sentinel:{m.group(1)}" if m else "tracker"
+
+
+# Days per cadence period -- the silent-archive threshold is N of these.
+_PERIOD_DAYS = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30,
+                "quarterly": 90}
+
+
+def _period_days(type_entry):
+    """Length of one cadence period in days for a type (defaults to weekly=7)."""
+    cadence = (type_entry or {}).get("cadence") or "weekly"
+    return _PERIOD_DAYS.get(cadence, 7)
+
+
+def _latest_observation_date(body):
+    """Most recent observation date in a program body, as a date, or None."""
+    latest = None
+    for obs_date, _kind, _source, _claim in _iter_observations(body or ""):
+        parsed = _parse_iso_date(obs_date)
+        if parsed is not None and (latest is None or parsed > latest):
+            latest = parsed
+    return latest
+
+
+def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
+    """Propose archive if the program has been silent too long AND the sentinel is live.
+
+    Silent is defined by the type's `archive_after_silent_cycles` (in weeks): if the
+    latest observation is older than (cycles * 7) days AND the movement-watch sentinel
+    is live (has a recent last_run with no error), propose archive.
+
+    Args:
+      fm: program frontmatter dict
+      type_entry: the type dict containing optional `archive_after_silent_cycles`
+      body: program body (contains ## Observations)
+      telemetry: sentinel telemetry dict from sentinel_runner.read_sentinel_runs()
+      now_iso: ISO datetime string (e.g., from date.today().isoformat() or NOW.isoformat())
+
+    Returns:
+      - A dict with op:"archive", reason, citations if silent archive is proposed
+      - None otherwise
+    """
+    silent_cycles = type_entry.get("archive_after_silent_cycles")
+    if not silent_cycles:
+        return None  # No silent policy configured for this type
+
+    # Latest observation date = the program's last activity signal.
+    latest_obs_date = _latest_observation_date(body)
+
+    if not latest_obs_date:
+        return None  # No observations, cannot apply silent archive
+
+    # Threshold = the type's cadence-period length * N cycles (period-aware per the
+    # approved design; defaults to weekly when a type declares no cadence).
+    # now_iso may be a full datetime isoformat (the scheduler) OR a date string
+    # (tests); _parse_iso_date accepts only YYYY-MM-DD, so take the date part.
+    now = _parse_iso_date(str(now_iso)[:10])
+    if now is None:
+        return None  # unparseable clock -> cannot judge silence (never crash)
+    silent_threshold_days = silent_cycles * _period_days(type_entry)
+    days_silent = (now - latest_obs_date).days
+    if days_silent < silent_threshold_days:
+        return None  # Still active (within the threshold)
+
+    # Check sentinel health: movement-watch must be LIVE (recent run, no error)
+    if not telemetry:
+        return None  # No telemetry, cannot verify sentinel is live
+    movement_watch = telemetry.get("movement-watch", {})
+    last_error = movement_watch.get("last_error")
+    if last_error:
+        return None  # Sentinel is blind (has error), suppress archive
+
+    last_run_str = movement_watch.get("last_run")
+    if not last_run_str:
+        return None  # No last_run recorded, sentinel never ran
+
+    # Check if sentinel last_run is recent enough (within last 7 days is reasonable)
+    try:
+        last_run = _parse_iso_date(last_run_str)
+        sentinel_staleness = (now - last_run).days
+        if sentinel_staleness > 7:
+            return None  # Sentinel is blind (stale run > 7 days)
+    except (ValueError, TypeError):
+        return None  # Cannot parse last_run
+
+    # All gates passed: propose archive
+    return {
+        "op": "archive",
+        "reason": f"dormant {days_silent} days (threshold {silent_threshold_days})",
+        "citations": ["silent-too-long"],
+    }
+
+
 def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None,
-                       period=None, registry=None):
+                       period=None, registry=None, now=None):
     """Evaluate the type's declarative emitters. Returns created task ids.
 
     Three emitter families fire here, all Tier-1 (LOCAL cards, no external writes,
@@ -859,6 +1054,10 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
     open_prop_ops = None    # lazily computed on the first propose-update fire
     open_agent_types = None  # lazily computed on the first produce-artifact fire
     open_birth_ids = None   # lazily computed on the first candidate-ripe fire
+    # Default now to today if not provided (for testing and background runs)
+    if now is None:
+        now = datetime.now(timezone.utc)
+    now_iso = now.isoformat() if isinstance(now, datetime) else str(now)
 
     for em in emitters:
         action = em.get("action")
@@ -917,6 +1116,62 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 emitted.append(task_id)
                 if cid:
                     open_birth_ids.add(cid)
+
+        elif action == "propose-update" and on == "completion-verified":
+            # The ARCHIVE door (inc4b): propose archiving when facts indicate completion.
+            # The mutation function is the real gate: _propose_archive checks terminal
+            # phase, verified checkpoints, and tracker-closed observations.
+            mutation = _propose_archive(fm, type_entry, body or "")
+            if not mutation:
+                continue
+            import task_lib
+            if open_prop_ops is None:
+                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+            if mutation["op"] in open_prop_ops:
+                continue  # an open proposal for the same op already exists -> dedupe
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: archive?",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                card_type="recommendation",
+                task_type="cadence-propose-update",
+                tags=[program_id, "cadence"],
+                proposal=mutation,
+                description=_build_archive_description(mutation, program_id),
+            )
+            emitted.append(task_id)
+            open_prop_ops.add(mutation["op"])
+
+        elif action == "propose-update" and on == "silent-too-long":
+            # The SILENT ARCHIVE door (inc4b): propose archiving when the program
+            # has been dormant longer than the type's archive_after_silent_cycles
+            # AND the movement-watch sentinel is live (recent, no errors).
+            # The mutation function is the real gate: _propose_archive_silent checks
+            # observation staleness and sentinel health.
+            import sentinel_runner
+            telemetry = sentinel_runner.read_sentinel_runs(root)
+            mutation = _propose_archive_silent(fm, type_entry, body or "", telemetry, now_iso)
+            if not mutation:
+                continue
+            import task_lib
+            if open_prop_ops is None:
+                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+            if mutation["op"] in open_prop_ops:
+                continue  # an open proposal for the same op already exists -> dedupe
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: archive?",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                card_type="recommendation",
+                task_type="cadence-propose-update",
+                tags=[program_id, "cadence"],
+                proposal=mutation,
+                description=_build_archive_description(mutation, program_id),
+            )
+            emitted.append(task_id)
+            open_prop_ops.add(mutation["op"])
 
         elif action == "propose-update":
             # The mutation function is the real gate (the `on` string is only a
@@ -1143,6 +1398,151 @@ def _maybe_advance_phase(fm, type_entry, body, now):
     return body, {"from": phase, "to": next_phase, "checkpoint": cp_id}
 
 
+def _age_candidates(fm, now):
+    """Derive each OPEN candidate's `age` (days since `opened`) in place.
+
+    The register verdict (_verdict_register) ages an item by its numeric `age`
+    field, but intake candidates carry `opened`, not `age` (4a M-3). Deriving it
+    here lets the nursery drift on stale candidates and gives the janitor a real
+    age to report. Only open/flagged candidates with a parseable `opened` are
+    aged; closed-with-reason / birthed candidates are left untouched.
+    """
+    today = now.date() if isinstance(now, datetime) else _parse_iso_date(str(now))
+    if today is None:
+        return
+    for it in fm.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        if it.get("status", "open") not in {"open", "flagged"}:
+            continue
+        opened = it.get("opened")
+        if not opened:
+            continue
+        parsed = _parse_iso_date(opened)
+        if parsed is not None:
+            it["age"] = (today - parsed).days
+
+
+# How long a sentinel that HAS run may go silent before it is "blind" (stale).
+_SENTINEL_STALE_DAYS = 14
+
+
+def _scan_portfolio_health(root, now):
+    """Scan the program store + intake register + telemetry, return findings.
+
+    Each finding is a register item dict shaped for both the severity-aware
+    register verdict and the UI: {name, owner, kind, severity, status, age?}.
+    severity is one of holding/drifting/broken; a broken finding escalates via
+    the type's `drift:broken` emitter. The janitor REPORTS -- it never archives
+    (the per-program archive doors propose that). ASCII-safe (invariant #8).
+
+    Findings:
+      - blind-sentinel (broken): a sentinel that HAS run but is now errored or
+        stale (> _SENTINEL_STALE_DAYS). A never-run sentinel is NOT flagged (that
+        is a cold start, not a regression -- the dead-vs-blind distinction).
+      - stale-active (drifting): an active program silent past its type's
+        archive_after_silent_cycles.
+      - aging-candidate (drifting): an open intake candidate older than the
+        nursery policy.
+      - duplicate (drifting): two active programs with the same normalized title.
+      - supply (drifting): no active programs in the roadmap family (the team has
+        nothing refined in front of it).
+    """
+    today = now.date() if isinstance(now, datetime) else _parse_iso_date(str(now))
+    findings = []
+
+    programs = program_lib.list_programs(status="active", root=root)
+    reg = program_lib.load_registry()
+    types_by_id = {t.get("id"): t for t in reg.get("types", [])}
+
+    telemetry = {}
+    try:
+        import sentinel_runner
+        telemetry = sentinel_runner.read_sentinel_runs(root) or {}
+    except Exception:
+        telemetry = {}
+
+    # 1. Blind sentinels: ran before, now errored or stale.
+    for name, entry in telemetry.items():
+        if not isinstance(entry, dict):
+            continue
+        reason = None
+        if entry.get("last_error"):
+            reason = "error"
+        else:
+            last_run = _parse_iso_date(entry.get("last_run"))
+            if last_run is None or (today and (today - last_run).days > _SENTINEL_STALE_DAYS):
+                reason = "stale"
+        if reason:
+            findings.append({
+                "name": f"sentinel {name} blind ({reason})", "owner": name,
+                "kind": "blind-sentinel", "severity": "broken", "status": "open",
+            })
+
+    # 2. Stale actives + 4. duplicate detection (single pass over actives).
+    norm_titles = {}
+    for p in programs:
+        fm = p["frontmatter"]
+        pid = fm.get("program_id")
+        te = types_by_id.get(fm.get("type"), {})
+        n = te.get("archive_after_silent_cycles")
+        if n:
+            last_obs = _latest_observation_date(p["body"])
+            if last_obs and today:
+                days = (today - last_obs).days
+                if days > n * _period_days(te):
+                    findings.append({
+                        "name": f"{fm.get('title', pid)} silent {days}d",
+                        "owner": pid, "kind": "stale-active",
+                        "severity": "drifting", "status": "open", "age": days,
+                    })
+        key = program_lib._norm_title_key(fm.get("title", ""))
+        if key:
+            norm_titles.setdefault(key, []).append(pid)
+
+    for key, pids in norm_titles.items():
+        if len(pids) > 1:
+            findings.append({
+                "name": f"possible duplicates: {', '.join(pids)}",
+                "owner": pids[0], "kind": "duplicate",
+                "severity": "drifting", "status": "open",
+            })
+
+    # 3. Aging candidates in the intake register(s).
+    for p in programs:
+        fm = p["frontmatter"]
+        if fm.get("type") != "program-intake":
+            continue
+        try:
+            policy = int(fm.get("policy", _DEFAULT_POLICY_DAYS))
+        except (TypeError, ValueError):
+            policy = _DEFAULT_POLICY_DAYS
+        for it in fm.get("items") or []:
+            if not isinstance(it, dict) or it.get("status") not in {"open", "flagged"}:
+                continue
+            opened = _parse_iso_date(it.get("opened"))
+            if opened and today and (today - opened).days > policy:
+                findings.append({
+                    "name": f"candidate aging: {it.get('title', '?')}",
+                    "owner": it.get("id"), "kind": "aging-candidate",
+                    "severity": "drifting", "status": "open",
+                    "age": (today - opened).days,
+                })
+
+    # 5. Supply: nothing refined in the roadmap family.
+    roadmap_actives = [
+        p for p in programs
+        if (types_by_id.get(p["frontmatter"].get("type"), {}).get("family") == "roadmap")
+    ]
+    if not roadmap_actives:
+        findings.append({
+            "name": "no active roadmap programs (supply low)", "owner": "portfolio",
+            "kind": "supply", "severity": "drifting", "status": "open",
+        })
+
+    return findings
+
+
 def reconcile_program(program, registry, now=None, force=False, root=None):
     """Run one program's reconcile cycle. Returns a result dict.
 
@@ -1165,6 +1565,16 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     now = now or datetime.now(timezone.utc)
     fm = program["frontmatter"]
     body = program["body"]
+
+    # The janitor refreshes its findings from a live portfolio scan each cycle,
+    # BEFORE the verdict (the severity-aware register verdict reads them). Self-
+    # hosting: the janitor is just a program whose items are computed, not declared.
+    if fm.get("type") == "portfolio-health":
+        fm["items"] = _scan_portfolio_health(root, now)
+
+    # Age open intake candidates from their `opened` date so the register verdict
+    # can drift on a stale nursery (4a M-3). No-op for items without `opened`.
+    _age_candidates(fm, now)
 
     verdict, facts = compute_verdict(program, registry, now)
 
@@ -1189,7 +1599,7 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     )
     emitted = _evaluate_emitters(
         program, type_entry, verdict, facts, body=body, root=root, period=period,
-        registry=registry
+        registry=registry, now=now
     )
 
     # The FACT door: mutate `fm` in place (phase + checkpoint) when the current

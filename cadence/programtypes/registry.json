@@ -9,6 +9,7 @@
   "types": [
     { "id": "roadmap-initiative", "label": "Roadmap initiative", "family": "roadmap",
       "state_model": "pipeline",
+      "archive_after_silent_cycles": 6,
       "phases": [
         { "id": "discovery", "label": "Discovery", "max_age_days": 21, "exit_checkpoint": "discovery-exit" },
         { "id": "planning",  "label": "Planning",  "max_age_days": 14 },
@@ -18,7 +19,7 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" }, { "kind": "project_management", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
         "signals": [
@@ -55,7 +56,7 @@
     { "id": "did-it-work", "label": "Did it work?", "family": "outcomes",
       "state_model": "target", "cadence": "weekly",
       "sources": [ { "kind": "metrics", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "completion-verified", "action": "propose-update" } ],
       "presentation": { "chip_tokens": {} } },
 
     { "id": "eos-rock", "label": "EOS rock", "family": "eos",
@@ -68,7 +69,7 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "completion-verified", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
         "signals": [ "quarterly rock commitment declared in a leadership session" ],
@@ -94,6 +95,14 @@
       "sources": [ { "kind": "transcripts", "mode": "read" } ],
       "emitters": [
         { "on": "candidate-ripe", "action": "propose-update" },
+        { "on": "drift:broken", "action": "escalate" }
+      ],
+      "presentation": { "chip_tokens": {} } },
+
+    { "id": "portfolio-health", "label": "Portfolio health", "family": "system",
+      "state_model": "register", "cadence": "weekly",
+      "sources": [ { "kind": "transcripts", "mode": "read" } ],
+      "emitters": [
         { "on": "drift:broken", "action": "escalate" }
       ],
       "presentation": { "chip_tokens": {} } }

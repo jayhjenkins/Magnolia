@@ -235,6 +235,7 @@ function cadenceExpandedPanel(p, tone) {
           <div class="cadence-eyebrow">Emissions</div>
           ${cadenceEmissions(p)}
         </div>
+        ${cadenceGrounding(p)}
         ${cadenceDigestsBlock(p)}
       </div>
     </div>
@@ -336,8 +337,19 @@ function cadenceItems(p) {
     // candidate row reads "<type> · N src · <status>". A missing field never
     // blanks the row (mirrors the inc3b cycle/register tolerance).
     const isCandidate = hasAge && hasStatus;
+    // A portfolio-health JANITOR finding carries an explicit `severity`
+    // (holding/drifting/broken) and a `kind` (blind-sentinel/stale-active/...).
+    // Tone by severity, label by kind, so a finding row reads
+    // "<finding text> - <owner> - <kind>". Checked first: findings never carry
+    // the candidate/cycle/register shapes, and severity is the discriminator.
+    const hasSeverity = it.severity != null && it.severity !== '';
     let trailing;
-    if (isCandidate) {
+    if (hasSeverity) {
+      const sev = String(it.severity);
+      const sevColor = sev === 'broken' ? 'var(--danger)'
+        : sev === 'drifting' ? 'var(--warning)' : 'var(--text-dim)';
+      trailing = `<span class="cadence-item-finding" style="color:${sevColor};">${escapeHtml(String(it.kind || 'finding'))}</span>`;
+    } else if (isCandidate) {
       // Source count is a tally, not an age, so no policy/age color comparison.
       const n = String(age);
       const st = String(it.status);
@@ -372,6 +384,31 @@ function cadenceItems(p) {
     </div>`;
   }
   return `<div class="cadence-items">${rows}</div>`;
+}
+
+// The grounding block (slice 8): citations, last observation, sentinel liveness,
+// and binding-health warnings. Render-only; tone from the data. Absent grounding
+// (older payloads) renders nothing.
+function cadenceGrounding(p) {
+  const g = p.grounding;
+  if (!g) return '';
+  const liveColor = g.sentinel_live === true ? 'var(--success)'
+    : g.sentinel_live === false ? 'var(--danger)' : 'var(--text-dim)';
+  const live = g.sentinel_live === true ? 'live'
+    : g.sentinel_live === false ? 'blind' : 'unknown';
+  const last = g.last_observation ? cadenceDate(g.last_observation) : 'none';
+  const warns = (g.binding_warnings || [])
+    .map(w => `<div class="cadence-grounding-warn" style="color:var(--warning);">${escapeHtml(w)}</div>`)
+    .join('');
+  return `<div class="cadence-block">
+    <div class="cadence-eyebrow">Grounding</div>
+    <div class="cadence-grounding" style="color:var(--text-dim);font-size:0.85em;">
+      <span>${escapeHtml(String(g.citations || 0))} citations</span>
+      &middot; <span>last ${escapeHtml(last)}</span>
+      &middot; sentinel <span style="color:${liveColor};">${escapeHtml(live)}</span>
+    </div>
+    ${warns}
+  </div>`;
 }
 
 function cadenceCheckpoints(p) {

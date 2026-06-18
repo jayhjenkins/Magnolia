@@ -505,3 +505,54 @@ def test_seeded_program_intake_program_parses_active():
     # role token, never a person/team name (invariant #1).
     assert fm["owner_role"] == "product"
     assert fm["items"] == []
+
+
+# ─── Task 3: archive fields, triggers, portfolio-health type ─────────────────
+
+
+def test_archive_after_silent_cycles_accepts_nonneg_int():
+    """archive_after_silent_cycles field accepts non-negative ints."""
+    reg = _type_with_emitters([])
+    reg["types"][0]["archive_after_silent_cycles"] = 10
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_archive_after_silent_cycles_rejects_bool():
+    """archive_after_silent_cycles rejects bool (even though bool is int subclass)."""
+    reg = _type_with_emitters([])
+    reg["types"][0]["archive_after_silent_cycles"] = True
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("archive_after_silent_cycles" in e for e in errs)
+
+
+def test_archive_after_silent_cycles_rejects_negative():
+    """archive_after_silent_cycles rejects negative values."""
+    reg = _type_with_emitters([])
+    reg["types"][0]["archive_after_silent_cycles"] = -1
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("archive_after_silent_cycles" in e for e in errs)
+
+
+def test_completion_verified_and_silent_too_long_emitter_triggers_valid():
+    """New emitter triggers: completion-verified and silent-too-long are valid."""
+    reg = _type_with_emitters([
+        {"on": "completion-verified", "action": "propose-update"},
+        {"on": "silent-too-long", "action": "propose-update"}
+    ])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_portfolio_health_type_validates():
+    """portfolio-health type is present in registry and validates."""
+    with open(ps.REGISTRY, encoding="utf-8") as f:
+        reg = json.load(f)
+    # Find portfolio-health type
+    ph = next((t for t in reg["types"] if t["id"] == "portfolio-health"), None)
+    assert ph is not None, "portfolio-health type not in registry"
+    assert ph["state_model"] == "register"
+    assert ph["family"] == "system"
+    # Validate the entire registry (which includes this type)
+    errs = ps.validate_doc(reg, tokens=ps._theme_tokens())
+    assert errs == [], f"portfolio-health type validation failed: {errs}"

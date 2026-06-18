@@ -391,6 +391,52 @@ def test_reject_birth_proposal_closes_candidate(tasks_root, tmp_path, monkeypatc
     assert tid not in [t["id"] for t in task_lib.list_tasks()]
 
 
+def test_accept_archive_proposal_moves_file_no_git(tasks_root, tmp_path, monkeypatch):
+    # An archive proposal (op archive) rides the SAME apply_mutation path as
+    # advance/adjust (archive is in the closed set) -- no new accept branch. Accept
+    # moves the file to programs/archive, sets status archived, completes the card,
+    # spawns an informational receipt, and never commits to git.
+    import task_server, task_lib, program_lib
+    pid = _seed_cadence_program(tmp_path, monkeypatch)
+    # NON-repo PM_OS_DIR: a git path would blow up, proving Tier-1.
+    monkeypatch.setattr(task_server, "PM_OS_DIR", str(tmp_path / "not-a-repo"))
+    tid, _ = task_lib.create_task(
+        "archive?", queue="human", card_type="recommendation",
+        task_type="cadence-propose-update", tags=[pid, "cadence"],
+        proposal={"op": "archive", "reason": "reached terminal phase",
+                  "citations": ["meeting:X"]})
+    receipt_id = task_server.apply_recommendation(tid)
+
+    # archived: file left the active scan, status archived, still resolvable.
+    assert pid not in [p["program_id"]
+                       for p in program_lib.list_programs(root=str(tmp_path))]
+    fm = program_lib.read_program(pid, root=str(tmp_path))["frontmatter"]
+    assert fm["status"] == "archived"
+    # card completed; informational receipt, NOT a git revert.
+    assert tid not in [t["id"] for t in task_lib.list_tasks()]
+    rc = task_lib.read_task(receipt_id)["frontmatter"]
+    assert rc["card_type"] == "receipt"
+    assert not rc.get("revert_commit")
+
+
+def test_reject_archive_proposal_cancels_card_no_move(tasks_root, tmp_path, monkeypatch):
+    # Rejecting an archive proposal just cancels the card -- there is NO candidate
+    # to close (that path is birth-only). The program stays active and in place.
+    import task_server, task_lib, program_lib
+    pid = _seed_cadence_program(tmp_path, monkeypatch)
+    tid, _ = task_lib.create_task(
+        "archive?", queue="human", card_type="recommendation",
+        task_type="cadence-propose-update", tags=[pid, "cadence"],
+        proposal={"op": "archive", "reason": "dormant"})
+    task_server.reject_recommendation(tid)
+
+    fm = program_lib.read_program(pid, root=str(tmp_path))["frontmatter"]
+    assert fm["status"] == "active"  # untouched
+    assert pid in [p["program_id"]
+                   for p in program_lib.list_programs(root=str(tmp_path))]
+    assert tid not in [t["id"] for t in task_lib.list_tasks()]  # card cancelled
+
+
 def test_undo_conflict_aborts_cleanly(tasks_root, tmp_path, monkeypatch):
     import task_server, task_lib, pytest
     repo = tmp_path / "repo"; repo.mkdir()

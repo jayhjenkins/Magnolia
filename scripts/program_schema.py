@@ -35,6 +35,9 @@ CLOSED_ACTIONS = {"escalate", "draft-message", "produce-artifact",
                   "propose-update", "draft-ticket"}
 # Brief §3 closed intake routing set — how a type's exhaust is routed.
 INTAKE_ROUTES = {"observe", "capture", "candidate", "ignore"}
+# Brief §3 closed emitter trigger set — the only triggers an emitter may declare.
+EMITTER_TRIGGERS = {"drift:broken", "candidate-ripe", "phase-advance-proposable",
+                    "cycle-fresh", "completion-verified", "silent-too-long"}
 
 
 def _theme_tokens():
@@ -121,6 +124,10 @@ def validate_doc(reg, tokens):
                     if not isinstance(on, str) or not on.strip():
                         errors.append(
                             f"type '{tid}': emitter has empty or non-string 'on'")
+                    elif on not in EMITTER_TRIGGERS:
+                        errors.append(
+                            f"type '{tid}': emitter trigger '{on}' not in "
+                            f"closed set {sorted(EMITTER_TRIGGERS)}")
                     action = em.get("action")
                     if action not in CLOSED_ACTIONS:
                         errors.append(
@@ -135,6 +142,15 @@ def validate_doc(reg, tokens):
                                 f"type '{tid}': emitter "
                                 f"max_nudges_per_person_per_week must be a "
                                 f"non-negative int, got {type(v).__name__}")
+
+        # Archive field (Task 3) — when to archive a program after silent cycles.
+        if "archive_after_silent_cycles" in t:
+            v = t["archive_after_silent_cycles"]
+            # bool is an int subclass; reject it explicitly.
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                errors.append(
+                    f"type '{tid}': archive_after_silent_cycles must be a "
+                    f"non-negative int, got {type(v).__name__}")
 
         # Intake block (brief §3) — how this type's exhaust is routed and,
         # for a `candidate` route, when accumulated evidence births a program.
