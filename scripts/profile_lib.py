@@ -316,6 +316,62 @@ def set_cost_posture(level, root=None):
     _update_yaml("config.yaml", mutate, root)
 
 
+def profile_is_live(root=None):
+    """True if the live profile/ dir exists (not the profile.example fallback)."""
+    root = root or PM_OS_DIR
+    return os.path.isdir(os.path.join(root, "profile"))
+
+
+def onboarding_complete(root=None):
+    """True once onboarding has finished: the live profile exists AND its config
+    carries `onboarded: true`. NOT mere profile/ existence (meta-onboard creates
+    profile/ early, at step 0, so existence alone would flip the gate
+    mid-onboarding)."""
+    if not profile_is_live(root):
+        return False
+    try:
+        return bool(config(root=root).get("onboarded"))
+    except Exception:
+        # A malformed config.yaml must not crash the gate. Treat an unreadable
+        # config as "not complete" - the safe direction, gating to onboarding.
+        return False
+
+
+def mark_onboarded(root=None):
+    """Stamp `onboarded: true` into the live profile config (the completion
+    marker). Called by meta-onboard's final step. Uses the same round-trip
+    read-modify-write idiom every other config setter uses, preserving siblings
+    and comments.
+
+    No-op (no write) when there is no live profile/. Without this guard a call
+    with no live profile would fall through profile_dir()'s profile.example
+    fallback and stamp the SHIPPED template - dirtying the tree and making every
+    fresh clone skip onboarding. A silent no-op is the safe behavior for a marker
+    writer; this mirrors the profile_is_live guard its sibling setters rely on."""
+    if not profile_is_live(root):
+        return
+    def mutate(doc):
+        doc["onboarded"] = True
+    _update_yaml("config.yaml", mutate, root)
+
+
+def migrate_legacy_onboarded(root=None):
+    """Backward-compat: an existing install (live profile already populated with
+    a real identity) predates the marker - stamp it so it is never re-gated into
+    onboarding. Returns True if it stamped, False otherwise. Idempotent."""
+    if not profile_is_live(root):
+        return False
+    cfg = config(root=root)
+    if cfg.get("onboarded"):
+        return False
+    name = (profile(root=root).get("display_name") or "").strip()
+    placeholder = name == "" or name.lower() in ("your name", "name")
+    if placeholder:
+        return False   # genuinely fresh/example-shaped; let onboarding run
+    mark_onboarded(root=root)
+    return True
+
+
 def autonomy_enforcement(root=None):
     """Global posture flag: may an autonomous action-type auto-ship without a
     per-instance human approve? Default False (auto-ship is opt-in per install)."""

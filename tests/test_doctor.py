@@ -178,16 +178,18 @@ def test_report_text_lists_caps(tmp_path):
     assert "brew install qmd" in text
 
 
-def test_qmd_is_not_required():
-    doc = doctor.detect()
+def test_qmd_is_not_required(tmp_path):
+    (tmp_path / "profile").mkdir()
+    doc = doctor.detect(root=str(tmp_path))
     qmd = doc["capabilities"]["qmd"]
     assert qmd.get("required") is False
 
 
-def test_recommended_tools_carry_rationale():
+def test_recommended_tools_carry_rationale(tmp_path):
     # qmd/pandoc/mgc are strongly recommended (non-blocking) and must carry a
     # plain-language rationale the Doctor can surface — see _LOCAL_TOOLS.
-    doc = doctor.detect()
+    (tmp_path / "profile").mkdir()
+    doc = doctor.detect(root=str(tmp_path))
     caps = doc["capabilities"]
     for name in ("qmd", "pandoc", "msgraph_cli"):
         assert caps[name].get("recommended") is True, name

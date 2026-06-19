@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<!--
+  Onboarding room - PLACEHOLDER (Inc 3a).
+
+  The first-run gate (task_server.do_GET) serves this page in place of the board
+  until onboarding completes (profile_lib.onboarding_complete()). Inc 3b replaces
+  this placeholder with the real conversational onboarding room that POSTs to
+  /api/onboarding/run and streams the meta-onboard session over SSE.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Magnolia - Getting set up</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0;
+           display: flex; align-items: center; justify-content: center;
+           min-height: 100vh; background: #fffdf7; color: #3a3a2f; }
+    main { max-width: 32rem; padding: 2rem; text-align: center; }
+    h1 { font-weight: 600; }
+    p { line-height: 1.5; opacity: 0.85; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Welcome in</h1>
+    <p>
+      Magnolia is getting you set up. The conversational onboarding room arrives
+      in the next increment; the backend (the onboarding run endpoint and the
+      first-run gate) is live now.
+    </p>
+  </main>
+</body>
+</html>
