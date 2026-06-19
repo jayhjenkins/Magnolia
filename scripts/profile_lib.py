@@ -385,6 +385,33 @@ def set_autonomy_enforcement(enabled, root=None):
     _update_yaml("config.yaml", mutate, root)
 
 
+def configured_server_port(root=None):
+    """The EXPLICITLY-configured server port as an int, or None if unset.
+
+    Distinct from server_port(), which applies the 8742 default. Returns None
+    when config.yaml carries no server.port, so callers can tell "the operator
+    chose a port" apart from "fall back to the default"."""
+    p = (config(root).get("server") or {}).get("port")
+    return int(p) if p is not None else None
+
+
+def set_server_port(p, root=None):
+    """Persist server.port = int(p) into the LIVE profile config.
+
+    Ensures the live profile/ dir exists FIRST: _update_yaml writes through
+    profile_dir(), which falls back to the TRACKED profile.example/ when no
+    live profile/ exists (the same trap mark_onboarded guards). Without this
+    a fresh install would dirty the shipped template. Preserves any existing
+    server subkeys plus all sibling top-level keys + comments."""
+    os.makedirs(os.path.join(root or PM_OS_DIR, "profile"), exist_ok=True)
+
+    def mutate(doc):
+        server = doc.get("server") or {}
+        server["port"] = int(p)
+        doc["server"] = server
+    _update_yaml("config.yaml", mutate, root)
+
+
 TIER_ORDER = ["light", "standard", "deep"]
 TIER_MODELS = {
     "light": "claude-haiku-4-5",

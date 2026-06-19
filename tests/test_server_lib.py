@@ -18,6 +18,22 @@ def test_free_port_returns_unused():
     s.close()
 
 
+def test_port_available_true_when_free():
+    p = server_lib.free_port()
+    assert server_lib.port_available(p) is True
+
+
+def test_port_available_false_when_bound():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    s.listen(1)
+    port = s.getsockname()[1]
+    try:
+        assert server_lib.port_available(port) is False
+    finally:
+        s.close()
+
+
 def test_is_running_true_when_api_serves():
     class H(BaseHTTPRequestHandler):
         def do_GET(self):

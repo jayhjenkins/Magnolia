@@ -125,6 +125,49 @@ def test_server_port_from_config(profile_root):
     assert profile_lib.server_port(root=profile_root) == 8755
 
 
+def test_configured_server_port_none_when_unset(tmp_path):
+    # No server.port in config -> None (distinct from server_port()'s 8742 default)
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("models:\n  judge: x\n")
+    assert profile_lib.configured_server_port(root=str(tmp_path)) is None
+
+
+def test_configured_server_port_returns_int(profile_root):
+    # fixture config has server.port: 8755
+    assert profile_lib.configured_server_port(root=profile_root) == 8755
+    assert isinstance(profile_lib.configured_server_port(root=profile_root), int)
+
+
+def test_set_server_port_writes_config(profile_root):
+    profile_lib.set_server_port(8761, root=profile_root)
+    assert profile_lib.configured_server_port(root=profile_root) == 8761
+    # sibling server keys / other top-level keys preserved
+    assert profile_lib.config(root=profile_root)["active_skill_packs"] == ["core", "pm"]
+
+
+def test_set_server_port_creates_live_profile_dir(tmp_path):
+    # No live profile/ dir exists yet; set_server_port must create it and write
+    # there, never falling back to profile.example.
+    root = str(tmp_path)
+    assert not (tmp_path / "profile").exists()
+    profile_lib.set_server_port(8762, root=root)
+    assert (tmp_path / "profile" / "config.yaml").exists()
+    assert profile_lib.configured_server_port(root=root) == 8762
+
+
+def test_set_server_port_does_not_touch_example(tmp_path):
+    # A tracked profile.example/config.yaml must stay untouched (the footgun).
+    root = str(tmp_path)
+    ex = tmp_path / "profile.example"
+    ex.mkdir()
+    (ex / "config.yaml").write_text("server:\n  port: 8742\n")
+    before = (ex / "config.yaml").read_text()
+    profile_lib.set_server_port(8799, root=root)
+    assert (ex / "config.yaml").read_text() == before
+    # the write landed in the live profile/ instead
+    assert profile_lib.configured_server_port(root=root) == 8799
+
+
 def test_transcript_config_defaults(tmp_path):
     (tmp_path / "profile").mkdir()
     (tmp_path / "profile" / "integrations.yaml").write_text("transcript:\n  provider: otter\n")
