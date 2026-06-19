@@ -84,6 +84,12 @@ datasets/evals/*/*
 datasets/reference/*
 !datasets/reference/.gitkeep
 
+# Scorecard folder: keep structure, ignore proprietary scorecard content
+datasets/scorecard/*
+!datasets/scorecard/.gitkeep
+!datasets/scorecard/*/
+!datasets/scorecard/*/.gitkeep
+
 # Per-person profile is gitignored; the .example template is tracked.
 /profile/
 
