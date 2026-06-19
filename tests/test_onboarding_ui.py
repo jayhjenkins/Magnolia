@@ -48,3 +48,28 @@ def test_onboarding_html_is_ascii():
     # Invariant #8 - runtime/source ASCII (no em-dash, no smart quotes).
     raw = open(os.path.join(UI, "onboarding.html"), "rb").read()
     raw.decode("ascii")
+
+
+def test_onboarding_js_exists_and_posts_the_run_route():
+    js = _read("js/onboarding.js")
+    assert "/api/onboarding/run" in js
+
+
+def test_onboarding_js_handles_the_completion_event():
+    js = _read("js/onboarding.js")
+    assert "onboarding_complete" in js
+
+
+def test_onboarding_js_reads_the_sse_done_sentinel():
+    js = _read("js/onboarding.js")
+    assert "event:" in js and "done" in js  # mirrors chat.js handleFrame
+
+
+def test_onboarding_js_runs_the_window_shade_reveal():
+    js = _read("js/onboarding.js")
+    assert "shade-pull" in js and "shade-lift" in js
+    assert "board-underlay" in js  # mounts the iframe beneath
+
+
+def test_onboarding_js_is_ascii():
+    open(os.path.join(UI, "js", "onboarding.js"), "rb").read().decode("ascii")
