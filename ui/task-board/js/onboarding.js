@@ -257,7 +257,7 @@
         room.addEventListener('transitionend', e => {
           if (e.propertyName === 'transform') redirect();
         });
-        // Fallback: redirect if the transitionend never fires (e.g. reduced motion).
+        // Fallback: redirect even if transitionend is dropped (interrupted transition, backgrounded tab).
         setTimeout(redirect, 3300);
       }, 650);
     }
@@ -313,6 +313,7 @@
       });
       if (resp.status === 409) {
         clearTyping();
+        a.remove();  // drop the empty assistant shell we appended before the fetch
         const n = renderTurn({ role: 'notice', text: 'Onboarding is already running.' }, false);
         thread.appendChild(n); revealNow(n, 'show'); scrollThread();
         throw new Error('busy');
