@@ -59,8 +59,12 @@ There are two kinds of first run. Note which one you are testing:
    `enabledMcpjsonServers`.
 7. Confirm `magnolia` resolves on PATH: `which magnolia` (open a new terminal
    first if the installer told you to add `~/.local/bin` to PATH).
-8. Type `magnolia` and press Enter. The server starts and a browser opens to
-   the board.
+8. Type `magnolia` and press Enter. The server starts and a browser opens. On a
+   fresh setup (no live `profile/`) it lands on the **onboarding room**, not the
+   board: a "Welcome to Magnolia" screen with an **Onboard me** button. Click it,
+   walk the guided setup, and confirm that on completion the room runs its reveal
+   and hands off to the board. (Re-running `magnolia` afterward opens straight to
+   the board.)
 
 ---
 
@@ -105,17 +109,29 @@ There are two kinds of first run. Note which one you are testing:
    `enabledMcpjsonServers`.
 7. Open a NEW terminal (so the PATH change is picked up) and confirm
    `magnolia` resolves: `where magnolia`.
-8. Type `magnolia` and press Enter. The server starts and a browser opens to
-   the board.
+8. Type `magnolia` and press Enter. The server starts and a browser opens. On a
+   fresh setup (no live `profile/`) it lands on the **onboarding room**, not the
+   board: a "Welcome to Magnolia" screen with an **Onboard me** button. Click it,
+   walk the guided setup, and confirm that on completion the room runs its reveal
+   and hands off to the board. (Re-running `magnolia` afterward opens straight to
+   the board.)
 
 ---
 
-## KNOWN GAP (until Inc 3)
+## First-run onboarding (the in-UI flow)
 
-There is no in-UI onboarding yet. After `magnolia` opens the board, first-run
-onboarding is still the conversational `onboard me` flow - you start it
-yourself by typing `onboard me` to Magnolia. Inc 3 adds the first-run gate and
-the in-UI onboarding screen; until then the smoke pass ends at "board opens."
+The first-run gate and the in-UI onboarding room are live. After `magnolia`
+opens the browser on a fresh setup, onboarding runs **inside the board** (a
+headless Claude session driving the `meta-onboard` skill), not as a separate
+`onboard me` prompt. Verify:
+
+- A fresh setup serves the onboarding room at `/` (the gate), not the board.
+- **Onboard me** streams the concierge conversation; browser sign-in windows for
+  connectors (Granola / M365 / qmd) pop OUTSIDE the chat and are narrated in
+  plain language.
+- On completion the room reveals the board and re-running `magnolia` goes
+  straight to the board (the `onboarded` marker is set, so the gate no longer
+  fires).
 
 ## If it fails
 

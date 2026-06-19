@@ -1,96 +1,104 @@
 # Installing Magnolia — macOS
 
-Get the prerequisites on your Mac, land the repo in the right place, then hand off to the
-conversational `onboard me` flow. Paste the prompts straight into Claude Code.
+One command installs everything; then you type `magnolia` and a browser opens into guided setup.
 
-## The two-prompt shape (and why)
-Installation is **two prompts with a restart in between**, on purpose:
-1. **Prompt 1** installs prerequisites + clones the repo.
-2. **You fully quit and reopen Claude Code.** Newly installed tools land on your `PATH`, and a
-   *running* Claude Code session can't see them until it restarts and re-reads your shell. (This
-   is the "hot-swap" gotcha — don't skip the restart.)
-3. **Prompt 2** is just `onboard me`.
+## The shape (one command, then `magnolia`)
+1. **Install Claude Code** if you don't have it yet (one time): https://claude.com/claude-code
+2. **Run the installer** (below). It installs prerequisites, signs you into Claude if needed,
+   clones the repo, seeds folder trust, and puts `magnolia` on your PATH.
+3. **Type `magnolia`.** The board starts and your browser opens — into the guided onboarding room
+   on a fresh setup, or straight to your board once you're set up.
+
+No restart, no second prompt. The installer does the PATH hand-off that used to require quitting
+and reopening Claude Code, and onboarding now runs inside the board.
 
 ---
 
-## ⚠️ Where to put Magnolia (read this first)
-**If you already use Claude Code, clone Magnolia *inside the same workspace where Claude Code
-already works for you*** — the folder where your corporate integrations (Granola, Microsoft 365,
-Jira, Pendo, Databricks) and your personal skills already show up.
+## Prerequisites
+- **Homebrew** — the installer uses it for git/node/python/pandoc. If you don't have it, install
+  it from https://brew.sh first, then re-run the installer.
+- **Claude Code** — required. The installer detects it; if it's missing, it stops and points you
+  to https://claude.com/claude-code. Install it, then re-run the installer.
 
-Why it matters: those integrations are **claude.ai account connectors**. They should follow you
+---
+
+## ⚠️ Where Magnolia lands (and how to change it)
+By default the installer clones to **`~/Magnolia`**. That's fine for most people.
+
+**If you already use Claude Code and want Magnolia to inherit your existing setup**, point it at
+the workspace where Claude Code already works for you — the folder where your corporate
+integrations (Granola, Microsoft 365, Jira, Pendo, Databricks) and personal skills already show
+up. Set `MAGNOLIA_DIR` before running:
+
+```
+export MAGNOLIA_DIR="$HOME/dev/Magnolia"
+```
+
+Why it matters: those integrations are **claude.ai account connectors**. They follow you
 everywhere, but a brand-new, never-opened folder can come up *untrusted* with connectors not yet
-enabled — which makes Magnolia look like it can't see integrations you actually have. Landing
-Magnolia next to your existing Claude Code work avoids that, and lets it inherit your skills too.
-
-You do **not** need to re-architect your folders. Just drop the `Magnolia` folder in the place
-your Claude Code already lives. If you don't use Claude Code yet, `~/dev` is a fine home.
+enabled — making Magnolia look like it can't see integrations you actually have. The installer
+seeds folder trust + qmd to avoid that, and landing Magnolia next to your existing Claude Code
+work lets it inherit your skills too. You don't need to re-architect anything.
 
 ---
 
-## Strongly recommended tools (install these up front)
-These aren't busywork — each unlocks real capability, and skipping them degrades quality. Install
-them now; onboarding won't *block* without them, but you really should have them.
+## Install
 
-| Tool | Unlocks | Install |
-|---|---|---|
-| **qmd** | Semantic search across all your meetings/notes/docs (the killer feature) | `npm install -g @tobilu/qmd` — needs **Node ≥ 22**. The correct repo is **https://github.com/tobi/qmd** (do NOT install any other "qmd"). |
-| **mgc** (Microsoft Graph CLI) | Outlook + Teams send, calendar invites | binary from https://aka.ms/get/graphcli/latest/osx-arm64.zip (osx-x64.zip on Intel), on PATH |
-| **pandoc** | Word-doc creation / publish-package | `brew install pandoc` |
+Run this in Terminal:
+
+```
+curl -fsSL https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.sh | bash
+```
+
+It will, in order:
+- install prerequisites via Homebrew (git, node, python, pandoc) and **qmd** (semantic search)
+- confirm Claude Code is present (or stop and tell you to install it)
+- sign you into Claude **only if you aren't already** (a browser opens — this is the one
+  interactive moment for a brand-new user)
+- clone Magnolia to `~/Magnolia` (or your `MAGNOLIA_DIR`)
+- seed folder trust + qmd enablement
+- put `magnolia` on your PATH (`~/.local/bin`)
+
+If it tells you to add `~/.local/bin` to your PATH, do so (`export PATH="$HOME/.local/bin:$PATH"`
+in `~/.zprofile`) and open a new terminal.
 
 ---
 
-## Prompt 1 — paste into a fresh Claude Code session
+## Start it
 
 ```
-You're installing a tool called Magnolia on my Mac and getting it ready for first-run setup. Do
-the steps in order, explain each in plain language, and ASK before anything that needs my
-approval. I'll see permission prompts for installs/downloads — that's expected. Do NOT start
-"onboard me" — stop at the end and tell me to restart you.
-
-1. Confirm this is macOS and tell me the chip: run `uname -m` (arm64 = Apple Silicon, x86_64 = Intel).
-2. Ask me: "Do you already use Claude Code? If so, where — what folder do you usually run it in?"
-   - If yes: we'll clone Magnolia INSIDE that same workspace so it inherits my existing
-     integrations and skills. Confirm the target path with me before cloning.
-   - If no: use ~/dev/Magnolia (create ~/dev if needed).
-3. Make sure Homebrew is installed (`brew --version`). If it isn't, install it from
-   https://brew.sh and add it to my PATH (on Apple Silicon, add `eval "$(/opt/homebrew/bin/brew
-   shellenv)"` to ~/.zprofile).
-4. Install these via Homebrew (skip any already present): git, node (Node >= 22, for qmd),
-   python, pandoc  →  `brew install git node python pandoc`
-5. Install qmd (semantic search): npm install -g @tobilu/qmd
-   The correct qmd is https://github.com/tobi/qmd — do NOT install any other tool named "qmd".
-6. Install the Microsoft Graph CLI (mgc): download https://aka.ms/get/graphcli/latest/osx-arm64.zip
-   (use osx-x64.zip on Intel), extract to a stable folder (e.g. ~/.local/bin), and make sure that
-   folder is on my PATH in ~/.zprofile. Verify `mgc --version` in a NEW terminal. Do NOT log me in
-   yet — the setup flow handles the Microsoft sign-in.
-7. Install Python deps: python3 -m pip install --break-system-packages ruamel.yaml pytest
-   (Homebrew's Python is "externally managed" — the flag is expected and safe here.)
-8. Clone the repo to the location we agreed in step 2:
-   git clone https://github.com/jayhjenkins/Magnolia.git "<agreed path>"
-9. STOP. Tell me exactly: "Setup's done. Fully quit Claude Code and reopen it (so it picks up the
-   newly installed tools on PATH), then cd into your Magnolia folder and type: onboard me."
+magnolia
 ```
+
+The board starts and your browser opens. On a fresh setup it lands on the **onboarding room** —
+click **Onboard me** and the concierge walks you through identity, integrations, and a quick
+capability check, all in plain language. When it's done, the room hands off to your board.
+
+Other commands:
+- `magnolia update` — pull the latest engine (fast-forward only)
+- `magnolia doctor` — check capabilities and get remediation if something's off
 
 ---
 
-## Then: restart + Prompt 2
-**Fully quit and reopen Claude Code.** Then, from the Magnolia folder:
-```
-cd <your Magnolia folder>
-```
-```
-onboard me
-```
-
-On the first run, if Magnolia asks about a connector (Granola/M365/Jira/…) you already have,
-open `/mcp` to confirm it's enabled for this folder and trust the folder — you should **not** need
-to re-authorize anything; these are account-level connectors.
+## Optional extras
+Onboarding will flag these if they're missing; you can add them anytime:
+- **mgc** (Microsoft Graph CLI) — Outlook + Teams send, calendar invites. Binary from
+  https://aka.ms/get/graphcli/latest/osx-arm64.zip (osx-x64.zip on Intel), placed on your PATH.
+  Onboarding handles the Microsoft sign-in; don't log in ahead of time.
 
 ---
 
 ## What to expect
-- **Permission prompts** for brew/npm/downloads/clone — approve them or Prompt 1 stalls.
-- **`mgc login` (during onboarding) may need admin consent** — the scope set includes
-  `User.Read.All`, which some tenants require an admin to approve. If you're not an admin it may
-  fail; that's fine — messaging/voice just stay disabled and onboarding continues.
+- **Permission prompts** for brew/npm/downloads/clone during install — approve them or the
+  installer stalls.
+- **Connectors you already have** (Granola/M365/Jira/…) follow your claude.ai account; onboarding
+  surfaces an "authorize on claude.ai" link for any that aren't connected yet. You should not need
+  to re-authorize ones you already use.
+- **`mgc login` may need admin consent** — the scope set includes `User.Read.All`, which some
+  tenants require an admin to approve. If you're not an admin it may fail; that's fine, messaging
+  and voice just stay disabled and onboarding continues.
+
+## If something goes wrong
+Run `magnolia doctor` — it detects and helps remediate a missing or degraded capability (Claude
+not found, login expired, qmd not enabled, etc.). The installer is idempotent: re-running it is
+safe and will fast-forward an existing checkout rather than re-clone.
