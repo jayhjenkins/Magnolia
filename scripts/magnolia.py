@@ -29,7 +29,10 @@ def launch(open_browser=True):
     Idempotent: a board already running is reused, not double-started."""
     explicit = profile_lib.configured_server_port()
     if explicit is not None:
-        target = explicit                      # respect a deliberate choice
+        target = explicit                      # respect a deliberate choice — and by
+                                               # design we reuse a board already on this
+                                               # port (the auto-free-port hunt below only
+                                               # applies to the unconfigured path).
     else:
         # Fresh/unconfigured: claim our OWN port so we never piggyback on a board
         # already on 8742 (e.g. the user's prod). Prefer the canonical default when
