@@ -66,6 +66,24 @@ SESSION_STATE_PATH = os.path.join(PM_OS_DIR, "logs", "onboard_session.json")
 # string - the runner greps for it in normalized text events.
 COMPLETE_SENTINEL = "ONBOARDING_COMPLETE"
 
+
+def _strip_sentinel(text):
+    """Remove the completion sentinel from a text event's body.
+
+    A line that is just the sentinel disappears entirely (no leftover blank
+    line); an inline sentinel within other prose has just the token removed.
+    Trailing whitespace the removal leaves behind is trimmed. Returns the
+    cleaned text (possibly empty if the event carried only the sentinel).
+    """
+    lines = text.split("\n")
+    kept = []
+    for line in lines:
+        if line.strip() == COMPLETE_SENTINEL:
+            # A sentinel-only line: drop it entirely (no blank line left).
+            continue
+        kept.append(line.replace(COMPLETE_SENTINEL, ""))
+    return "\n".join(kept).rstrip()
+
 # Onboarding pins STANDARD (sonnet): it runs a long, judgment-heavy concierge
 # conversation + tool orchestration; a 'low' posture would resolve to haiku, too
 # weak. Passed as a task_override so it wins over posture (profile_lib.resolve_model).
@@ -180,7 +198,10 @@ def run_turn(message):
 
     Generator yielding normalized events (think / tool_step / text / result),
     plus a synthetic `onboarding_complete` event the moment a text event carries
-    the ONBOARDING_COMPLETE sentinel (meta-onboard's terminal signal). Every
+    the ONBOARDING_COMPLETE sentinel (meta-onboard's terminal signal). The raw
+    sentinel is STRIPPED from the user-visible/persisted text before that text
+    event is yielded or logged (so it never paints into the prose or the durable
+    transcript); a text event that carried ONLY the sentinel is dropped. Every
     user-visible event is appended to the single-session transcript for
     reconnect/replay.
 
@@ -243,14 +264,31 @@ def run_turn(message):
                 yield event
                 continue
 
-            # think / tool_step / text: persist then yield.
-            onboard_transcript.append_event(event)
-            yield event
+            # A text event carrying the terminal sentinel: strip the sentinel
+            # from the user-visible/persisted text BEFORE persisting or yielding
+            # (so the raw word ONBOARDING_COMPLETE never paints into the prose or
+            # lands in the durable transcript), while still detecting completion
+            # and firing the single-shot synthetic event below. If stripping
+            # leaves only whitespace, the event carried nothing but the sentinel,
+            # so we drop it entirely - but still fire completion.
+            sentinel_here = (not completed and kind == "text"
+                             and COMPLETE_SENTINEL in (event.get("text") or ""))
+            if sentinel_here:
+                cleaned = _strip_sentinel(event.get("text") or "")
+                if cleaned:
+                    event = dict(event)
+                    event["text"] = cleaned
+                    onboard_transcript.append_event(event)
+                    yield event
+                # else: the event was sentinel-only -> persist/yield nothing.
+            else:
+                # think / tool_step / text: persist then yield.
+                onboard_transcript.append_event(event)
+                yield event
 
-            # Terminal sentinel in a text event -> emit the synthetic completion
-            # event once (persisted + yielded) so the server flips the gate.
-            if (not completed and kind == "text"
-                    and COMPLETE_SENTINEL in (event.get("text") or "")):
+            # Terminal sentinel detected -> emit the synthetic completion event
+            # once (persisted + yielded) so the server flips the gate.
+            if sentinel_here:
                 completed = True
                 complete_evt = {
                     "kind": "onboarding_complete",

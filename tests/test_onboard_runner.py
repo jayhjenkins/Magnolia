@@ -143,6 +143,58 @@ def test_no_sentinel_no_complete_event(stub_model, monkeypatch):
     assert [e for e in events if e.get("kind") == "onboarding_complete"] == []
 
 
+def test_sentinel_only_text_is_stripped_not_yielded(stub_model, monkeypatch):
+    # The final text event is EXACTLY the sentinel on its own line. No text event
+    # carrying the literal sentinel may be yielded or persisted, but the single
+    # synthetic onboarding_complete event must still fire.
+    stream = [
+        _assistant_text("ONBOARDING_COMPLETE"),
+        _result(session_id="onb-done"),
+    ]
+    events = _run(monkeypatch, "finish up", stream)
+
+    # No yielded text event carries the raw sentinel.
+    text_events = [e for e in events if e.get("kind") == "text"]
+    assert all(onboard_runner.COMPLETE_SENTINEL not in (e.get("text") or "")
+               for e in text_events)
+    # The sentinel-only event carried no other prose -> not yielded at all.
+    assert text_events == []
+
+    # Exactly one synthetic completion event still fires.
+    complete = [e for e in events if e.get("kind") == "onboarding_complete"]
+    assert len(complete) == 1
+
+    # Nothing carrying the raw sentinel was persisted either.
+    logged = onboard_transcript.read_events()
+    assert all(onboard_runner.COMPLETE_SENTINEL not in (e.get("text") or "")
+               for e in logged if e.get("kind") == "text")
+    assert any(e.get("kind") == "onboarding_complete" for e in logged)
+
+
+def test_sentinel_appended_to_prose_strips_sentinel_keeps_prose(stub_model, monkeypatch):
+    # The sentinel rides along with real prose. The yielded/persisted text event
+    # keeps the prose but NOT the literal sentinel, and completion still fires once.
+    stream = [
+        _assistant_text("You're all set.\nONBOARDING_COMPLETE"),
+        _result(session_id="onb-done"),
+    ]
+    events = _run(monkeypatch, "finish up", stream)
+
+    text_events = [e for e in events if e.get("kind") == "text"]
+    assert len(text_events) == 1
+    assert "You're all set." in text_events[0]["text"]
+    assert onboard_runner.COMPLETE_SENTINEL not in text_events[0]["text"]
+
+    complete = [e for e in events if e.get("kind") == "onboarding_complete"]
+    assert len(complete) == 1
+
+    logged = onboard_transcript.read_events()
+    logged_text = [e for e in logged if e.get("kind") == "text"]
+    assert len(logged_text) == 1
+    assert "You're all set." in logged_text[0]["text"]
+    assert onboard_runner.COMPLETE_SENTINEL not in logged_text[0]["text"]
+
+
 # --- Session resume ----------------------------------------------------------
 
 def test_first_turn_is_new_session_and_persists_id(stub_model, monkeypatch):
