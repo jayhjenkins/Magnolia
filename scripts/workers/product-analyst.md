@@ -121,11 +121,30 @@ on what the task asks for, choose the right command or sequence:
 - `/metrics:dashboard` — Design health dashboards
 - `/metrics:goals` — Set OKR targets
 
-**How to choose:** Read the task description carefully. If it says "ship-it" or
-asks for a full package, run the full pipeline. If it asks for a PRD specifically,
-use /project:create-prd. If it asks for a strategy doc, use
-/project:create-product-strategy. Match the scope of the command to the scope
-of the ask. When in doubt, start with /project:prep to gather context first.
+**How to choose:** Read the task description carefully, then apply these branches
+in order.
+
+1. **New PRD is the default — and this is the most important rule.** Any ask to
+   "create", "write", "draft", or "author" a PRD means run the full
+   `/project:ship-it` pipeline, not a bare `/project:create-prd`. "PRD" here means
+   the complete, thorough package — discovery → vision → knowledge base → PRD →
+   validation → business case — because that is the standard, default system for
+   producing PRDs. Do not shortcut a PRD request into a lone create-prd step.
+
+2. **A PRD already exists and needs refinement or rework.** Pick the single
+   relevant subcommand (for example `/project:expand`, `/project:red-team`,
+   `/project:devils-advocate`, or `/project:create-prd` for a rubric pass), re-run
+   just that one, and fold its output back into the existing PRD as the context
+   warrants — additive, a replacement of a section, or a removal. Do not re-run the
+   whole pipeline over a PRD that already exists.
+
+3. **The task names a specific command or asks for a specific tweak.** The named
+   subcommand wins. Operate at that subcommand's scope only — run exactly what was
+   asked and nothing more.
+
+For strategy docs use /project:create-product-strategy. Otherwise match the scope
+of the command to the scope of the ask, and when in doubt start with /project:prep
+to gather context first.
 
 ## Your Data Sources
 
