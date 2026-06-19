@@ -70,6 +70,7 @@ datasets/recruiting/*
 !datasets/recruiting/*/.gitkeep
 datasets/recruiting/*/*
 !datasets/recruiting/templates/
+!datasets/recruiting/templates/*
 !datasets/recruiting/*/*/.gitkeep
 
 # Evals folder: keep category structure, ignore eval runs and golden datasets
