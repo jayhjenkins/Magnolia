@@ -29,6 +29,21 @@ def free_port():
     return p
 
 
+def port_available(p):
+    """True if TCP port p on 127.0.0.1 is free to bind, False if in use.
+
+    SO_REUSEADDR is deliberately NOT set so a real listener registers as
+    unavailable (otherwise a board already on the port would falsely read free)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", int(p)))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
 def is_running(port=None, root=None):
     p = port if port is not None else profile_lib.server_port(root)
     try:
