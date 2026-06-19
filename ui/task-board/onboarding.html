@@ -1,34 +1,328 @@
 <!DOCTYPE html>
 <!--
-  Onboarding room - PLACEHOLDER (Inc 3a).
+  Onboarding room (Inc 3b) - the real first-run concierge.
 
   The first-run gate (task_server.do_GET) serves this page in place of the board
-  until onboarding completes (profile_lib.onboarding_complete()). Inc 3b replaces
-  this placeholder with the real conversational onboarding room that POSTs to
-  /api/onboarding/run and streams the meta-onboard session over SSE.
+  until onboarding completes (profile_lib.onboarding_complete()). It POSTs each
+  turn to /api/onboarding/run and streams the headless meta-onboard session over
+  SSE. On the synthetic onboarding_complete event the room runs a window-shade
+  reveal of the board mounted beneath (#board-underlay) and redirects to /.
+
+  Standalone page: no build step, no libraries. Theme tokens only (invariant #3),
+  ASCII source only (invariant #8). The renderer lives in /js/onboarding.js
+  (a self-contained port of the safe chat.js subset).
 -->
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Magnolia - Getting set up</title>
-  <style>
-    body { font-family: system-ui, -apple-system, sans-serif; margin: 0;
-           display: flex; align-items: center; justify-content: center;
-           min-height: 100vh; background: #fffdf7; color: #3a3a2f; }
-    main { max-width: 32rem; padding: 2rem; text-align: center; }
-    h1 { font-weight: 600; }
-    p { line-height: 1.5; opacity: 0.85; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Magnolia - Getting set up</title>
+<link rel="icon" id="app-favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect x='6' y='6' width='20' height='20' rx='3' ry='12' transform='rotate(-12 16 16)' fill='%237a9e6d'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=Mulish:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Moods - the same six token-only stylesheets as index.html, in the same order. -->
+<link rel="stylesheet" href="/themes/organic.css">
+<link rel="stylesheet" href="/themes/modafinil.css">
+<link rel="stylesheet" href="/themes/breathe.css">
+<link rel="stylesheet" href="/themes/vantaca.css">
+<link rel="stylesheet" href="/themes/karesansui.css">
+<link rel="stylesheet" href="/themes/sugarmagnolia.css">
+<script>
+  // Apply the saved mood before first paint so there's no flash of a wrong palette.
+  // Sets the data-theme attribute the theme stylesheets key off of.
+  document.documentElement.dataset.theme = localStorage.getItem('pmos-mood') || 'organic';
+</script>
+<style>
+  /* --spring (and the --mono fallback) live only in index.html's inline :root,
+     not in the theme files, so this standalone page must define them itself.
+     Everything else (--accent, --app-bg, --text, --r-btn, ...) comes from the
+     active theme stylesheet. */
+  :root {
+    --spring: cubic-bezier(.22, .9, .36, 1.14);
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--app-bg);
+    background-attachment: fixed;
+    color: var(--text);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: color-mix(in oklab, var(--accent) 32%, transparent); }
+
+  /* --- The room panel + window-shade reveal -------------------------------
+     The whole room is a fixed, full-viewport panel sitting ABOVE the board
+     iframe (#board-underlay, z-index 1). On completion it pulls down 12px,
+     catches, then lifts offscreen on a slow-start cubic-bezier, revealing the
+     already-rendered board beneath like a spring-loaded window shade. */
+  #board-underlay {
+    position: fixed; inset: 0; z-index: 1; border: 0;
+    background: var(--app-bg);
+  }
+  #board-underlay iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+  #onboard-room {
+    position: fixed; inset: 0; z-index: 2;
+    background: var(--app-bg);
+    display: flex; flex-direction: column; align-items: stretch;
+    overflow: hidden;
+    will-change: transform;
+  }
+  /* A weighted bottom edge so the moving shade reads as a physical edge. */
+  #onboard-room::after {
+    content: '';
+    position: absolute; left: 0; right: 0; top: 100%;
+    height: 14px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .22);
+    background: linear-gradient(to bottom, rgba(0, 0, 0, .14), transparent);
+    pointer-events: none;
+  }
+  .shade-pull { transform: translateY(12px); transition: transform .5s ease; }
+  .shade-lift { transform: translateY(-110vh); transition: transform 2.55s cubic-bezier(.42, .08, .76, .38); }
+
+  /* --- Welcome panel ----------------------------------------------------- */
+  #welcome {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 32px 24px;
+    transition: opacity .3s ease;
+  }
+  #welcome.gone { opacity: 0; pointer-events: none; }
+  .welcome-inner { max-width: 34rem; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .welcome-leaf { width: 44px; height: 44px; color: var(--accent); }
+  .welcome-leaf svg { width: 44px; height: 44px; display: block; }
+  #welcome h1 {
+    font-family: var(--font-serif); font-weight: 500; font-size: 30px;
+    letter-spacing: 0.01em; color: var(--text);
+  }
+  #welcome .welcome-sub {
+    font-size: 15px; line-height: 1.65; color: var(--text-dim);
+    text-wrap: pretty; max-width: 30rem;
+  }
+  #onboard-start {
+    margin-top: 6px;
+    border: none; border-radius: var(--r-btn); cursor: pointer;
+    background: var(--accent); color: var(--accent-ink);
+    font-family: inherit; font-size: 14px; font-weight: 600;
+    padding: 11px 22px;
+    transition: filter var(--ease), transform .25s var(--spring);
+  }
+  #onboard-start:hover { filter: brightness(1.08); }
+  #onboard-start:active { transform: translateY(1px); }
+
+  /* --- Conversation (hidden until start) ----------------------------------
+     Ported from index.html's chat CSS (~1145-1297), scoped under the room and
+     reusing the SAME class names the /js/onboarding.js renderer emits. */
+  #convo { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #convo.hidden { display: none; }
+
+  #onboard-body { flex: 1; min-height: 0; overflow-y: auto; position: relative; padding: 28px 20px; }
+
+  /* One reading column, centered. */
+  #onboard-thread {
+    display: flex; flex-direction: column; gap: 22px;
+    max-width: 46rem; margin: 0 auto; width: 100%;
+  }
+  .chat-turn { opacity: 0; transform: translateY(6px) scale(.99); filter: blur(5px); }
+  .chat-turn.show { opacity: 1; transform: none; filter: blur(0);
+    transition: opacity .45s ease, transform .45s var(--spring), filter .45s ease; }
+
+  /* You - right-aligned bubble */
+  .turn-user { display: flex; justify-content: flex-end; }
+  .turn-user .turn-text {
+    max-width: 86%; padding: 9px 13px; border-radius: 15px 15px 5px 15px;
+    background: var(--surface-hover); border: 1px solid var(--border-soft);
+    font-size: 13px; line-height: 1.55; color: var(--text);
+    white-space: pre-wrap; text-wrap: pretty;
+  }
+
+  /* Assistant - no bubble, full-width prose */
+  .turn-assistant .turn-text { font-size: 13.5px; line-height: 1.66; color: var(--text); white-space: pre-wrap; text-wrap: pretty; }
+  .turn-text.streaming::after { content: '\258D'; margin-left: 1px; color: var(--accent); animation: caret 1.05s steps(1) infinite; }
+  @keyframes caret { 50% { opacity: 0; } }
+
+  /* Rendered markdown in assistant prose. Theme tokens only. */
+  .turn-assistant .turn-text { white-space: normal; }
+  .turn-text p { margin: 0 0 10px; }
+  .turn-text p:last-child { margin-bottom: 0; }
+  .turn-text .md-h { margin: 14px 0 6px; line-height: 1.35; color: var(--text); font-weight: 600; }
+  .turn-text .md-h:first-child { margin-top: 0; }
+  .turn-text h1.md-h { font-size: 15px; }
+  .turn-text h2.md-h { font-size: 14px; }
+  .turn-text h3.md-h { font-size: 13.5px; color: var(--text-muted); }
+  .turn-text ul, .turn-text ol { margin: 6px 0 10px; padding-left: 20px; }
+  .turn-text li { margin: 2px 0; }
+  .turn-text a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .turn-text code {
+    font-family: var(--mono, ui-monospace, monospace); font-size: 12px;
+    background: var(--surface-hover); border: 1px solid var(--border-soft);
+    border-radius: 5px; padding: 1px 5px;
+  }
+  .turn-text pre {
+    margin: 8px 0 10px; padding: 10px 12px; overflow-x: auto;
+    background: var(--surface-hover); border: 1px solid var(--border-soft);
+    border-radius: 9px;
+  }
+  .turn-text pre code { background: none; border: none; padding: 0; font-size: 12px; line-height: 1.5; }
+
+  /* Quiet meta lines - "thinking" + tool calls. */
+  .turn-steps { display: flex; flex-direction: column; align-items: flex-start; gap: 11px; margin-bottom: 14px; }
+  .turn-steps:empty { display: none; }
+  .tool-think, .tool-step { font-size: 12.5px; line-height: 1.5; color: var(--text-dim); max-width: 100%; }
+  .tool-think { display: block; }
+  .tool-step { display: inline-flex; align-items: baseline; gap: 7px; }
+  .tool-think::after { content: none; }
+  .tool-step::after { content: '\203A'; color: var(--text-dim); opacity: .6; font-size: 14px; align-self: center; }
+  .tool-verb { font-weight: 600; color: var(--text-muted); flex: 0 0 auto; }
+  .tool-target { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tool-step, .tool-think, .turn-result { opacity: 0; transform: translateY(3px); }
+  .tool-step.in, .tool-think.in, .turn-result.in { opacity: 1; transform: none;
+    transition: opacity .35s ease, transform .35s var(--spring); }
+
+  /* Many sequential tool calls collapse into one calm, expandable line. */
+  .steps-group { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; max-width: 100%; }
+  .steps-toggle {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: none; border: none; padding: 0; margin: 0; font: inherit;
+    font-size: 12.5px; color: var(--text-muted); cursor: pointer;
+    transition: color var(--ease);
+  }
+  .steps-toggle svg { width: 13px; height: 13px; flex: 0 0 auto; }
+  .steps-toggle .step-check { color: var(--success); }
+  .steps-toggle .chev-svg { color: var(--text-dim); transition: transform .25s var(--ease); }
+  .steps-toggle.open .chev-svg { transform: rotate(90deg); }
+  .steps-toggle:hover { color: var(--text); }
+  .steps-toggle:hover .chev-svg { color: var(--text-muted); }
+  .steps-count { font-weight: 500; }
+  .steps-list { overflow: hidden; max-height: 640px; width: 100%;
+    transition: max-height .38s var(--spring), opacity .26s ease; }
+  .steps-list.collapsed { max-height: 0; opacity: 0; }
+  .steps-inner { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding-top: 2px; }
+
+  /* Typing - three soft dots before the first words land. */
+  .typing { display: inline-flex; align-items: center; gap: 4px; padding: 3px 0; }
+  .typing span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); animation: typing 1.2s ease-in-out infinite; }
+  .typing span:nth-child(2) { animation-delay: .18s; }
+  .typing span:nth-child(3) { animation-delay: .36s; }
+  @keyframes typing { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: .9; transform: translateY(-2px); } }
+
+  .turn-result {
+    display: inline-flex; align-items: center; gap: 7px; margin-top: 12px;
+    font-size: 11.5px; font-weight: 600; color: var(--success);
+    background: var(--success-soft); border-radius: 8px; padding: 5px 11px;
+  }
+  .turn-result svg { width: 13px; height: 13px; }
+  .turn-error .turn-text { color: var(--danger); }
+
+  /* Notice - a calm accent-tinted advisory aside (not an error). */
+  .turn-notice .notice-inner {
+    display: flex; gap: 8px; align-items: flex-start;
+    background: var(--accent-soft); border: 1px solid var(--border-soft);
+    border-left: 2px solid var(--accent); border-radius: 9px; padding: 9px 12px;
+  }
+  .turn-notice .notice-icon { flex-shrink: 0; width: 15px; height: 15px; color: var(--accent); margin-top: 2px; }
+  .turn-notice .notice-text { font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+  .turn-notice .notice-text p { margin: 0 0 8px; }
+  .turn-notice .notice-text p:last-child { margin-bottom: 0; }
+  .turn-notice .notice-text code {
+    font-family: var(--mono, ui-monospace, monospace); font-size: 12px;
+    background: var(--surface-hover); border: 1px solid var(--border-soft);
+    border-radius: 5px; padding: 1px 5px;
+  }
+
+  /* Footer - the composer. */
+  #onboard-footer {
+    flex-shrink: 0; padding: 14px 16px 18px; border-top: 1px solid var(--border-soft);
+  }
+  .onboard-composer {
+    display: flex; align-items: flex-end; gap: 8px;
+    max-width: 46rem; margin: 0 auto;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 13px; padding: 7px 7px 7px 13px;
+    transition: border-color var(--ease);
+  }
+  .onboard-composer:focus-within { border-color: var(--accent); }
+  .onboard-composer textarea {
+    flex: 1; min-width: 0; border: none; background: transparent; color: var(--text);
+    font-family: inherit; font-size: 13.5px; line-height: 1.5; resize: none;
+    max-height: 140px; outline: none; padding: 5px 0;
+  }
+  .onboard-composer textarea::placeholder { color: var(--text-dim); }
+  .chat-send {
+    flex: 0 0 auto; width: 33px; height: 33px; display: grid; place-items: center;
+    border: none; border-radius: 9px; background: var(--accent); color: var(--accent-ink);
+    cursor: pointer; transition: filter var(--ease), opacity var(--ease);
+  }
+  .chat-send:hover { filter: brightness(1.08); }
+  .chat-send:disabled { opacity: .4; cursor: default; }
+  .chat-send svg { width: 15px; height: 15px; }
+
+  /* --- Completion banner (hidden until done) ----------------------------- */
+  #complete-banner {
+    position: absolute; inset: 0; z-index: 3;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 32px 24px; gap: 16px;
+    background: color-mix(in oklab, var(--app-bg) 88%, transparent);
+    backdrop-filter: blur(2px);
+  }
+  #complete-banner.hidden { display: none; }
+  #complete-banner .complete-copy {
+    font-family: var(--font-serif); font-size: 20px; font-weight: 500;
+    color: var(--text); text-wrap: pretty; max-width: 30rem;
+  }
+  #go-board {
+    font-size: 13px; color: var(--accent);
+    text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+  }
+</style>
 </head>
 <body>
-  <main>
-    <h1>Welcome in</h1>
-    <p>
-      Magnolia is getting you set up. The conversational onboarding room arrives
-      in the next increment; the backend (the onboarding run endpoint and the
-      first-run gate) is live now.
-    </p>
-  </main>
+  <!-- The board, mounted lazily by /js/onboarding.js on completion. Sits BEHIND
+       the room so the shade lift reveals an already-rendered board. -->
+  <div id="board-underlay"></div>
+
+  <div id="onboard-room">
+    <!-- Welcome -->
+    <section id="welcome">
+      <div class="welcome-inner">
+        <span class="welcome-leaf" aria-hidden="true">
+          <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+            <rect x="6" y="6" width="20" height="20" rx="3" ry="12" transform="rotate(-12 16 16)" fill="currentColor"/>
+          </svg>
+        </span>
+        <h1>Welcome to Magnolia</h1>
+        <p class="welcome-sub">I'm your set-up concierge. A few questions and you'll be working - about ten minutes.</p>
+        <button id="onboard-start" type="button">Onboard me</button>
+      </div>
+    </section>
+
+    <!-- Conversation -->
+    <section id="convo" class="hidden">
+      <div id="onboard-body">
+        <div id="onboard-thread"></div>
+      </div>
+      <footer id="onboard-footer">
+        <div class="onboard-composer">
+          <textarea id="onboard-input" rows="1" placeholder="Type your reply..." aria-label="Reply to the set-up concierge"></textarea>
+          <button class="chat-send" id="onboard-send" type="button" aria-label="Send" title="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2.6 7 9"/><path d="M13.4 2.6 9.4 13.2l-2.4-4.2-4.2-2.4Z"/></svg></button>
+        </div>
+      </footer>
+    </section>
+
+    <!-- Completion -->
+    <section id="complete-banner" class="hidden">
+      <p class="complete-copy">You're all set. This onboarding will self destruct in 3 seconds :)</p>
+      <a id="go-board" href="/">Go to my board</a>
+    </section>
+  </div>
+
+  <script src="/js/onboarding.js"></script>
 </body>
 </html>
