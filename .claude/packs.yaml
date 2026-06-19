@@ -118,8 +118,12 @@ eng:
 
 recruiting:
   label: "Recruiting"
-  description: "Placeholder — candidate synthesis and hiring-loop support; no skills yet (factory-extensible)."
-  skills: []
+  description: "Candidate and practicum assessment plus the interview-processing loop."
+  skills:
+    - hiring-assess-pm-candidate
+    - hiring-assess-pm-practicum
+    - recruiting-process-interview
+    - recruiting-process-practicum
 
 ops:
   label: "Operations"
