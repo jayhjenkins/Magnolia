@@ -49,6 +49,8 @@ async function openTask(taskId, keepChat) {
   document.body.classList.add('ws-open');
   modalBody.innerHTML = '<div class="loading">Loading...</div>';
   modalTitle.textContent = taskId;
+  const _mSub = document.getElementById('modal-subtitle');
+  if (_mSub) { _mSub.textContent = ''; _mSub.style.display = 'none'; }
   modalActions.innerHTML = '';
 
   try {
@@ -56,7 +58,18 @@ async function openTask(taskId, keepChat) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const task = await res.json();
 
-    modalTitle.innerHTML = escapeHtml(task.title);
+    const cleanedTitle = typeof _cleanTitle === 'function' ? _cleanTitle(task.title) : task.title;
+    modalTitle.innerHTML = escapeHtml(cleanedTitle);
+    const modalSubtitle = document.getElementById('modal-subtitle');
+    if (modalSubtitle) {
+      const label = typeof _meetingLabel === 'function' ? _meetingLabel(task) : null;
+      if (label) { modalSubtitle.textContent = label; modalSubtitle.style.display = ''; }
+      else { modalSubtitle.textContent = ''; modalSubtitle.style.display = 'none'; }
+    }
+
+    const isArchived = task.status === 'done' || task.status === 'cancelled';
+    // Archive view: no chat panel — workspace becomes a read-only detail pane.
+    if (isArchived) overlay.classList.add('no-chat');
 
     let html = '';
 
@@ -64,7 +77,8 @@ async function openTask(taskId, keepChat) {
     const QMETA = { agent: ['agent', 'agent'], collab: ['supervised', 'collab'], human: ['human', 'human'], waiting: ['waiting', 'waiting'] };
     const qm = QMETA[task.queue] || QMETA.human;
     let stCls = '', stLabel = (task.status || 'open').replace(/-/g, ' '), stIcon = '';
-    if (task.agent_status === 'running')          { stCls = 'is-running';     stLabel = 'running';         stIcon = '<span class="mark-running"></span>'; }
+    if (isArchived) { /* status already set to 'done' or 'cancelled' — no agent-state override */ }
+    else if (task.agent_status === 'running')          { stCls = 'is-running';     stLabel = 'running';         stIcon = '<span class="mark-running"></span>'; }
     else if (task.agent_status === 'needs-human') { stCls = 'is-needs-human'; stLabel = 'needs you';       stIcon = svgIcon('needsHuman'); }
     else if (task.agent_status === 'complete')    { stCls = 'is-complete';    stLabel = 'ready to review'; stIcon = svgIcon('complete'); }
     else if (task.agent_status === 'failed')      { stCls = 'is-failed';      stLabel = 'stopped';         stIcon = svgIcon('failed'); }
@@ -143,11 +157,11 @@ async function openTask(taskId, keepChat) {
     }
     html += `<div class="dt-section">`;
     html += `<div class="dt-sec-head"><span class="dt-sec-title">The task</span>`;
-    if (descContent !== null) html += `<button class="dt-textbtn" id="desc-edit-btn" onclick="toggleDescEdit()">Edit</button>`;
+    if (descContent !== null && !isArchived) html += `<button class="dt-textbtn" id="desc-edit-btn" onclick="toggleDescEdit()">Edit</button>`;
     html += `</div>`;
     if (descContent !== null) {
       html += `<div id="desc-display" class="dt-prose">${escapeHtml(descContent)}</div>`;
-      html += `<div id="desc-editor" style="display:none;margin-top:8px;"><textarea class="desc-textarea" id="desc-input">${escapeHtml(descContent)}</textarea><div class="desc-actions"><button class="btn btn-primary" onclick="saveDescription()">Save</button><button class="btn" onclick="toggleDescEdit()">Cancel</button></div></div>`;
+      if (!isArchived) html += `<div id="desc-editor" style="display:none;margin-top:8px;"><textarea class="desc-textarea" id="desc-input">${escapeHtml(descContent)}</textarea><div class="desc-actions"><button class="btn btn-primary" onclick="saveDescription()">Save</button><button class="btn" onclick="toggleDescEdit()">Cancel</button></div></div>`;
     } else {
       html += `<div class="dt-prose dim">${escapeHtml(task.title)}</div>`;
     }
@@ -170,7 +184,7 @@ async function openTask(taskId, keepChat) {
       const initials = (s) => String(s).trim().split(/\s+/).map(w => w[0] || '').slice(0, 2).join('').toUpperCase() || '?';
 
       html += `<div class="dt-section">`;
-      html += `<div class="dt-sec-head"><span class="dt-sec-title">Meeting</span><button class="dt-textbtn" id="btn-edit-meeting" onclick="editMeetingDetails()">Edit</button></div>`;
+      html += `<div class="dt-sec-head"><span class="dt-sec-title">Meeting</span>${!isArchived ? `<button class="dt-textbtn" id="btn-edit-meeting" onclick="editMeetingDetails()">Edit</button>` : ''}</div>`;
       html += `<div class="dt-meeting">`;
 
       // Left — the invite
@@ -217,7 +231,7 @@ async function openTask(taskId, keepChat) {
       const to = task.message_to || '';
       const toInit = String(to).replace(/^[#@]/, '').trim().split(/\s+/).map(w => w[0] || '').slice(0, 2).join('').toUpperCase() || '?';
       html += `<div class="dt-section">`;
-      html += `<div class="dt-sec-head"><span class="dt-sec-title">Message</span><button class="dt-textbtn" id="btn-edit-message" onclick="editMessage()">Edit</button></div>`;
+      html += `<div class="dt-sec-head"><span class="dt-sec-title">Message</span>${!isArchived ? `<button class="dt-textbtn" id="btn-edit-message" onclick="editMessage()">Edit</button>` : ''}</div>`;
       html += `<div class="dt-msg-to">`;
       html += `<span class="dt-msg-chip"><span class="k">To</span><span class="dt-msg-avatar">${escapeHtml(toInit)}</span>${escapeHtml(to)}</span>`;
       html += `<span class="dt-msg-channel">${svgIcon(isEmail ? 'mail' : 'chat')}${escapeHtml(ch)}</span>`;
@@ -233,6 +247,7 @@ async function openTask(taskId, keepChat) {
     // Jira draft panel (when agent has drafted a ticket)
     const hasJiraDraft = task.body && task.body.includes('<!-- JIRA_DRAFT -->');
     if (hasJiraDraft) {
+      await loadJiraConfig();
       const jiraDraft = parseJiraDraft(task.body);
       if (jiraDraft) {
         const featureFieldLabel = jiraDraft.type === 'Feature' ? 'Feature' : 'Epic';
@@ -253,7 +268,13 @@ async function openTask(taskId, keepChat) {
           meta.forEach(([k, v]) => html += `<div class="dt-sum-item"><span class="dt-sum-k">${k}</span><span class="dt-sum-v">${escapeHtml(v)}</span></div>`);
           html += `</div>`;
         }
-        html += `<div class="dt-sec-hint" style="margin-top:11px;">Project VNT · Vantaca HXP · Board AI DLC (1096) · Refinement</div>`;
+        const _jc = _jiraConfig || {};
+        const _compId = jiraDraft.component_id || _jc.component_id || '';
+        const _compName = (_jc.components_by_id && _jc.components_by_id[_compId]) || '';
+        const _previewParts = [`Project ${_jc.project_key || '—'}`];
+        if (_compName) _previewParts.push(_compName);
+        if (_jc.board_id) _previewParts.push(`Board ${_jc.board_id}`);
+        html += `<div class="dt-sec-hint" style="margin-top:11px;">${escapeHtml(_previewParts.join(' · '))}</div>`;
         html += `</div>`;
       }
     }
@@ -342,35 +363,39 @@ async function openTask(taskId, keepChat) {
     // Actions — regrouped by job. The output opens from the panel up top,
     // so it's gone from here. Left = utilities (incl. rerun, moved aside);
     // right = the one act you came to do.
-    const doneLabel = isAgentComplete ? 'Approve & archive' : 'Mark done';
-    const canDispatch = (task.status === 'open' || (task.status === 'blocked' && task.agent_status === 'failed'))
-                        && (task.queue === 'collab' || task.queue === 'agent');
-    const canRerun = (task.queue === 'agent' || task.queue === 'collab')
-                     && (task.agent_status === 'failed' || task.agent_status === 'complete' || task.status === 'blocked');
-    const hasSlots = isScheduleMeeting && task.body && parseSlots(task.body).length > 0;
-    const canSendMessage = task.task_type === 'send-message' && (task.agent_status === 'complete' || task.agent_status === 'needs-human');
+    if (isArchived) {
+      modalActions.innerHTML = `<div class="dt-foot-left"><button class="btn btn-quiet" onclick="closeModal()">Close</button></div><div class="dt-foot-right"><span style="font-size:12px;color:var(--text-dim);opacity:0.6;">archived · read only</span></div>`;
+    } else {
+      const doneLabel = isAgentComplete ? 'Approve & archive' : 'Mark done';
+      const canDispatch = (task.status === 'open' || (task.status === 'blocked' && task.agent_status === 'failed'))
+                          && (task.queue === 'collab' || task.queue === 'agent');
+      const canRerun = (task.queue === 'agent' || task.queue === 'collab')
+                       && (task.agent_status === 'failed' || task.agent_status === 'complete' || task.status === 'blocked');
+      const hasSlots = isScheduleMeeting && task.body && parseSlots(task.body).length > 0;
+      const canSendMessage = task.task_type === 'send-message' && (task.agent_status === 'complete' || task.agent_status === 'needs-human');
 
-    let leftHtml = `<button class="btn btn-quiet" onclick="closeModal()">Close</button>`;
-    leftHtml += `<button class="btn btn-quiet" onclick="notMineTask('${task.id}')">Not mine</button>`;
-    if (canRerun) leftHtml += `<button class="btn btn-quiet" id="btn-rerun-agent" onclick="rerunAgent('${task.id}')">Rerun agent</button>`;
+      let leftHtml = `<button class="btn btn-quiet" onclick="closeModal()">Close</button>`;
+      leftHtml += `<button class="btn btn-quiet" onclick="notMineTask('${task.id}')">Not mine</button>`;
+      if (canRerun) leftHtml += `<button class="btn btn-quiet" id="btn-rerun-agent" onclick="rerunAgent('${task.id}')">Rerun agent</button>`;
 
-    let rightHtml = '';
-    if (canDispatch) rightHtml += `<button class="btn btn-schedule" id="btn-start-agent" onclick="startAgent('${task.id}')">Start agent</button>`;
-    if (hasSlots) rightHtml += `<button class="btn btn-schedule" id="btn-create-meeting" onclick="scheduleMeeting('${task.id}')" disabled>Create meeting</button>`;
-    if (hasJiraDraft && (task.agent_status === 'complete' || task.agent_status === 'needs-human')) rightHtml += `<button class="btn btn-schedule" id="btn-publish-jira" onclick="publishToJira('${task.id}')">Publish to Jira</button>`;
-    if (canSendMessage) rightHtml += `<button class="btn btn-schedule" id="btn-send-message" onclick="sendMessage('${task.id}')">${svgIcon('send')}Send message</button>`;
-    // Both approvals sit together on the right
-    if (isAgentComplete && task.agent_output) rightHtml += `<button class="btn btn-danger" id="btn-done-delete" onclick="markDoneAndDelete()">Approve & delete</button>`;
-    rightHtml += `<button class="btn btn-success" onclick="markDone()">${doneLabel}</button>`;
+      let rightHtml = '';
+      if (canDispatch) rightHtml += `<button class="btn btn-schedule" id="btn-start-agent" onclick="startAgent('${task.id}')">Start agent</button>`;
+      if (hasSlots) rightHtml += `<button class="btn btn-schedule" id="btn-create-meeting" onclick="scheduleMeeting('${task.id}')" disabled>Create meeting</button>`;
+      if (hasJiraDraft && (task.agent_status === 'complete' || task.agent_status === 'needs-human')) rightHtml += `<button class="btn btn-schedule" id="btn-publish-jira" onclick="publishToJira('${task.id}')">Publish to Jira</button>`;
+      if (canSendMessage) rightHtml += `<button class="btn btn-schedule" id="btn-send-message" onclick="sendMessage('${task.id}')">${svgIcon('send')}Send message</button>`;
+      // Both approvals sit together on the right
+      if (isAgentComplete && task.agent_output) rightHtml += `<button class="btn btn-danger" id="btn-done-delete" onclick="markDoneAndDelete()">Approve & delete</button>`;
+      rightHtml += `<button class="btn btn-success" onclick="markDone()">${doneLabel}</button>`;
 
-    modalActions.innerHTML = `<div class="dt-foot-left">${leftHtml}</div><div class="dt-foot-right">${rightHtml}</div>`;
+      modalActions.innerHTML = `<div class="dt-foot-left">${leftHtml}</div><div class="dt-foot-right">${rightHtml}</div>`;
+    }
 
     // Build the linked chat for this task, mark the source card, then let the
     // whole workspace materialize (blur→sharp + sweet-spot spring). On a
     // keepChat refresh (post-settle / post-comment), skip all three: the
     // workspace is already visible and the chat thread must be preserved.
     if (!keepChat) {
-      if (typeof buildChat === 'function') buildChat(task);
+      if (!isArchived && typeof buildChat === 'function') buildChat(task);
       markSourceCard(taskId);
       revealWorkspace();
     }
@@ -854,6 +879,16 @@ async function loadEmailCache() {
   } catch { emailCache = {}; }
 }
 
+let _jiraConfig = null;
+async function loadJiraConfig() {
+  if (_jiraConfig !== null) return;
+  try {
+    const res = await fetch(`${API}/jira-config`);
+    if (res.ok) _jiraConfig = await res.json();
+    else _jiraConfig = {};
+  } catch { _jiraConfig = {}; }
+}
+
 function getCurrentAttendees() {
   const chips = document.querySelectorAll('#attendee-chips .dt-att');
   return Array.from(chips).map(c => c.dataset.email).filter(Boolean);
@@ -1136,6 +1171,7 @@ function parseJiraDraft(body) {
     gtm_date: field('JIRA_GTM_DATE') || '',
     client_commitment: field('JIRA_CLIENT_COMMITMENT') || '',
     parent: field('JIRA_PARENT') || '',
+    component_id: field('JIRA_COMPONENT_ID') || '',
     description: descMatch ? descMatch[1].trim() : '',
   };
 }

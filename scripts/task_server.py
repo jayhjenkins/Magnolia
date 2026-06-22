@@ -1606,6 +1606,20 @@ def handle_schedule_meeting(handler, task_id):
     })
 
 
+def handle_get_jira_config(handler):
+    """GET /api/jira-config — Jira config for the board UI preview row."""
+    cfg = profile_lib.jira_config()
+    raw_comps = cfg.get("components") or {}
+    # Flip name→ID map to ID→human-label for the UI lookup
+    components_by_id = {v: k.replace("_", " ").title() for k, v in raw_comps.items()}
+    _json_response(handler, {
+        "project_key": cfg.get("project_key", ""),
+        "board_id": str(cfg.get("board_id", "") or ""),
+        "component_id": cfg.get("component_id", ""),
+        "components_by_id": components_by_id,
+    })
+
+
 def handle_publish_jira(handler, task_id):
     """POST /api/tasks/{id}/publish-jira — publish a Jira draft (Tier-2 gated)."""
     import importlib
@@ -2387,6 +2401,10 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
                 _error_response(self, "Invalid task ID format", status=400)
             else:
                 handle_schedule_meeting(self, task_id)
+            return True
+
+        if path == "/api/jira-config" and method == "GET":
+            handle_get_jira_config(self)
             return True
 
         # Match /api/tasks/{id}/publish-jira

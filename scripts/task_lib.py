@@ -225,7 +225,7 @@ def create_task(title, queue="human", priority="medium", domain=None,
                 meeting_duration=None, meeting_title=None,
                 meeting_description=None, message_channel=None,
                 message_to=None, message_subject=None, message_body=None,
-                card_type=None, patch_path=None):
+                card_type=None, patch_path=None, worker=None):
     """Create a new task file in the appropriate queue directory.
 
     Returns (task_id, filepath).
@@ -279,6 +279,8 @@ def create_task(title, queue="human", priority="medium", domain=None,
         frontmatter["card_type"] = card_type
     if patch_path:
         frontmatter["patch_path"] = patch_path
+    if worker:
+        frontmatter["worker"] = worker
 
     # Add waiting metadata if applicable
     if queue == "waiting":
@@ -425,6 +427,8 @@ def list_tasks(queue=None, status=None, domain=None, priority=None,
         for fname in os.listdir(qdir):
             if not fname.startswith("TASK-") or not fname.endswith(".md"):
                 continue
+            if "-jira-draft" in fname:
+                continue
             filepath = os.path.join(qdir, fname)
             try:
                 fm, _ = _parse_task_file(filepath)
@@ -479,6 +483,7 @@ def list_tasks(queue=None, status=None, domain=None, priority=None,
                 "grad_approval_pct": fm.get("grad_approval_pct"),
                 "grad_agreement_pct": fm.get("grad_agreement_pct"),
                 "grad_examples": fm.get("grad_examples"),
+                "worker": fm.get("worker"),
                 "file": os.path.relpath(filepath, TASKS_DIR),
             })
 

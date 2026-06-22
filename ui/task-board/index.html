@@ -280,6 +280,12 @@
     text-wrap: pretty;
   }
   .card-title > span:last-child { flex: 1 1 auto; min-width: 0; }
+  .card-subtitle {
+    display: block;
+    font-size: 11px; font-weight: 400;
+    color: var(--text-muted); margin-top: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .prio-dot {
     width: 8px; height: 8px; border-radius: 50%;
     margin-top: 6px; flex: 0 0 auto;
@@ -387,8 +393,10 @@
     animation: rise var(--ease);
   }
   @keyframes rise { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-  .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0; }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0; gap: 12px; }
+  .modal-title-block { flex: 1 1 auto; min-width: 0; }
   .modal-header h2 { font-family: var(--font-serif); font-size: 18px; font-weight: 500; line-height: 1.35; }
+  #modal-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 3px; display: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .modal-close { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; padding: 2px 10px; border-radius: 8px; transition: background var(--ease), color var(--ease); }
   .modal-close:hover { background: var(--surface-hover); color: var(--text); }
   .modal-body { padding: 22px; overflow-y: auto; flex: 1; min-height: 0; }
@@ -504,7 +512,7 @@
   /* each row is a .card so it inherits the exact proximity warming used on Now */
   .activity-row {
     display: grid; grid-template-columns: var(--activity-cols); column-gap: 16px; align-items: center;
-    padding: 9px 15px; margin-bottom: 0; border-radius: 9px; cursor: default;
+    padding: 9px 15px; margin-bottom: 0; border-radius: 9px; cursor: pointer;
     font-size: 13px;
   }
   .activity-date { color: var(--text-dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1360,7 +1368,10 @@
   <div class="split-modal" id="split-modal">
     <div class="modal task-pane">
       <div class="modal-header">
-        <h2 id="modal-title"></h2>
+        <div class="modal-title-block">
+          <h2 id="modal-title"></h2>
+          <p id="modal-subtitle"></p>
+        </div>
         <button class="modal-close" onclick="closeModal()" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body" id="modal-body"></div>

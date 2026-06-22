@@ -273,7 +273,48 @@ function _renderActions(task, actionIds) {
 }
 
 // ─── Slot builders (head / title / context) ─────────────────────────────────
-// These reproduce board.js's head/title/context markup verbatim.
+
+// Strip the task-router "(from: <meeting-slug>)" suffix that gets embedded in
+// titles at extraction time. The meeting name is shown separately as a subtitle.
+function _cleanTitle(title) {
+  if (!title) return title;
+  return title.replace(/\s*\(from:.*$/, '').trim();
+}
+
+// Return a short human-readable label for the meeting or chat that spawned the
+// task. Tries task.source_meeting first; falls back to extracting the "from:"
+// suffix embedded in the title by the task-router.
+function _meetingLabel(task) {
+  let slug = task.source_meeting;
+  if (!slug) {
+    const m = (task.title || '').match(/\(from:\s*(.+?)\s*\)?$/);
+    if (m) slug = m[1].trim();
+  }
+  if (!slug) return null;
+
+  const fname = slug.split('/').pop().replace(/\.[^.]+$/, '');
+
+  // Extract leading date (YYYY-MM-DD), separator may be _ or -
+  const dateMatch = fname.match(/^(\d{4}-\d{2}-\d{2})[_-](.*)$/);
+  if (!dateMatch) return fname.replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const d = new Date(dateMatch[1] + 'T12:00:00');
+  const dateLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const rest = dateMatch[2];
+
+  // Detailed format (underscore-separated: type_description_participants):
+  // show "Jun 1 · type description"
+  if (rest.includes('_')) {
+    const segs = rest.split('_');
+    const type = segs[0] || '';
+    const desc = segs[1] ? segs[1].replace(/-/g, ' ') : '';
+    const label = [type, desc].filter(Boolean).join(' ');
+    return label ? `${dateLabel} · ${label}` : dateLabel;
+  }
+  // Simple format (hyphen-only slug): "Jun 3 · cmp core standup"
+  return `${dateLabel} · ${rest.replace(/-/g, ' ')}`;
+}
+
 function _renderHead(task, q) {
   const kind = KIND_META[task.card_type];
   let head = `<div class="card-head">`;
@@ -289,7 +330,12 @@ function _renderHead(task, q) {
 
 function _renderTitle(task) {
   const prioClass = `prio-${task.priority || 'low'}`;
-  return `<div class="card-title"><span class="prio-dot ${prioClass}" title="${task.priority || 'low'} priority"></span><span>${escapeHtml(task.title)}</span></div>`;
+  const cleanedTitle = _cleanTitle(task.title);
+  const mtgLabel = _meetingLabel(task);
+  const subtitle = mtgLabel
+    ? `<span class="card-subtitle">${escapeHtml(mtgLabel)}</span>`
+    : '';
+  return `<div class="card-title"><span class="prio-dot ${prioClass}" title="${task.priority || 'low'} priority"></span><span>${escapeHtml(cleanedTitle)}${subtitle}</span></div>`;
 }
 
 function _cardAge(created) {
@@ -300,14 +346,12 @@ function _cardAge(created) {
   if (days === 0) return 'today';
   if (days === 1) return '1 day old';
   if (days < 60) return `${days} days old`;
-  // Older: show a short date so the exact timestamp is readable.
   return new Date(created).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function _renderContext(task) {
   const ctxParts = [];
-  const mtg = meetingName(task.source_meeting);
-  if (mtg) ctxParts.push(`<span class="card-from" title="From: ${escapeHtml(task.source_meeting)}">${svgIcon('meeting')}<span>${escapeHtml(mtg)}</span></span>`);
+  // Meeting name moved to card subtitle (_renderTitle). Only show domain + age here.
   if (task.domain) ctxParts.push(`<span class="card-domain">${escapeHtml(task.domain)}</span>`);
   const age = _cardAge(task.created);
   if (age) ctxParts.push(`<span class="card-age">${age}</span>`);

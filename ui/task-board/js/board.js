@@ -103,6 +103,7 @@ function judgeScoreBadge(task) {
 }
 
 function statusMark(task) {
+  if (task.status === 'done' || task.status === 'cancelled') return '';
   switch (task.agent_status) {
     case 'running':     return '<span class="status-mark" title="Agent working"><span class="mark-running"></span></span>';
     case 'needs-human': return `<span class="status-mark" style="color:var(--warning)" title="Needs your input">${svgIcon('needsHuman')}</span>`;

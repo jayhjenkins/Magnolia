@@ -101,9 +101,10 @@ function renderNow() {
   html += renderNowSection('Review', lanes.review, 'Nothing to review.');
   html += renderNowSection('People', lanes.people, 'Inbox zero.');
 
-  // Agent queue — collapsed by default; running cards show their pulse.
+  // Agent queue — collapsed by default; preserve open state across re-renders.
   const aq = lanes['agent-queue'];
-  html += `<details class="now-section now-agent-queue">`;
+  const aqWasOpen = view.querySelector('.now-agent-queue')?.open ?? false;
+  html += `<details class="now-section now-agent-queue"${aqWasOpen ? ' open' : ''}>`;
   html += `<summary class="now-section-header"><span class="now-section-title"><span class="now-section-name">Agent queue</span></span>${aq.length ? `<span class="now-count">${aq.length}</span>` : ''}</summary>`;
   html += `<div class="now-section-body">`;
   if (aq.length === 0) {
@@ -113,7 +114,9 @@ function renderNow() {
   }
   html += `</div></details>`;
 
+  const scrollTop = view.scrollTop;
   view.innerHTML = html;
+  view.scrollTop = scrollTop;
   // Re-apply any inline notices (e.g. a 409 the user is still reading) that the
   // full re-render would otherwise wipe.
   if (typeof reapplyCardNotices === 'function') reapplyCardNotices();

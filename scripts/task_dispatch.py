@@ -447,6 +447,15 @@ def match_worker(task, workers):
     task_type = task.get("task_type") or ""
     domain = task.get("domain") or ""
 
+    # Pinned worker: task frontmatter explicitly names a worker — skip LLM/regex.
+    pinned = task.get("worker") or ""
+    if pinned:
+        for w in workers:
+            if w.get("name") == pinned:
+                log(f"Pinned worker: {pinned}")
+                return w, 200, [f"pinned:{pinned}"]
+        log(f"Pinned worker '{pinned}' not found in worker list, falling back to matching")
+
     # Try LLM-based matching first
     llm_name, llm_reason = _match_worker_llm(task, workers)
     if llm_name:
@@ -1031,6 +1040,7 @@ def main():
                     "task_type": fm.get("task_type"),
                     "model": fm.get("model"),
                     "tier": fm.get("tier"),
+                    "worker": fm.get("worker"),
                 }
             except Exception:
                 task = {"id": task_id, "title": "(single dispatch)", "priority": "medium"}

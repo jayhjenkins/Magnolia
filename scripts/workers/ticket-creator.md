@@ -72,8 +72,10 @@ Task {task_id}. Follow these steps:
 
 2. Read the team's Jira target from `profile/integrations.yaml` →
    `project_management.jira`: `project_key`, `board_id`, `default_assignee`,
-   `component_id`, `product_area`. If a field is unset/empty, draft without it
-   and note it for the operator's review.
+   `component_id`, `product_area`, and `conventions`. The `conventions` field
+   states the default issue type (e.g. "Default type is Unit for engineering work").
+   Use it to set the default — do NOT fall back to a hardcoded type. If the field
+   is unset/empty, draft without it and note it for the operator's review.
 
 3. Read the jira-home skill for field reference:
    Read .claude/skills/workflow-jira-home/SKILL.md to understand the
@@ -87,10 +89,10 @@ Task {task_id}. Follow these steps:
    - Read the source meeting transcript if one exists.
    - Search qmd for related context.
 
-6. Pick the issue type:
+6. Pick the issue type (derive the default from the `conventions` field you read in step 2):
    - **Bug** — client-reported (Zendesk, customer). Lands on the team's kanban/backlog.
    - **Regression Defect** — internally-found regression (QA, internal test). Lands on the team's kanban/backlog.
-   - **Unit** — small enhancement, improvement, or single engineering change. **Default for most worker drafts.** Lands on the team's kanban/backlog.
+   - **Unit** — small enhancement, improvement, or single engineering change. The `conventions` field should confirm this as the default for most engineering work on this project. Lands on the team's kanban/backlog.
    - **Feature** — larger net-new product capability (PRD-scale). Only use when the work is roadmap-tier and product-owned. Features live on roadmap boards, not on the team's kanban.
    - **Spike** — time-boxed investigation.
    - **Hotfix** — emergency fix.

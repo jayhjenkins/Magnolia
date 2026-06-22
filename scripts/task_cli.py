@@ -240,13 +240,15 @@ def cmd_agent_complete(args):
             changes["sharepoint_url"] = sp_url
 
     # Stamp the canonical action task_type for a Jira draft so the trust ladder,
-    # judge, and Quality tab all key on 'publish-ticket' (the draft is otherwise
-    # title-pattern-routed with no task_type). Never overwrite an explicit type.
+    # judge, and Quality tab all key on 'publish-ticket'. Promote both unset and
+    # 'create-ticket' (the pre-completion type assigned at extraction time) so that
+    # tasks routed through the queue pipeline are correctly transitioned on completion.
     try:
         td = task_lib.read_task(args.task_id)
         existing_fm = td.get("frontmatter") or {}
         body = td.get("body", "") or ""
-        if not existing_fm.get("task_type") and "<!-- JIRA_DRAFT -->" in body:
+        promotable = existing_fm.get("task_type") in (None, "", "create-ticket")
+        if promotable and "<!-- JIRA_DRAFT -->" in body:
             changes["task_type"] = "publish-ticket"
     except Exception:
         pass

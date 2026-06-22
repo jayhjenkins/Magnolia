@@ -304,6 +304,7 @@ def execute_job(job):
         tags=tpl.get("tags", ["cron"]),
         creator="cron",
         description=description,
+        worker=tpl.get("worker"),
     )
 
     # Update job state

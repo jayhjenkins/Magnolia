@@ -1,9 +1,10 @@
-// ─── Activity Surface (read-only) ──────────────────────────────────────
+// ─── Activity Surface ───────────────────────────────────────────────────
 // Reverse-chron list of archived (done/cancelled) tasks from /api/activity.
-// READ-ONLY: rows never call openTask or any write verb. Each row links to
-// its output when available (agent_output → Obsidian, else sharepoint_url →
-// Word Online). Client-side substring filter over id+title+domain+queue;
-// the fetched data is cached so filtering never refetches.
+// Clicking a row opens the task in a read-only workspace view (output tiles,
+// description, activity log, judge score, 👍/👎 — no write actions, no chat).
+// The "Open output" link is a direct shortcut that does not open the modal.
+// Client-side substring filter over id+title+domain+queue; fetched data is
+// cached so filtering never refetches.
 
 let _activityData = [];
 
@@ -77,15 +78,21 @@ function _renderActivityRow(t) {
 
   let link;
   if (t.agent_output) {
-    link = `<a class="activity-link" href="${obsidianUri(t.agent_output)}" title="Open in Obsidian">Open output</a>`;
+    const v = String(t.agent_output).trim();
+    const urlMatch = v.match(/https?:\/\/[^\s)]+/);
+    if (urlMatch) {
+      link = `<a class="activity-link" href="${escapeHtml(urlMatch[0])}" target="_blank" rel="noopener" title="${escapeHtml(urlMatch[0])}" onclick="event.stopPropagation()">Open output</a>`;
+    } else {
+      link = `<a class="activity-link" href="${obsidianUri(v)}" title="Open in Obsidian" onclick="event.stopPropagation()">Open output</a>`;
+    }
   } else if (t.sharepoint_url) {
-    link = `<a class="activity-link" href="${escapeHtml(t.sharepoint_url)}" target="_blank" rel="noopener" title="Open in Word Online">Open output</a>`;
+    link = `<a class="activity-link" href="${escapeHtml(t.sharepoint_url)}" target="_blank" rel="noopener" title="Open in Word Online" onclick="event.stopPropagation()">Open output</a>`;
   } else {
     link = `<span class="activity-link activity-empty-cell">—</span>`;
   }
 
   return `
-    <div class="activity-row card">
+    <div class="activity-row card" onclick="openTask('${escapeHtml(t.id || '')}')">
       <span class="activity-date">${escapeHtml(formatDate(t.updated))}</span>
       <span class="activity-id">${escapeHtml(t.id || '')}</span>
       <span class="activity-title">${escapeHtml(t.title || '')}</span>
