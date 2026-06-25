@@ -138,6 +138,17 @@ def test_configured_server_port_returns_int(profile_root):
     assert isinstance(profile_lib.configured_server_port(root=profile_root), int)
 
 
+def test_configured_server_port_ignores_example_fallback(tmp_path):
+    # Regression: with NO live profile/, profile_dir() falls back to the shipped
+    # profile.example/ (which ships server.port: 8742). configured_server_port
+    # must NOT treat that template port as an explicit operator choice, or a fresh
+    # install would skip the launcher's auto-free-port hunt and collide on 8742.
+    (tmp_path / "profile.example").mkdir()
+    (tmp_path / "profile.example" / "config.yaml").write_text("server:\n  port: 8742\n")
+    # no live profile/ dir on purpose
+    assert profile_lib.configured_server_port(root=str(tmp_path)) is None
+
+
 def test_set_server_port_writes_config(profile_root):
     profile_lib.set_server_port(8761, root=profile_root)
     assert profile_lib.configured_server_port(root=profile_root) == 8761

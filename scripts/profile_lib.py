@@ -389,8 +389,17 @@ def configured_server_port(root=None):
     """The EXPLICITLY-configured server port as an int, or None if unset.
 
     Distinct from server_port(), which applies the 8742 default. Returns None
-    when config.yaml carries no server.port, so callers can tell "the operator
-    chose a port" apart from "fall back to the default"."""
+    when no port has been deliberately chosen, so callers can tell "the operator
+    chose a port" apart from "fall back to the default".
+
+    A port counts as explicit ONLY when it lives in the operator's LIVE profile/.
+    Without this guard, profile_dir() falls back to the shipped profile.example/
+    (which carries server.port: 8742), so a brand-new install with no live
+    profile/ would read that template port and look like a deliberate 8742 choice
+    - defeating the launcher's auto-free-port hunt and colliding with whatever is
+    already on 8742 (e.g. an existing production board)."""
+    if not profile_is_live(root):
+        return None
     p = (config(root).get("server") or {}).get("port")
     return int(p) if p is not None else None
 
