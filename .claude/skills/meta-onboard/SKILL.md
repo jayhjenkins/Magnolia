@@ -114,8 +114,10 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
    and move on without blocking. On Windows, auto-start-on-reboot uses Task Scheduler and is **not set
    up automatically** — the board runs now; tell them it's a quick optional follow-up later (the
    `persist_lib.install` return carries the PowerShell command, but never auto-run it on their first
-   session). Don't block. Then open it: `platform_lib.open_url(server_lib.url())`. **This is the
-   board-spawn beat** — welcome them onto their live board.
+   session). Don't block. The board is now live behind the scenes — but do NOT open it, link it, or
+   send them to it here, and NEVER invite them to "go take a look and come back." Onboarding runs in
+   ONE direction, start to finish, with no going back and forth; the board is revealed exactly once,
+   at the very end (see Close). Just confirm the plumbing is good and continue straight to voice + packs.
 6. **Voice discovery** — if M365 is authorized, study their recent Teams + Outlook messages (and any
    adopted/feed transcripts) and draft `profile/voice/teams.md` and `profile/voice/email.md`, then
    show them: "here's how you sound — change anything?" If M365 isn't ready, keep the placeholder
@@ -123,8 +125,14 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
 7. **Pick packs** — confirm `core` + their persona pack in `profile/config.yaml` `active_skill_packs`.
 
 ## Close
-Recap what's live, what's pending (and why it's fine), and point them at the board. Leave them in the
-sunshine.
+Recap what's live and what's pending (and why it's fine). THEN reveal the board — once, here at the end:
+- **In the in-UI onboarding room** (the headless harness): do NOT open or link anything. Printing
+  `ONBOARDING_COMPLETE` in the next section is what reveals the board — the room runs the reveal itself.
+  Just close warmly.
+- **In a terminal run** (no room to reveal): open it now with `platform_lib.open_url(server_lib.url())`
+  and welcome them onto their live board.
+
+Leave them in the sunshine.
 
 ## Mark complete (the final step — always do this last)
 Once everything above is done and you've closed warmly, set the completion marker and signal you're

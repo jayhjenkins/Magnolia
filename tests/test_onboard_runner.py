@@ -121,6 +121,16 @@ def test_argv_uses_broad_allowlist_and_settings(stub_model, monkeypatch):
     assert os.path.isabs(settings_path)
 
 
+# --- Harness one-direction rule ---------------------------------------------
+
+def test_harness_forbids_board_back_and_forth():
+    # The board is revealed once, at the end, by ONBOARDING_COMPLETE - never opened
+    # mid-flow with a "go look and come back" beat. The harness must say so.
+    h = onboard_runner.build_harness_prompt()
+    assert "one direction" in h.lower()
+    assert "going back and forth" in h.lower()
+
+
 # --- Completion sentinel -----------------------------------------------------
 
 def test_sentinel_yields_onboarding_complete_event(stub_model, monkeypatch):
