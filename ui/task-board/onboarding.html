@@ -98,7 +98,12 @@
     text-align: center; padding: 32px 24px;
     transition: opacity .3s ease;
   }
-  #welcome.gone { opacity: 0; pointer-events: none; }
+  /* On start, lift welcome OUT of the flex flow (position:absolute) so the
+     conversation claims the full room height - otherwise this still-flex:1
+     panel keeps eating ~half the viewport and the chat is squeezed into the
+     bottom half. Absolute keeps the opacity fade intact (it fades out as an
+     overlay above the convo, then is non-interactive). */
+  #welcome.gone { opacity: 0; pointer-events: none; position: absolute; inset: 0; }
   .welcome-inner { max-width: 34rem; display: flex; flex-direction: column; align-items: center; gap: 18px; }
   .welcome-leaf { width: 44px; height: 44px; color: var(--accent); }
   .welcome-leaf svg { width: 44px; height: 44px; display: block; }

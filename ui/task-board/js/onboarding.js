@@ -21,6 +21,11 @@
   let busy = false;
   let completed = false;
   let onboardingStarted = false;
+  // Follow the streaming tail to the bottom ONLY while the reader is parked
+  // there. A new turn parks the view at its own top instead (see anchorTurnTop),
+  // so a long message - like the auto-fired kickoff - reads from the beginning
+  // rather than being scrolled clean past its top.
+  let userPinned = true;
 
   // -- escapeHtml (chat.js gets this from a board global; we own it here) ----
   function escapeHtml(s) {
@@ -221,9 +226,27 @@
     return el;
   }
 
+  function nearBottom(body) {
+    return body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+  }
+
+  // Chase the bottom only when the reader is already parked there. After a turn
+  // is anchored to its top (userPinned = false), streaming calls here no-op, so
+  // the message fills downward from its visible top; if the reader scrolls back
+  // down to the bottom, following resumes.
   function scrollThread() {
     const body = document.getElementById('onboard-body');
-    if (body) body.scrollTop = body.scrollHeight;
+    if (body && userPinned) body.scrollTop = body.scrollHeight;
+  }
+
+  // Park the top of a turn near the top of the viewport so a long message reads
+  // from its beginning instead of having its head scrolled off. Used for each
+  // new assistant turn (including the long auto-fired kickoff).
+  function anchorTurnTop(el) {
+    const body = document.getElementById('onboard-body');
+    if (!body || !el) return;
+    body.scrollTop = Math.max(0, el.offsetTop - 24);
+    userPinned = false;
   }
 
   // -- Window-shade reveal + board redirect ----------------------------------
@@ -289,13 +312,15 @@
 
     if (!hidden) {
       const userTurn = renderTurn({ role: 'user', text }, false);
-      thread.appendChild(userTurn); revealNow(userTurn, 'show'); scrollThread();
+      thread.appendChild(userTurn); revealNow(userTurn, 'show');
     }
 
     const a = document.createElement('div');
     a.className = 'chat-turn turn-assistant show';
     a.innerHTML = '<div class="turn-steps"></div><div class="turn-text"><span class="typing"><span></span><span></span><span></span></span></div>';
-    thread.appendChild(a); scrollThread();
+    // Park the view at the top of this new assistant turn so its message reads
+    // from the start, rather than pinning to the bottom and chasing the tail.
+    thread.appendChild(a); anchorTurnTop(a);
     const stepsBox = a.querySelector('.turn-steps');
     const textBox = a.querySelector('.turn-text');
     let typingCleared = false, liveGroup = null, toolCount = 0, sawText = false, streamDone = false, rawText = '';
@@ -434,6 +459,11 @@
 
     const goBoard = document.getElementById('go-board');
     if (goBoard) goBoard.addEventListener('click', e => { e.preventDefault(); window.location = '/'; });
+
+    // Re-pin to the bottom only when the reader scrolls (back) to the bottom;
+    // any scroll up unpins, so streaming won't yank them away from what they read.
+    const body = document.getElementById('onboard-body');
+    if (body) body.addEventListener('scroll', () => { userPinned = nearBottom(body); });
   });
 
 }());
