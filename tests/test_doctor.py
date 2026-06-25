@@ -58,12 +58,28 @@ def test_probe_transcript_not_expected(tmp_path):
     assert cap["status"] == "not_expected"
 
 
-def test_probe_transcript_needs_reauth_when_no_session(tmp_path):
+def test_probe_transcript_needs_reauth_when_no_session(tmp_path, monkeypatch):
+    # Deps present (Playwright + otterai installed) but no saved session yet.
+    monkeypatch.setattr(doctor, "_dep_missing", lambda m: False)
     (tmp_path / "profile").mkdir()
     (tmp_path / "profile" / "integrations.yaml").write_text("transcript:\n  provider: otter\n")
     cap = doctor.probe_transcript(root=str(tmp_path))
     assert cap["provider"] == "otter"
     assert cap["status"] == "needs_reauth"  # no session.json present
+
+
+def test_probe_transcript_otter_needs_setup_when_deps_missing(tmp_path, monkeypatch):
+    # The Otter feed needs the transcript extras (Playwright + otterai) installed
+    # before otter_auth.py can even run. The Doctor must surface that as a setup
+    # step, NOT send the user to re-auth against a script that will crash on import.
+    monkeypatch.setattr(doctor, "_dep_missing", lambda m: m in ("playwright", "otterai"))
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "integrations.yaml").write_text("transcript:\n  provider: otter\n")
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["provider"] == "otter"
+    assert cap["status"] == "needs_setup"
+    assert "requirements-transcript.txt" in cap.get("remedy", "")
+    assert "playwright" in cap.get("missing", [])
 
 
 def test_probe_transcript_granola_no_marker_needs_reauth(tmp_path):
