@@ -46,6 +46,43 @@ def test_install_sh_has_required_steps():
     assert "magnolia" in body.lower()                    # the closing instruction
 
 
+def test_install_sh_installs_only_missing_prereqs():
+    body = open(os.path.join(ROOT, "install.sh"), encoding="utf-8").read()
+    # No longer blanket-installs (which upgrades) - only what's missing.
+    assert "brew install git node python pandoc" not in body
+    assert "brew install $missing" in body               # word-split over missing list
+    # Builds the missing list from individual command -v checks.
+    assert 'missing="$missing git"' in body
+    assert 'missing="$missing pandoc"' in body
+    # qmd is skipped when already present.
+    assert "command -v qmd" in body
+
+
+def test_install_sh_redirects_stdin_for_interactive_commands():
+    body = open(os.path.join(ROOT, "install.sh"), encoding="utf-8").read()
+    # brew / npm / pip read </dev/null so they can't consume a piped script
+    # and won't interactively prompt.
+    assert "brew install $missing </dev/null" in body
+    assert "npm install -g @tobilu/qmd </dev/null" in body
+    assert "ruamel.yaml pytest </dev/null" in body
+    # claude login reads the real terminal even under `... | bash`.
+    assert "claude login </dev/tty" in body
+
+
+def test_install_docs_use_safe_bash_c_oneliner():
+    # The macOS/Linux one-liner must pass the script as an ARG to bash so stdin
+    # stays the terminal (the sign-in step needs it) - not `curl | bash`.
+    safe = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.sh)"'
+    old = "install.sh | bash"
+    for name in ("docs/INSTALL-macos.md", "docs/INSTALL-smoke-checklist.md"):
+        body = open(os.path.join(ROOT, name), encoding="utf-8").read()
+        assert safe in body, name
+        assert old not in body, name
+    # Windows command is intentionally unchanged (iex has no stdin footgun).
+    win = open(os.path.join(ROOT, "docs/INSTALL-windows.md"), encoding="utf-8").read()
+    assert "install.ps1 | iex" in win
+
+
 def test_install_ps1_has_required_steps():
     p = os.path.join(ROOT, "install.ps1")
     assert os.path.isfile(p)

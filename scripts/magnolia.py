@@ -50,7 +50,9 @@ def launch(open_browser=True):
     if not server_lib.is_running(port=target):
         server_lib.start(cmd=server_lib.default_cmd())   # task_server reads the (now-persisted) port from config
         started = True
-    if not persist_lib.is_installed():
+    # Persistence is tied to a board WE actually started this invocation; if one
+    # is already serving the target port we don't (re)register an agent for it.
+    if started and not persist_lib.is_installed():
         persist_lib.install(program=server_lib.default_cmd(),
                             working_dir=PM_OS_DIR, log_path=LOG_PATH)
     url = f"http://localhost:{target}"
