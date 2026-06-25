@@ -14,12 +14,31 @@ if ! command -v brew >/dev/null 2>&1; then
   say "Homebrew is required. Install it from https://brew.sh and re-run this."
   exit 1
 fi
-say "Installing prerequisites (git, node, python, pandoc)..."
-brew install git node python pandoc
-say "Installing qmd (semantic search)..."
-npm install -g @tobilu/qmd
+say "Checking prerequisites (git, node, python, pandoc)..."
+# Only install what's MISSING (never upgrade tools already present). A
+# space-separated string + intentional word-splitting, NOT a bash array:
+# macOS /bin/bash is 3.2 and under `set -u` empty-array expansion breaks there.
+missing=""
+command -v git    >/dev/null 2>&1 || missing="$missing git"
+command -v node   >/dev/null 2>&1 || missing="$missing node"
+command -v python3 >/dev/null 2>&1 || missing="$missing python"
+command -v pandoc >/dev/null 2>&1 || missing="$missing pandoc"
+if [ -n "$missing" ]; then
+  say "Installing missing prerequisites:$missing"
+  # </dev/null so brew can't consume the piped install script and never
+  # interactively prompts. `$missing` is intentionally unquoted (word-split).
+  brew install $missing </dev/null
+else
+  say "All prerequisites already present - skipping."
+fi
+if command -v qmd >/dev/null 2>&1; then
+  say "qmd already present - skipping."
+else
+  say "Installing qmd (semantic search)..."
+  npm install -g @tobilu/qmd </dev/null
+fi
 say "Installing Python dependencies..."
-python3 -m pip install --break-system-packages ruamel.yaml pytest
+python3 -m pip install --break-system-packages ruamel.yaml pytest </dev/null
 
 # 2. Claude CLI: detect-and-direct (never guess an install command)
 if ! command -v claude >/dev/null 2>&1; then
@@ -39,7 +58,10 @@ PY
 )"
 if [ "$LOGGED_IN" != "yes" ]; then
   say "Sign in to Claude (a browser will open)..."
-  claude login
+  # </dev/tty so that under the old `... | bash` form claude reads the real
+  # terminal, not the piped script. Harmless under the safe `bash -c "$(...)"`
+  # form, where stdin is already the terminal.
+  claude login </dev/tty
 fi
 
 # 4. Clone (or fast-forward an existing checkout)

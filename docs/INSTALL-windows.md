@@ -56,7 +56,9 @@ Run this in PowerShell:
 irm https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.ps1 | iex
 ```
 
-It will, in order:
+(Windows is unaffected by the stdin footgun that the macOS/Linux installer guards against:
+PowerShell's `iex` runs the script in-session rather than reading it from a pipe, so the
+sign-in step reads your terminal as-is.) It will, in order:
 - install prerequisites via winget (git, node, python, pandoc) and **qmd** (semantic search)
 - confirm Claude Code is present (or stop and tell you to install it)
 - sign you into Claude **only if you aren't already** (a browser opens — this is the one

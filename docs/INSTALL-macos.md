@@ -47,10 +47,12 @@ work lets it inherit your skills too. You don't need to re-architect anything.
 Run this in Terminal:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.sh | bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.sh)"
 ```
 
-It will, in order:
+This form passes the script to bash as an argument, so stdin stays attached to your terminal
+(the same pattern Homebrew's installer uses) — that's what lets the Claude sign-in step read your
+input. It will, in order:
 - install prerequisites via Homebrew (git, node, python, pandoc) and **qmd** (semantic search)
 - confirm Claude Code is present (or stop and tell you to install it)
 - sign you into Claude **only if you aren't already** (a browser opens — this is the one

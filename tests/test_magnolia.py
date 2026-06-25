@@ -44,10 +44,24 @@ def test_launch_skips_start_when_already_running(monkeypatch):
 
 
 def test_launch_installs_persistence_when_absent(monkeypatch):
-    calls = _patch(monkeypatch, running=True, explicit=8742)
+    # We start the board (running=False -> started True) AND persistence is
+    # absent -> register the KeepAlive agent for the board we own.
+    calls = _patch(monkeypatch, running=False, explicit=8742)
     monkeypatch.setattr(magnolia.persist_lib, "is_installed", lambda: False)
     magnolia.launch()
     assert calls["install"] == 1
+
+
+def test_launch_does_not_persist_board_we_did_not_start(monkeypatch):
+    # A board is already serving the target port (running=True -> started False),
+    # so we must NOT register a persistence agent for a board we don't own,
+    # even when persistence is absent.
+    calls = _patch(monkeypatch, running=True, explicit=8742)
+    monkeypatch.setattr(magnolia.persist_lib, "is_installed", lambda: False)
+    res = magnolia.launch()
+    assert res["started"] is False
+    assert calls["start"] == 0
+    assert calls["install"] == 0
 
 
 def test_launch_can_skip_browser(monkeypatch):

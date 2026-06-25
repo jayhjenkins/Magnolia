@@ -28,8 +28,11 @@ There are two kinds of first run. Note which one you are testing:
 2. Run the one-liner:
 
    ```
-   curl -fsSL https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.sh | bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.sh)"
    ```
+
+   (This form passes the script as an argument, so stdin stays attached to your terminal — the
+   same pattern Homebrew's installer uses — which is what lets the `claude login` step read input.)
 
 3. Watch each step narrate and complete in order:
    - prerequisites (git, node, python, pandoc) via Homebrew
