@@ -86,5 +86,15 @@ def test_onboarding_js_anchors_new_turns_to_top():
     assert m and "userPinned" in m.group(0)
 
 
+def test_onboarding_js_cache_busts_the_board_fetch():
+    # '/' served the onboarding room moments before completion; a cached '/' would
+    # re-show the room (with "Onboard me"). The redirect + underlay iframe must use
+    # a cache-busted board url so the browser fetches the fresh board.
+    js = _read("js/onboarding.js")
+    assert "boardUrl" in js
+    assert "location.replace(boardUrl)" in js   # redirect uses the busted url
+    assert "iframe.src = boardUrl" in js         # so does the revealed underlay
+
+
 def test_onboarding_js_is_ascii():
     open(os.path.join(UI, "js", "onboarding.js"), "rb").read().decode("ascii")

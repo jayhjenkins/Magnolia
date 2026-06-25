@@ -87,6 +87,20 @@ def _should_onboard():
         return False
 
 
+# The first-run gate serves TWO different documents under the SAME URL ("/"):
+# the onboarding room while _should_onboard(), the board once it flips. If the
+# browser caches "/", a just-completed user gets shown the stale onboarding room
+# (with its "Onboard me" button) after the post-completion redirect. So this
+# small app-shell HTML must never be cached (it's cheap to refetch). Assets
+# (js/css) keep normal caching - they're versioned by content, not by state.
+_APP_SHELL_PATHS = ("/", "/index.html", "/onboarding.html")
+
+
+def _is_app_shell(path):
+    """True for the gate-dependent app-shell HTML that must be served no-store."""
+    return path.split("?", 1)[0] in _APP_SHELL_PATHS
+
+
 # ─── Load LangFuse env vars if not already set ───────────────────────────────
 _PM_OS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _env_langfuse = os.path.join(_PM_OS, ".env.langfuse")
@@ -3147,8 +3161,12 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
         _error_response(self, "PUT not allowed for this path", status=405)
 
     def end_headers(self):
-        """Inject CORS header into all responses (including static files)."""
+        """Inject CORS header into all responses (including static files), and
+        mark the gate-dependent app-shell HTML no-store so a completed user is
+        never shown a stale onboarding room cached under '/'."""
         self.send_header("Access-Control-Allow-Origin", "*")
+        if _is_app_shell(getattr(self, "path", "")):
+            self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
 

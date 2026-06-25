@@ -265,6 +265,11 @@
     const room = document.getElementById('onboard-room');
     const underlay = document.getElementById('board-underlay');
     let shadeStarted = false;
+    // Cache-bust the board fetch: '/' served the onboarding room moments ago, and
+    // a browser that cached it would otherwise re-show this very room (with its
+    // "Onboard me" button) instead of the board. A unique query forces a fresh
+    // fetch; the gate keys off the path, so '/?...' still resolves to the board.
+    const boardUrl = '/?onboarded=' + Date.now();
 
     function runShade() {
       if (shadeStarted || !room) return;
@@ -276,7 +281,7 @@
         if (!room) return;
         room.classList.add('shade-lift');
         let redirected = false;
-        function redirect() { if (!redirected) { redirected = true; window.location = '/'; } }
+        function redirect() { if (!redirected) { redirected = true; window.location.replace(boardUrl); } }
         room.addEventListener('transitionend', e => {
           if (e.propertyName === 'transform') redirect();
         });
@@ -289,7 +294,7 @@
       // Lazy-mount the iframe: the completion marker is already set by the time
       // completeOnboarding fires, so / will serve the real board inside the iframe.
       const iframe = document.createElement('iframe');
-      iframe.src = '/';
+      iframe.src = boardUrl;
       iframe.setAttribute('tabindex', '-1');
       iframe.setAttribute('aria-hidden', 'true');
       // Defensive: if the iframe load stalls beyond ~4s, run the shade anyway.
@@ -300,7 +305,7 @@
       });
       underlay.appendChild(iframe);
     } else {
-      setTimeout(() => { window.location = '/'; }, 3300);
+      setTimeout(() => { window.location.replace(boardUrl); }, 3300);
     }
   }
 
