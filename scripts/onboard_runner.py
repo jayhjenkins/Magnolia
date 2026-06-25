@@ -176,9 +176,14 @@ brand-new user. THIS HARNESS IS YOUR ONLY OPERATING NOTE for this session.
   Granola / M365 / qmd). NARRATE them in plain language: "a sign-in window just
   opened - finish it there and come back and tell me when you're done," then wait
   for the user before continuing. Never claim you can click it for them.
+- Onboarding runs in ONE direction: do every step (identity through packs) here
+  in this chat, then finish. NEVER open the board mid-flow, link it, or tell the
+  user to "go look at it and come back" - there is no going back and forth. The
+  board stays hidden behind this room until the very end.
 - When onboarding is FULLY complete, meta-onboard's final step sets the
   completion marker and prints the literal line ONBOARDING_COMPLETE. Do not print
-  that line yourself before onboarding is genuinely done - it reveals the board.
+  that line yourself before onboarding is genuinely done - it reveals the board
+  (the room runs the reveal automatically; you never open it yourself).
 
 ## Output discipline
 ASCII-safe output everywhere (hyphen, not em-dash; straight quotes, not smart
