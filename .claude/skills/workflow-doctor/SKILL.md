@@ -28,8 +28,14 @@ does only the irreducible minimum — clicking "Authorize."
        bare `qmd` command); on first launch the user approves it via `/mcp`.
    - **feed/transcript** `needs_reauth`: depends on the active provider (`probe_transcript`
      keys off `transcript.provider`).
-     - **Otter**: the saved session expired. Walk the user through `python3 scripts/otter_auth.py`
-       (a browser opens for Microsoft sign-in). Inherently manual — explain warmly, wait for them.
+     - **Otter** `needs_setup` (deps missing — `cap["missing"]` lists them): the Otter feed needs the
+       optional transcript extras, which the core install does NOT ship. Have the user install them
+       FIRST — `pip install -r requirements-transcript.txt && python3 -m playwright install chromium` —
+       otherwise `otter_auth.py` crashes on import. (Or note Granola needs none of this.) Only after
+       the deps are present does the probe move on to the session check.
+     - **Otter** `needs_reauth`: deps are present but the saved session expired. Walk the user through
+       `python3 scripts/otter_auth.py` (a browser opens for Microsoft sign-in). Inherently manual —
+       explain warmly, wait for them.
      - **Granola**: the MCP isn't connected yet. The probe stays `needs_reauth` until a successful
        sync writes its marker (`granola_downloaded.json`). Walk the user through: connect Granola via
        `/mcp`, then finish the one-time signup at granola.ai/mcp-signup (the MCP is a claude.ai

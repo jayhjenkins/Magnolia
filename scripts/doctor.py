@@ -115,7 +115,18 @@ def probe_transcript(root=None):
             cap["status"] = "needs_reauth"
             cap["detail"] = "Connect Granola via /mcp, then finish granola.ai/mcp-signup"
         return cap
-    # otter: a saved Playwright session.json means authed
+    # otter: the feed needs the transcript extras (Playwright + otterai) installed
+    # BEFORE otter_auth.py can run - it imports Playwright. Check deps first so the
+    # Doctor surfaces "install the extras" rather than routing the user to a re-auth
+    # script that crashes on import. Once the deps are present, a saved Playwright
+    # session.json means authed.
+    missing = [m for m in ("playwright", "otterai") if _dep_missing(m)]
+    if missing:
+        cap["status"] = "needs_setup"
+        cap["missing"] = missing
+        cap["remedy"] = ("install the Otter transcript extras: pip install -r "
+                         "requirements-transcript.txt && python3 -m playwright install chromium")
+        return cap
     session = os.path.join(state_dir, "session.json")
     cap["status"] = "ok" if os.path.isfile(session) else "needs_reauth"
     return cap

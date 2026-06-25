@@ -16,7 +16,10 @@ import os
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # optional transcript extra; absent unless the Otter feed is set up
+    sync_playwright = None
 
 # ── Engine wiring ────────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +30,16 @@ SESSION_FILE = STATE_DIR / "session.json"
 
 
 def main() -> None:
+    if sync_playwright is None:
+        sys.stderr.write(
+            "Playwright not installed - Otter sign-in is unavailable on this machine.\n"
+            "The Otter transcript feed needs extra dependencies. Install them first:\n"
+            "  pip install -r requirements-transcript.txt\n"
+            "  python3 -m playwright install chromium\n"
+            "Then re-run: python3 scripts/otter_auth.py\n"
+            "(Or switch your transcript feed to Granola, which needs none of this.)\n")
+        sys.exit(1)
+
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
