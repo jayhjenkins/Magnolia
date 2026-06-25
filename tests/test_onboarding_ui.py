@@ -71,5 +71,20 @@ def test_onboarding_js_runs_the_window_shade_reveal():
     assert "board-underlay" in js  # mounts the iframe beneath
 
 
+def test_onboarding_js_anchors_new_turns_to_top():
+    # Bug fix: the kickoff is auto-fired hidden, so the first turn is one long
+    # assistant-only message with nothing above it. The ported pin-to-bottom
+    # scroll (scrollThread) chased the streaming tail and scrolled clean past
+    # the top of that message, hiding the intro + first question. The fix
+    # anchors each new assistant turn's top near the viewport top and only
+    # follows the bottom while the reader is already parked there.
+    js = _read("js/onboarding.js")
+    assert "anchorTurnTop" in js   # new turn -> align its top, not the bottom
+    assert "userPinned" in js      # follow the bottom only when parked there
+    # scrollThread must be gated by the pin flag - no unconditional jump.
+    m = re.search(r"function scrollThread\(\)\s*\{[^}]*\}", js)
+    assert m and "userPinned" in m.group(0)
+
+
 def test_onboarding_js_is_ascii():
     open(os.path.join(UI, "js", "onboarding.js"), "rb").read().decode("ascii")
