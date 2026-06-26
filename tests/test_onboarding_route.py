@@ -150,3 +150,16 @@ def test_should_onboard_true_when_not_complete(monkeypatch):
 def test_should_onboard_false_when_complete(monkeypatch):
     monkeypatch.setattr(profile_lib, "onboarding_complete", lambda *a, **k: True)
     assert task_server._should_onboard() is False
+
+
+def test_app_shell_paths_are_no_store():
+    # The gate serves the onboarding room and the board under the SAME url ('/'),
+    # so that document must not be cached - else a completed user is re-shown the
+    # stale room. Assets keep normal caching.
+    assert task_server._is_app_shell("/")
+    assert task_server._is_app_shell("/index.html")
+    assert task_server._is_app_shell("/onboarding.html")
+    assert task_server._is_app_shell("/?onboarded=123")  # cache-busted board url
+    assert not task_server._is_app_shell("/js/onboarding.js")
+    assert not task_server._is_app_shell("/themes/organic.css")
+    assert not task_server._is_app_shell("/api/cadence")
