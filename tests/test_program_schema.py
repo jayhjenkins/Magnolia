@@ -1,7 +1,13 @@
 import json
+import os
 
 import program_schema as ps
 import program_lib
+
+# The seed programs live as a TEST FIXTURE, not shipped engine content (a fresh
+# install ships an empty cadence). Tests that read a specific PROG-* point
+# program_lib's root here. See tests/test_program_lib.py SEED_ROOT.
+SEED_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "cadence_seed")
 
 
 def test_seed_registry_is_valid():
@@ -72,7 +78,7 @@ def test_prog_0005_items_survive_read_program():
     """Option 1 seam check: the seeded role-referenced items survive the read
     and are available to the worker (which is how items are consumed). No
     person/company names leak into the seed."""
-    prog = program_lib.read_program("PROG-0005")
+    prog = program_lib.read_program("PROG-0005", root=SEED_ROOT)
     items = prog["frontmatter"]["items"]
     assert items, "PROG-0005 must seed a non-empty items list"
     for it in items:
@@ -530,7 +536,7 @@ def test_eos_rock_is_explicit_declaration_only():
 
 def test_seeded_program_intake_program_parses_active():
     """The seeded nursery program reads back as type program-intake, active."""
-    prog = program_lib.read_program("PROG-0014")
+    prog = program_lib.read_program("PROG-0014", root=SEED_ROOT)
     fm = prog["frontmatter"]
     assert fm["type"] == "program-intake"
     assert fm["status"] == "active"

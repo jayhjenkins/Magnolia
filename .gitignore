@@ -59,6 +59,25 @@ datasets/cron/*
 datasets/cron/*/*
 !datasets/cron/*/*/.gitkeep
 
+# Adaptations folder: keep structure, ignore the per-user adaptation records the
+# Adapt tab generates (and their .events.jsonl) - they are not engine content.
+datasets/adaptations/*
+!datasets/adaptations/.gitkeep
+!datasets/adaptations/*/
+!datasets/adaptations/*/.gitkeep
+datasets/adaptations/*/*
+!datasets/adaptations/*/*/.gitkeep
+
+# Programs folder (Cadence): keep structure, ignore program instances. A fresh
+# install starts with an EMPTY cadence; real programs are born at runtime / via
+# starter-sets - the engine never ships seed PROG-* instances or the _counter.
+datasets/programs/*
+!datasets/programs/.gitkeep
+!datasets/programs/*/
+!datasets/programs/*/.gitkeep
+datasets/programs/*/*
+!datasets/programs/*/*/.gitkeep
+
 # People folder: keep structure, ignore people data (e.g. email cache)
 datasets/people/*
 !datasets/people/.gitkeep
