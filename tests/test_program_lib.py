@@ -3,6 +3,12 @@ import os
 import program_lib as pl
 import task_lib
 
+# The 16 reference seed programs live as a TEST FIXTURE, not shipped engine
+# content - a fresh install starts with an empty cadence (datasets/programs/
+# ships only .gitkeep). Tests that exercise the seeds point program_lib's root
+# here, where <root>/datasets/programs/ holds the PROG-* files.
+SEED_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "cadence_seed")
+
 
 def test_create_and_read_roundtrip(tmp_path):
     root = str(tmp_path)
@@ -453,15 +459,15 @@ def test_cadence_payload_is_json_clean():
     # must be strictly JSON-clean so a future caller can json.dumps() it with
     # the DEFAULT encoder (no default=str crutch) without raising.
     import json
-    payload = pl.build_cadence_payload()  # real datasets root (seeds carry date objects)
+    payload = pl.build_cadence_payload(root=SEED_ROOT)  # seed fixture (carries date objects)
     # Must succeed WITHOUT a default= argument. RED before the fix (TypeError).
     json.dumps(payload)
 
     # Values are preserved as ISO strings, not mangled. PROG-0001's seed has an
     # unquoted checkpoint due of 2026-05-19; it must surface as that exact string.
     reg = pl.load_registry()
-    prog = pl.read_program("PROG-0001")
-    vm = pl.render_view(prog, reg)
+    prog = pl.read_program("PROG-0001", root=SEED_ROOT)
+    vm = pl.render_view(prog, reg, root=SEED_ROOT)
     # render_view itself must be json.dumps-clean on its own.
     json.dumps(vm)
     dues = [cp["due"] for cp in vm["checkpoints"]]
@@ -697,7 +703,7 @@ def test_build_payload_emissions_resilient_when_task_lib_raises(tmp_path, monkey
 
 def test_all_seed_programs_render():
     reg = pl.load_registry()
-    progs = pl.list_programs()  # real datasets root
+    progs = pl.list_programs(root=SEED_ROOT)  # the seed fixture root
     # 13 original seeds + PROG-0014 (program-intake nursery, inc4a) + PROG-0015
     # (portfolio-health janitor, inc4b) + PROG-0016 (portfolio-rollup, inc5).
     assert len(progs) == 16     # concrete count: a silently-dropped/malformed seed fails here
@@ -707,7 +713,7 @@ def test_all_seed_programs_render():
         assert vm["name"]
     # the family payload groups them and drops no expected family. The nursery
     # adds the System family, which shelves last (order 99).
-    payload = pl.build_cadence_payload()
+    payload = pl.build_cadence_payload(root=SEED_ROOT)
     fam_ids = [f["id"] for f in payload["families"]]
     assert fam_ids == ["roadmap", "weekly", "outcomes", "eos", "system"]
 
