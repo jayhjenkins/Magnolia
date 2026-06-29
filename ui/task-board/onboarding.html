@@ -227,6 +227,14 @@
   .typing span:nth-child(3) { animation-delay: .36s; }
   @keyframes typing { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: .9; transform: translateY(-2px); } }
 
+  /* The persistent "working" indicator: animated dots + a contextual label,
+     pinned to the bottom of the in-progress turn so a lull never looks frozen. */
+  .turn-activity { display: inline-flex; align-items: center; gap: 9px; margin-top: 6px; }
+  .turn-activity .activity-label {
+    font-size: 12.5px; line-height: 1.5; color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
   .turn-result {
     display: inline-flex; align-items: center; gap: 7px; margin-top: 12px;
     font-size: 11.5px; font-weight: 600; color: var(--success);

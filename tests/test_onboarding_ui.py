@@ -116,5 +116,21 @@ def test_onboarding_js_skips_replayed_events_across_turns():
     assert "connIdx <= renderedCount" in js  # skip already-rendered replayed events
 
 
+def test_onboarding_js_shows_a_persistent_working_indicator():
+    # During a lull (Claude running a tool / thinking) the stream goes silent and
+    # the room looked frozen. A labeled activity indicator stays pinned to the
+    # bottom of the turn the whole time it streams, updates by event kind, escalates
+    # with an elapsed timer, and is driven alive by the SSE heartbeat.
+    js = _read("js/onboarding.js")
+    assert "turn-activity" in js
+    assert "noteActivity" in js and "endActivity" in js
+    assert "labelForEvent" in js          # contextual label by event kind
+    assert "lastBeatAt" in js             # heartbeat-driven liveness
+    # The heartbeat comment is no longer ignored.
+    assert "frame.startsWith(':')" in js
+    # And the CSS hook exists.
+    assert "turn-activity" in _read("onboarding.html")
+
+
 def test_onboarding_js_is_ascii():
     open(os.path.join(UI, "js", "onboarding.js"), "rb").read().decode("ascii")

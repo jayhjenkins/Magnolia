@@ -328,24 +328,77 @@
 
     const a = document.createElement('div');
     a.className = 'chat-turn turn-assistant show';
-    // One vertical flow; segments (steps / text) are appended in arrival order.
-    a.innerHTML = '<div class="turn-flow"><div class="turn-text turn-typing"><span class="typing"><span></span><span></span><span></span></span></div></div>';
+    // One vertical flow; segments (steps / text) are appended in arrival order,
+    // with a persistent activity indicator pinned to the bottom while streaming.
+    a.innerHTML = '<div class="turn-flow"><div class="turn-activity">'
+      + '<span class="typing"><span></span><span></span><span></span></span>'
+      + '<span class="activity-label"></span></div></div>';
     // Park the view at the top of this new assistant turn so its message reads
     // from the start, rather than pinning to the bottom and chasing the tail.
     thread.appendChild(a); anchorTurnTop(a);
     const flow = a.querySelector('.turn-flow');
-    const typingEl = a.querySelector('.turn-typing');
+    const activity = a.querySelector('.turn-activity');
+    const activityLabel = activity.querySelector('.activity-label');
 
     // Per-turn sequential render state. `curKind` tracks the open segment so a
     // run of consecutive think/tool events shares one steps box and a run of
     // text deltas shares one text box; when the kind flips we open a new segment
     // (appended after the previous one), preserving chronological order.
-    let typingCleared = false, anyRendered = false, streamDone = false;
+    let anyRendered = false, streamDone = false;
     let curKind = null;            // 'steps' | 'text' | null
     let stepsBox = null, liveGroup = null, toolCount = 0;   // current steps segment
     let textEl = null, rawText = '';                        // current text segment
     let connIdx = 0;               // transcript events seen on THIS connection
-    const clearTyping = () => { if (!typingCleared) { if (typingEl) typingEl.remove(); typingCleared = true; } };
+
+    // -- Liveness: a persistent "working" indicator -------------------------
+    // The stream goes silent for seconds-to-minutes while Claude runs a tool or
+    // thinks; without a live signal the room looks frozen (the disabled send
+    // button is the only hint). Keep a labeled pulse pinned to the bottom of the
+    // turn the whole time it streams: the label says what's happening, an
+    // elapsed timer makes a long lull read as intentional, and the SSE heartbeat
+    // (a `: ping` comment every ~15s) confirms the backend is genuinely alive.
+    let activityWord = 'Getting set up';
+    let activityEnded = false;
+    let lastEventAt = Date.now();
+    let lastBeatAt = Date.now();
+    function labelForEvent(ev) {
+      if (ev.kind === 'think') return 'Thinking';
+      if (ev.kind === 'text') return 'Writing';
+      if (ev.kind === 'tool_step') {
+        const k = toolKind(ev.verb);
+        return k === 'read' ? 'Reading files'
+          : k === 'search' ? 'Searching'
+          : k === 'write' ? 'Saving your setup'
+          : 'Running a step';
+      }
+      return activityWord;
+    }
+    function refreshActivity() {
+      if (activityEnded) return;
+      const idleMs = Date.now() - lastEventAt;
+      const idle = Math.floor(idleMs / 1000);
+      // No heartbeat AND no event for a while -> the connection itself stalled.
+      if (Date.now() - lastBeatAt > 22000 && idleMs > 22000) {
+        activityLabel.textContent = 'Still connected - reconnecting the view...';
+      } else if (idle >= 6) {
+        activityLabel.textContent = activityWord + '... (' + idle + 's)';
+      } else {
+        activityLabel.textContent = activityWord + '...';
+      }
+    }
+    function noteActivity(ev) {
+      lastEventAt = Date.now();
+      activityWord = labelForEvent(ev);
+      if (activity.parentNode === flow) flow.appendChild(activity);  // keep it last
+      refreshActivity();
+    }
+    function endActivity() {
+      activityEnded = true;
+      if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }
+      if (activity && activity.parentNode) activity.remove();
+    }
+    let activityTimer = setInterval(refreshActivity, 1000);
+    refreshActivity();
 
     function startSteps() {
       if (curKind === 'steps') return;
@@ -375,14 +428,13 @@
         body: JSON.stringify({ message: text }),
       });
       if (resp.status === 409) {
-        clearTyping();
+        endActivity();
         a.remove();  // drop the empty assistant shell we appended before the fetch
         const n = renderTurn({ role: 'notice', text: 'Onboarding is already running.' }, false);
         thread.appendChild(n); revealNow(n, 'show'); scrollThread();
         throw new Error('busy');
       }
       if (!resp.ok || !resp.body) {
-        clearTyping();
         renderEvent({ kind: 'error', text: 'Could not reach the concierge. You can retry.' });
         throw new Error('http');
       }
@@ -403,6 +455,9 @@
     } catch (_) { /* message already shown on the turn */ }
 
     function handleFrame(frame) {
+      // A `: ping` SSE comment is the backend heartbeat during a lull - no data,
+      // but proof the run is alive. Use it to keep the indicator confident.
+      if (frame.startsWith(':')) { lastBeatAt = Date.now(); refreshActivity(); return; }
       let isDone = false, dataLine = null;
       for (const line of frame.split('\n')) {
         if (line.startsWith('event:') && line.slice(6).trim() === 'done') isDone = true;
@@ -422,24 +477,24 @@
 
     function renderEvent(ev) {
       if (ev.kind === 'think') {
-        clearTyping(); startSteps(); anyRendered = true;
+        startSteps(); anyRendered = true;
         const t = elFromHTML(stepHtml({ kind: 'think', label: ev.text || '' }));
-        stepsBox.appendChild(t); revealNow(t, 'in'); scrollThread();
+        stepsBox.appendChild(t); revealNow(t, 'in'); noteActivity(ev); scrollThread();
       } else if (ev.kind === 'tool_step') {
-        clearTyping(); startSteps(); anyRendered = true;
+        startSteps(); anyRendered = true;
         if (!liveGroup) { liveGroup = makeStepsGroup(); stepsBox.appendChild(liveGroup.group); }
         const row = elFromHTML(stepHtml({ kind: toolKind(ev.verb), label: ev.target || ev.verb || '' }));
-        liveGroup.inner.appendChild(row); revealNow(row, 'in'); scrollThread();
+        liveGroup.inner.appendChild(row); revealNow(row, 'in'); noteActivity(ev); scrollThread();
         toolCount += 1;
         if (toolCount === STEP_COLLAPSE_AT) collapseGroup(liveGroup, toolCount);
         else if (toolCount > STEP_COLLAPSE_AT) { liveGroup.toggle.querySelector('.steps-count').textContent = 'Worked across ' + toolCount + ' steps'; }
       } else if (ev.kind === 'text') {
-        clearTyping(); startText(); anyRendered = true;
+        startText(); anyRendered = true;
         rawText += ev.text || '';
         textEl.innerHTML = renderMarkdown(rawText);
-        scrollThread();
+        noteActivity(ev); scrollThread();
       } else if (ev.kind === 'error') {
-        clearTyping(); anyRendered = true;
+        endActivity(); anyRendered = true;
         curKind = null;  // an error ends any open segment
         const er = document.createElement('div');
         er.className = 'turn-text';
@@ -447,17 +502,18 @@
         flow.appendChild(er);
         a.classList.add('turn-error');
       } else if (ev.kind === 'notice') {
-        clearTyping();
         curKind = null;  // a notice is its own turn; break the segment run
         const nTurn = renderTurn({ role: 'notice', text: ev.text || '' }, false);
         thread.appendChild(nTurn); revealNow(nTurn, 'show'); scrollThread();
       } else if (ev.kind === 'onboarding_complete') {
+        endActivity();
         completeOnboarding();
       }
     }
 
-    // If this turn produced no new events (e.g. the whole replay was already
-    // shown), drop the empty assistant shell rather than leave a stuck spinner.
+    // Stream finished: stop the working indicator. If the turn produced no new
+    // events (e.g. the whole replay was already shown), drop the empty shell.
+    endActivity();
     if (!anyRendered) a.remove();
 
     busy = false;
