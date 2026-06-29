@@ -96,5 +96,25 @@ def test_onboarding_js_cache_busts_the_board_fetch():
     assert "iframe.src = boardUrl" in js         # so does the revealed underlay
 
 
+def test_onboarding_js_renders_events_sequentially():
+    # Bug fix: the assistant turn used a fixed turn-steps box (top) + turn-text box
+    # (bottom), so all think/tool events bucketed above all text regardless of
+    # arrival order. The renderer now appends segments to a single .turn-flow in
+    # arrival order (startSteps / startText open a new segment when the kind flips).
+    js = _read("js/onboarding.js")
+    assert "turn-flow" in js
+    assert "startSteps" in js and "startText" in js
+    assert "curKind" in js  # tracks the open segment so a kind-flip starts a new one
+
+
+def test_onboarding_js_skips_replayed_events_across_turns():
+    # Bug fix: live_runs.tail replays the WHOLE transcript from index 0 on every
+    # POST, so without a cursor a later turn re-renders earlier turns. A monotonic
+    # renderedCount skips events already shown.
+    js = _read("js/onboarding.js")
+    assert "renderedCount" in js
+    assert "connIdx <= renderedCount" in js  # skip already-rendered replayed events
+
+
 def test_onboarding_js_is_ascii():
     open(os.path.join(UI, "js", "onboarding.js"), "rb").read().decode("ascii")
