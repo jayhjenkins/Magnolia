@@ -21,6 +21,12 @@
   let busy = false;
   let completed = false;
   let onboardingStarted = false;
+  // The SSE tail replays the WHOLE accumulated transcript from the start on
+  // every POST (live_runs.tail begins at index 0). This counts transcript events
+  // already rendered across the page-session so each new turn shows ONLY its own
+  // events - a later turn never re-stuffs an earlier turn's think/tool/text into
+  // its bubble. Monotonic; a page reload resets it to 0 and rebuilds from replay.
+  let renderedCount = 0;
   // Follow the streaming tail to the bottom ONLY while the reader is parked
   // there. A new turn parks the view at its own top instead (see anchorTurnTop),
   // so a long message - like the auto-fired kickoff - reads from the beginning
@@ -322,14 +328,41 @@
 
     const a = document.createElement('div');
     a.className = 'chat-turn turn-assistant show';
-    a.innerHTML = '<div class="turn-steps"></div><div class="turn-text"><span class="typing"><span></span><span></span><span></span></span></div>';
+    // One vertical flow; segments (steps / text) are appended in arrival order.
+    a.innerHTML = '<div class="turn-flow"><div class="turn-text turn-typing"><span class="typing"><span></span><span></span><span></span></span></div></div>';
     // Park the view at the top of this new assistant turn so its message reads
     // from the start, rather than pinning to the bottom and chasing the tail.
     thread.appendChild(a); anchorTurnTop(a);
-    const stepsBox = a.querySelector('.turn-steps');
-    const textBox = a.querySelector('.turn-text');
-    let typingCleared = false, liveGroup = null, toolCount = 0, sawText = false, streamDone = false, rawText = '';
-    const clearTyping = () => { if (!typingCleared) { textBox.innerHTML = ''; typingCleared = true; } };
+    const flow = a.querySelector('.turn-flow');
+    const typingEl = a.querySelector('.turn-typing');
+
+    // Per-turn sequential render state. `curKind` tracks the open segment so a
+    // run of consecutive think/tool events shares one steps box and a run of
+    // text deltas shares one text box; when the kind flips we open a new segment
+    // (appended after the previous one), preserving chronological order.
+    let typingCleared = false, anyRendered = false, streamDone = false;
+    let curKind = null;            // 'steps' | 'text' | null
+    let stepsBox = null, liveGroup = null, toolCount = 0;   // current steps segment
+    let textEl = null, rawText = '';                        // current text segment
+    let connIdx = 0;               // transcript events seen on THIS connection
+    const clearTyping = () => { if (!typingCleared) { if (typingEl) typingEl.remove(); typingCleared = true; } };
+
+    function startSteps() {
+      if (curKind === 'steps') return;
+      curKind = 'steps';
+      stepsBox = document.createElement('div');
+      stepsBox.className = 'turn-steps';
+      flow.appendChild(stepsBox);
+      liveGroup = null; toolCount = 0;
+    }
+    function startText() {
+      if (curKind === 'text') return;
+      curKind = 'text';
+      textEl = document.createElement('div');
+      textEl.className = 'turn-text';
+      flow.appendChild(textEl);
+      rawText = '';
+    }
 
     busy = true;
     const sendBtn = document.getElementById('onboard-send');
@@ -350,7 +383,7 @@
       }
       if (!resp.ok || !resp.body) {
         clearTyping();
-        textBox.textContent = 'Could not reach the concierge. You can retry.';
+        renderEvent({ kind: 'error', text: 'Could not reach the concierge. You can retry.' });
         throw new Error('http');
       }
       const reader = resp.body.getReader();
@@ -378,16 +411,22 @@
       if (isDone) { streamDone = true; return; }
       if (!dataLine) return;
       let ev; try { ev = JSON.parse(dataLine); } catch (_) { return; }
+      connIdx += 1;
+      // Skip events already rendered in earlier turns (the tail replays the whole
+      // transcript from 0 each POST). Only events past the page-session cursor
+      // belong to THIS turn.
+      if (connIdx <= renderedCount) return;
+      renderedCount = connIdx;
       renderEvent(ev);
     }
 
     function renderEvent(ev) {
       if (ev.kind === 'think') {
-        clearTyping();
+        clearTyping(); startSteps(); anyRendered = true;
         const t = elFromHTML(stepHtml({ kind: 'think', label: ev.text || '' }));
         stepsBox.appendChild(t); revealNow(t, 'in'); scrollThread();
       } else if (ev.kind === 'tool_step') {
-        clearTyping();
+        clearTyping(); startSteps(); anyRendered = true;
         if (!liveGroup) { liveGroup = makeStepsGroup(); stepsBox.appendChild(liveGroup.group); }
         const row = elFromHTML(stepHtml({ kind: toolKind(ev.verb), label: ev.target || ev.verb || '' }));
         liveGroup.inner.appendChild(row); revealNow(row, 'in'); scrollThread();
@@ -395,23 +434,31 @@
         if (toolCount === STEP_COLLAPSE_AT) collapseGroup(liveGroup, toolCount);
         else if (toolCount > STEP_COLLAPSE_AT) { liveGroup.toggle.querySelector('.steps-count').textContent = 'Worked across ' + toolCount + ' steps'; }
       } else if (ev.kind === 'text') {
-        clearTyping();
-        if (!sawText) { sawText = true; textBox.textContent = ''; }
+        clearTyping(); startText(); anyRendered = true;
         rawText += ev.text || '';
-        textBox.innerHTML = renderMarkdown(rawText);
+        textEl.innerHTML = renderMarkdown(rawText);
         scrollThread();
       } else if (ev.kind === 'error') {
-        clearTyping();
-        textBox.textContent = ev.text || 'The chat run failed. You can retry.';
+        clearTyping(); anyRendered = true;
+        curKind = null;  // an error ends any open segment
+        const er = document.createElement('div');
+        er.className = 'turn-text';
+        er.textContent = ev.text || 'The chat run failed. You can retry.';
+        flow.appendChild(er);
         a.classList.add('turn-error');
       } else if (ev.kind === 'notice') {
         clearTyping();
+        curKind = null;  // a notice is its own turn; break the segment run
         const nTurn = renderTurn({ role: 'notice', text: ev.text || '' }, false);
         thread.appendChild(nTurn); revealNow(nTurn, 'show'); scrollThread();
       } else if (ev.kind === 'onboarding_complete') {
         completeOnboarding();
       }
     }
+
+    // If this turn produced no new events (e.g. the whole replay was already
+    // shown), drop the empty assistant shell rather than leave a stuck spinner.
+    if (!anyRendered) a.remove();
 
     busy = false;
     if (!completed && sendBtn) sendBtn.disabled = false;
