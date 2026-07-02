@@ -92,6 +92,27 @@ function mdFormatProse(seg) {
   return s;
 }
 
+// GFM tables: a header row followed IMMEDIATELY by a delimiter row (this regex).
+// Requiring the delimiter keeps a lone prose line with a pipe — or a header that
+// has streamed in before its delimiter lands — harmless prose until the table is
+// complete. Cells run through mdInline (escaping + inline format reused);
+// alignment comes from the delimiter colons.
+const MD_TABLE_DELIM = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/;
+function mdTableCells(row) {
+  let s = row.trim();
+  if (s.charAt(0) === '|') s = s.slice(1);
+  if (s.charAt(s.length - 1) === '|') s = s.slice(0, -1);
+  return s.split('|').map(c => c.trim());
+}
+function mdTableAlign(cell) {
+  const c = cell.trim();
+  const l = c.charAt(0) === ':', r = c.charAt(c.length - 1) === ':';
+  if (l && r) return 'md-tc';
+  if (r) return 'md-tr';
+  if (l) return 'md-tl';
+  return '';
+}
+
 function renderMarkdown(src) {
   const lines = String(src == null ? '' : src).split('\n');
   const out = [];
@@ -123,6 +144,27 @@ function renderMarkdown(src) {
 
     // Blank line — paragraph / list break.
     if (/^\s*$/.test(raw)) { flushPara(); flushList(); i += 1; continue; }
+
+    // GFM table — a pipe row immediately followed by a delimiter row.
+    if (raw.indexOf('|') !== -1 && i + 1 < lines.length && MD_TABLE_DELIM.test(lines[i + 1])) {
+      flushPara(); flushList();
+      const headers = mdTableCells(raw);
+      const aligns = mdTableCells(lines[i + 1]).map(mdTableAlign);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].indexOf('|') !== -1 && !/^\s*$/.test(lines[i])) {
+        rows.push(mdTableCells(lines[i])); i += 1;
+      }
+      const cls = n => (aligns[n] ? ` class="${aligns[n]}"` : '');
+      const head = headers.map((cell, n) => `<th${cls(n)}>${mdInline(cell)}</th>`).join('');
+      const body = rows.map(r => {
+        let tds = '';
+        for (let c = 0; c < headers.length; c += 1) { tds += `<td${cls(c)}>${mdInline(r[c] != null ? r[c] : '')}</td>`; }
+        return `<tr>${tds}</tr>`;
+      }).join('');
+      out.push(`<table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`);
+      continue;
+    }
 
     // Headings (#, ##, ###) → small headings.
     const h = raw.match(/^\s*(#{1,3})\s+(.*)$/);
