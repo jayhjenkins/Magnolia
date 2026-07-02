@@ -76,6 +76,7 @@ def transcript_config(root=None):
     return {
         "provider": t.get("provider") or "none",
         "target": t.get("target") or "datasets/meetings/",
+        "external_feed": bool(t.get("external_feed", False)),
     }
 
 
@@ -237,6 +238,28 @@ def write_identity(data, root=None):
 def write_voice(channel, text, root=None):
     """Atomically write voice/{channel}.md, creating the file if missing."""
     _atomic_write_text(os.path.join("voice", f"{channel}.md"), text, root)
+
+
+def set_transcript_external(value, root=None):
+    """Set integrations.yaml transcript.external_feed = bool(value).
+
+    Records that the transcript feed is served by an EXTERNAL, already-working
+    downloader (e.g. a prior install's Otter LaunchAgent re-pointed at Magnolia's
+    otter_sync.py) rather than a fresh in-Magnolia setup. When true, the Doctor
+    verifies the feed by output marker instead of nagging about Playwright/otterai
+    deps. Preserves the transcript sub-config + siblings + comments."""
+    def mutate(doc):
+        t = doc.get("transcript")
+        if not isinstance(t, dict):
+            t = {}
+            doc["transcript"] = t
+        t["external_feed"] = bool(value)
+    _update_yaml("integrations.yaml", mutate, root)
+
+
+def transcript_external(root=None):
+    """True if the transcript feed is served by an external downloader."""
+    return transcript_config(root)["external_feed"]
 
 
 def set_integration_provider(category, provider_id, root=None):
