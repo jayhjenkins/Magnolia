@@ -66,21 +66,43 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
    Claude Code workspace** (do NOT make them re-architect their folders — just move Magnolia into
    the place where their Claude Code already works), then re-check. The install guide
    (`docs/INSTALL.md`) covers landing it in the right place up front.
-   **Then, do they already run a PM-OS?** If yes, locate it (read-only) and ADOPT
-   its content non-destructively: copy `datasets/`, copy legacy voice into `profile/voice/`, copy
-   custom skills (not already in the engine) into `.claude/skills/`. For diverged engine skills,
-   keep the engine's and note the difference for them to reconcile later — never silently merge.
-   **Transcript-feed reconciliation (triple-check this):** you will stand up Magnolia's own feed in
-   a later step writing to `datasets/meetings/`. Run `python3 scripts/feed_guard.py` logic (call
-   `feed_guard.detect_competing`) to find any OTHER downloader. If found, explain plainly and ask
-   permission to disable the old one so only Magnolia's feed runs; only call `feed_guard.disable`
-   after they say yes. If you can't safely identify it, warn loudly and name exactly what to turn off.
+   **Then, proactively check for a prior install to adopt — do this without being asked.** Magnolia
+   is often replacing an older PM-OS that's being retired, and their history should come with them.
+   Run the adoption detector (read-only; it never executes the old sync script):
+   `python3 -c "import sys; sys.path.insert(0,'scripts'); import adopt_lib, json; print(json.dumps(adopt_lib.detect_meetings_candidates(), indent=2))"`
+   It finds a prior install's meeting corpus from a running transcript feed's LaunchAgent (parsing its
+   script + venv) and from common locations. If it surfaces a candidate with transcripts, say so plainly
+   and by the numbers — "I found about N transcripts at `<path>` from your old setup; want me to bring
+   those in?" — and on a yes, CLONE the whole history in (copy, **never** symlink):
+   `adopt_lib.adopt_meetings("<path>", also=["tasks","research","voice","skills"])`. That copies the
+   meeting corpus plus their tasks/research, legacy voice into `profile/voice/`, and any custom skills —
+   engine-owned skills are kept and reported in `extras["skills_diverged"]` for them to reconcile,
+   never silently merged. It's non-destructive and idempotent (never clobbers; safe to re-run). Bringing
+   meetings in is the default; offer the other subtrees too since the old system is going away. Hold onto
+   the detected `agent` dict — step 3 reuses it to re-point their live feed. (If detection finds nothing,
+   just move on; not everyone has a prior install.)
 3. **Integrations** — ask: Otter or Granola? Jira / Asana / Linear / none? Teams & Outlook (M365)?
-   Default M365 Teams+Outlook ON. Write `profile/integrations.yaml`. Both Otter and Granola are
-   fully wired — pick one transcript feed (single active provider). Otter authes via
-   `python3 scripts/otter_auth.py`; Granola runs through its claude.ai MCP connector (connect via
-   `/mcp`, then finish the one-time signup at granola.ai/mcp-signup) and syncs hourly through
-   `scripts/granola_sync.py`.
+   Default M365 Teams+Outlook ON. Write `profile/integrations.yaml`. Pick one transcript feed (single
+   active provider):
+   - **Reuse an existing Otter feed (the smooth path — default when step 2 found one).** If the
+     adoption check surfaced a WORKING Otter feed (a running LaunchAgent with its own venv), do NOT make
+     them reinstall anything — re-point it at Magnolia: `adopt_lib.redirect_otter_feed(<agent dict from
+     step 2 detection>)`. That stands up a Magnolia-owned LaunchAgent running their existing venv's
+     python (which already has the Otter extras) against Magnolia's own `scripts/otter_sync.py`, and
+     disables the old agent (renamed aside, never deleted). It records `transcript.external_feed`, so the
+     doctor verifies the feed by its output and won't nag about playwright/otterai — those live in the
+     reused venv; Magnolia's own python never needs them. (macOS only; off macOS it reports unsupported —
+     the history is already cloned, so just note the live feed is a quick manual follow-up.)
+   - **Fresh Otter (no existing feed).** Authe via `python3 scripts/otter_auth.py`. This is the ONLY
+     case that needs the transcript extras — the doctor will call for `pip install -r
+     requirements-transcript.txt && python3 -m playwright install chromium`. Frame it that way: the
+     extras are only for a brand-new Otter feed; a reused feed or Granola needs none of it.
+   - **Granola** runs through its claude.ai MCP connector (connect via `/mcp`, then finish the one-time
+     signup at granola.ai/mcp-signup) and syncs hourly through `scripts/granola_sync.py`.
+   - **Any leftover competing downloader:** if they choose a feed while some OTHER downloader still runs
+     (e.g. they pick Granola but an old Otter agent lingers), run `feed_guard.detect_competing` and, with
+     their ok, `feed_guard.disable` it so only one feed writes to `datasets/meetings/`. (A `redirect`
+     already handles this for the reused-Otter case.)
    - **If they enable M365** — set `calendar.provider` AND `messaging.provider` to `m365` in
      `profile/integrations.yaml` (messaging powers the Outlook + Teams *send* buttons; calendar powers
      invites). M365 runs through the `mgc` Microsoft Graph CLI, so authorize it ONCE with the full
@@ -103,6 +125,10 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
    **`npm install -g @tobilu/qmd`** (https://github.com/tobi/qmd, Node ≥ 22) — never `brew install
    qmd` or any other "qmd" repo. Still: if a tool can't be fixed, degraded features just stay
    disabled with a reason; onboarding never blocks.
+   - **Transcript feed:** if you reused an existing Otter feed in step 3 (`transcript.external_feed`
+     set), the doctor verifies it by its output marker and reports `ok` — it will NOT ask for
+     playwright/otterai (those live in the reused venv). A playwright "needs_setup" nag only appears for
+     a genuinely fresh Otter feed. Don't route a reused-feed user to install the extras.
 5. **Spin up the board** — pick a free port with `server_lib.free_port()` if 8742 is taken, and
    record it in `profile/config.yaml` `server.port` BEFORE launching (the server reads its port from
    config). Launch with `server_lib.start(cmd=server_lib.default_cmd())` and verify it serves —
