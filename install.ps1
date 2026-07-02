@@ -8,6 +8,30 @@ $Dest = if ($env:MAGNOLIA_DIR) { $env:MAGNOLIA_DIR } else { Join-Path $HOME "Mag
 
 function Say($m) { Write-Host "`n$m" }
 
+# A gold ASCII welcome, printed once at the end of a successful install. Native
+# PowerShell coloring (works on older terminals without ANSI/VT). Single-quoted
+# here-strings keep the art's backticks/backslashes literal. Pure ASCII (invariant #8).
+function Banner {
+    $art = @'
+  __  __                        _ _
+ |  \/  | __ _  __ _ _ __   ___ | (_) __ _
+ | |\/| |/ _` |/ _` | '_ \ / _ \| | |/ _` |
+ | |  | | (_| | (_| | | | | (_) | | | (_| |
+ |_|  |_|\__,_|\__, |_| |_|\___/|_|_|\__,_|
+               |___/
+'@
+    Write-Host ""
+    foreach ($line in ($art -split "`n")) { Write-Host $line.TrimEnd("`r") -ForegroundColor Yellow }
+    $lyr = @'
+      "She's got everything delightful
+       She's got everything I need
+       Takes the wheel when I'm seeing double
+       Pays my ticket when I speed"
+                                  -- Sugar Magnolia
+'@
+    foreach ($line in ($lyr -split "`n")) { Write-Host $line.TrimEnd("`r") -ForegroundColor DarkGray }
+}
+
 # 1. Prerequisites via winget
 Say "Installing prerequisites (git, node, python, pandoc)..."
 winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
@@ -54,4 +78,5 @@ if ($userPath -notlike "*$bin*") {
 }
 
 # 7. Done
+Banner
 Say "Magnolia is installed. Type:  magnolia   then press Enter."
