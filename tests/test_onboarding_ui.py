@@ -132,5 +132,19 @@ def test_onboarding_js_shows_a_persistent_working_indicator():
     assert "turn-activity" in _read("onboarding.html")
 
 
+def test_gfm_tables_supported_in_both_chat_renderers():
+    # The onboarding room and the board chat share a byte-identical hand-rolled
+    # renderMarkdown. A GFM-table fix must land in BOTH or they drift - exactly
+    # what bit the numbered-list bug (fixed twice). Guard the pair together.
+    for name in ("js/onboarding.js", "js/chat.js"):
+        js = _read(name)
+        assert "md-table" in js, name                 # emits <table class="md-table">
+        assert "MD_TABLE_DELIM" in js, name           # header + delimiter-row gate
+        assert "mdTableCells" in js and "mdTableAlign" in js, name
+    # The table CSS hook exists on both surfaces (onboarding room + main board).
+    assert "md-table" in _read("onboarding.html")
+    assert "md-table" in _read("index.html")
+
+
 def test_onboarding_js_is_ascii():
     open(os.path.join(UI, "js", "onboarding.js"), "rb").read().decode("ascii")

@@ -115,6 +115,19 @@ def probe_transcript(root=None):
             cap["status"] = "needs_reauth"
             cap["detail"] = "Connect Granola via /mcp, then finish granola.ai/mcp-signup"
         return cap
+    # otter, external feed: the operator adopted a prior install's already-working
+    # Otter LaunchAgent (re-pointed at Magnolia's otter_sync.py), so the Playwright/
+    # otterai extras may live only in the OLD install's venv - a dep import probe
+    # here would wrongly nag "install the extras". Verify by output marker instead
+    # (mirrors the granola branch above): a synced feed leaves otter_sync.log or
+    # downloaded.json in the state dir.
+    if tc["external_feed"]:
+        for marker in ("otter_sync.log", "downloaded.json"):
+            if os.path.isfile(os.path.join(state_dir, marker)):
+                cap["status"] = "ok"
+                return cap
+        cap["status"] = "needs_reauth"
+        return cap
     # otter: the feed needs the transcript extras (Playwright + otterai) installed
     # BEFORE otter_auth.py can run - it imports Playwright. Check deps first so the
     # Doctor surfaces "install the extras" rather than routing the user to a re-auth

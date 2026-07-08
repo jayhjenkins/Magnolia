@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>__LABEL__</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>__PM_OS_DIR__/scripts/otter_sync.py</string>
+    </array>
+    <key>StandardOutPath</key><string>__PM_OS_DIR__/logs/otter_sync.log</string>
+    <key>StandardErrorPath</key><string>__PM_OS_DIR__/logs/otter_sync.log</string>
+    <key>StartCalendarInterval</key>
+    <array>
+__INTERVAL_BLOCK__
+    </array>
+</dict>
+</plist>

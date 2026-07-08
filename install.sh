@@ -9,6 +9,33 @@ DEST="${MAGNOLIA_DIR:-$HOME/Magnolia}"
 
 say() { printf '\n%s\n' "$1"; }
 
+# A gold ASCII welcome, printed once at the end of a successful install. Color
+# only when stdout is a real terminal and NO_COLOR is unset, so piped/CI output
+# stays clean. Art + lyric are pure ASCII (invariant #8); the single-quoted
+# heredocs keep backticks/backslashes literal.
+banner() {
+  esc=$(printf '\033')
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then G="${esc}[38;5;214m"; D="${esc}[38;5;180m"; R="${esc}[0m"; else G=''; D=''; R=''; fi
+  printf '\n%s' "$G"
+  cat <<'ART'
+  __  __                        _ _
+ |  \/  | __ _  __ _ _ __   ___ | (_) __ _
+ | |\/| |/ _` |/ _` | '_ \ / _ \| | |/ _` |
+ | |  | | (_| | (_| | | | | (_) | | | (_| |
+ |_|  |_|\__,_|\__, |_| |_|\___/|_|_|\__,_|
+               |___/
+ART
+  printf '%s%s\n' "$R" "$D"
+  cat <<'LYR'
+      "She's got everything delightful
+       She's got everything I need
+       Takes the wheel when I'm seeing double
+       Pays my ticket when I speed"
+                                  -- Sugar Magnolia
+LYR
+  printf '%s\n' "$R"
+}
+
 # 1. Prerequisites via Homebrew
 if ! command -v brew >/dev/null 2>&1; then
   say "Homebrew is required. Install it from https://brew.sh and re-run this."
@@ -85,4 +112,5 @@ case ":$PATH:" in
 esac
 
 # 7. Done
+banner
 say "Magnolia is installed. Type:  magnolia   then press Enter."

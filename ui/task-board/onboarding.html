@@ -180,6 +180,12 @@
     border-radius: 9px;
   }
   .turn-text pre code { background: none; border: none; padding: 0; font-size: 12px; line-height: 1.5; }
+  .turn-text .md-table { border-collapse: collapse; margin: 8px 0 12px; width: 100%; font-size: 12.5px; line-height: 1.5; }
+  .turn-text .md-table th, .turn-text .md-table td { border: 1px solid var(--border-soft); padding: 5px 9px; text-align: left; vertical-align: top; }
+  .turn-text .md-table th { background: var(--surface-hover); color: var(--text); font-weight: 600; }
+  .turn-text .md-table .md-tc { text-align: center; }
+  .turn-text .md-table .md-tr { text-align: right; }
+  .turn-text .md-table .md-tl { text-align: left; }
 
   /* The assistant turn is one vertical flow of segments (steps / text) appended
      in the order events arrive, so it reads top-to-bottom like a transcript

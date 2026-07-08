@@ -82,6 +82,42 @@ def test_probe_transcript_otter_needs_setup_when_deps_missing(tmp_path, monkeypa
     assert "playwright" in cap.get("missing", [])
 
 
+def test_probe_transcript_otter_external_feed_ok_by_marker(tmp_path, monkeypatch):
+    # An adopted (external) Otter feed is verified by OUTPUT MARKER, not by a
+    # Playwright/otterai dep probe — the extras may live only in the prior
+    # install's venv. A present otter_sync.log means the feed is running.
+    monkeypatch.setattr(doctor, "_dep_missing", lambda m: True)  # deps ABSENT
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "integrations.yaml").write_text(
+        "transcript:\n  provider: otter\n  external_feed: true\n")
+    st = tmp_path / "profile" / "transcript"
+    st.mkdir(parents=True)
+    (st / "otter_sync.log").write_text("2026-07-01  INFO  synced\n")
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["provider"] == "otter"
+    assert cap["status"] == "ok"
+
+
+def test_probe_transcript_otter_external_feed_no_marker_needs_reauth(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "_dep_missing", lambda m: True)
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "integrations.yaml").write_text(
+        "transcript:\n  provider: otter\n  external_feed: true\n")
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["status"] == "needs_reauth"  # no marker yet
+
+
+def test_probe_transcript_otter_no_external_flag_still_needs_setup(tmp_path, monkeypatch):
+    # external_feed absent/false → the existing dep check runs UNCHANGED.
+    monkeypatch.setattr(doctor, "_dep_missing", lambda m: m in ("playwright", "otterai"))
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "integrations.yaml").write_text(
+        "transcript:\n  provider: otter\n")
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["status"] == "needs_setup"
+    assert "playwright" in cap.get("missing", [])
+
+
 def test_probe_transcript_granola_no_marker_needs_reauth(tmp_path):
     (tmp_path / "profile").mkdir()
     (tmp_path / "profile" / "integrations.yaml").write_text("transcript:\n  provider: granola\n")
