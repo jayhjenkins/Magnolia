@@ -494,6 +494,7 @@ async function sendChat() {
   }
 
   function renderEvent(ev) {
+    if (ev.role === 'user') return;
     if (ev.kind === 'think') {
       clearTyping();
       const t = elFromHTML(stepHtml({ kind: 'think', label: ev.text || '' }));

@@ -520,6 +520,7 @@
     }
 
     function renderEvent(ev) {
+      if (ev.role === 'user') return;
       if (ev.kind === 'think') {
         startSteps(); anyRendered = true;
         const t = elFromHTML(stepHtml({ kind: 'think', label: ev.text || '' }));
