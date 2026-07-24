@@ -26,8 +26,8 @@ Activate when:
 
 1. **PRD is a living document** — It will evolve through collaboration and discovery
 2. **Ambitious by default** — Set the ceiling as high as possible. Build the fully-featured version. Code is cheap — ambiguity and timidity are expensive
-3. **Ambitious scope, incremental delivery** — Set the ceiling high for WHAT we build. Use vertical slices for HOW we ship it. These are different questions.
-4. **Slice, don't cut** — Each delivery slice must stand alone as a useful product for a named audience. "Phase 1 = backend only" is not a slice; "Phase 1 = end-to-end for segment X" is.
+3. **Ambitious scope, incremental delivery** — Ambition governs *what* is built; slicing governs *when* a customer gets value. Set the ceiling high for WHAT we build. Use vertical slices for HOW we ship it. These are different questions.
+4. **Sequence as shippable slices, don't cut** — Start with the thinnest end-to-end slice that delivers standalone customer value. Each delivery slice must stand alone as a useful product for a named audience. "Phase 1 = backend only" is not a slice; "Phase 1 = end-to-end for segment X" is.
 5. **Value to the Management Company** — Every PRD must articulate how this feature creates or protects value for management companies (our customers). If you cannot answer "why does a management company care?", the PRD is not ready.
 6. **Share and link** — PRDs should be accessible with links to Slack channels
 7. **No fabrication** — Leave sections blank/TBD rather than making up information
