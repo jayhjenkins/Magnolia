@@ -13,7 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(ROOT, "ui", "task-board", "cardtypes", "registry.json")
 SIGNAL_IDS = os.path.join(ROOT, "ui", "task-board", "cardtypes", "signal-ids.txt")
 TEMPLATE_CSS = os.path.join(ROOT, "ui", "task-board", "themes", "_TEMPLATE.css")
-BODY_RENDERERS = {"diff", "preview", "agreement"}
+BODY_RENDERERS = {"diff", "preview", "agreement", "program-preview"}
 SLOT_ORDER = ["head", "title", "context", "signals", "body", "actions"]
 
 _COLOR_RE = re.compile(

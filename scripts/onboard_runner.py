@@ -84,10 +84,11 @@ def _strip_sentinel(text):
         kept.append(line.replace(COMPLETE_SENTINEL, ""))
     return "\n".join(kept).rstrip()
 
-# Onboarding pins STANDARD (sonnet): it runs a long, judgment-heavy concierge
-# conversation + tool orchestration; a 'low' posture would resolve to haiku, too
-# weak. Passed as a task_override so it wins over posture (profile_lib.resolve_model).
-ONBOARD_MODEL_TIER = "standard"
+# Onboarding runs on DEEP (opus): the concierge session needs stronger reasoning
+# during context discovery, program setup card creation, and integration
+# orchestration. Passed as a task_override so it wins over posture
+# (profile_lib.resolve_model).
+ONBOARD_MODEL_TIER = "deep"
 
 # --- The HIGH-PRIVILEGE allowlist (see the module docstring for WHY) ---------
 #

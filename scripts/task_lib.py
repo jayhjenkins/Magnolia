@@ -488,6 +488,7 @@ def list_tasks(queue=None, status=None, domain=None, priority=None,
                 "grad_approval_pct": fm.get("grad_approval_pct"),
                 "grad_agreement_pct": fm.get("grad_agreement_pct"),
                 "grad_examples": fm.get("grad_examples"),
+                "program_type": fm.get("program_type"),
                 "file": os.path.relpath(filepath, TASKS_DIR),
             })
 

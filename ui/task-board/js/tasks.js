@@ -160,6 +160,37 @@ async function openTask(taskId, keepChat) {
     const isScheduleMeeting = task.task_type === 'schedule-meeting';
     const isAgentComplete = task.agent_status === 'complete' && task.status === 'done';
 
+    // Program setup — show program type + intent preview
+    if (task.card_type === 'program-setup') {
+      const ptype = task.program_type || 'unknown';
+      // Extract intent from body: everything after ## Intent heading, or the whole
+      // body stripped of markdown headings if no Intent section exists.
+      let intentText = '';
+      if (task.body) {
+        const intentMatch = task.body.match(/^## Intent\s*\n([\s\S]*?)(?=^## |\Z)/m);
+        if (intentMatch) {
+          intentText = intentMatch[1].trim();
+        } else {
+          intentText = task.body.replace(/^##?\s+.*$/gm, '').trim();
+        }
+      }
+      const previewLen = 200;
+      const intentPreview = intentText
+        ? (intentText.length > previewLen ? intentText.slice(0, previewLen).trim() + '...' : intentText)
+        : '';
+      html += `<div class="dt-section">`;
+      html += `<div class="dt-sec-head"><span class="dt-sec-title">Program</span></div>`;
+      html += `<div class="dt-summary">`;
+      html += `<div class="dt-sum-item"><span class="dt-sum-k">Type</span><span class="dt-sum-v">${escapeHtml(ptype)}</span></div>`;
+      html += `</div>`;
+      if (intentPreview) {
+        html += `<div class="dt-prose" style="margin-top:var(--space-sm);opacity:0.85;">${escapeHtml(intentPreview)}</div>`;
+      } else {
+        html += `<div class="dt-prose dim" style="margin-top:var(--space-sm);font-size:12.5px;">No intent yet -- use the chat to add context about what this program should track.</div>`;
+      }
+      html += `</div>`;
+    }
+
     // Schedule-meeting — two calm columns: the invite · pick a time
     if (isScheduleMeeting) {
       await loadEmailCache();
@@ -341,15 +372,18 @@ async function openTask(taskId, keepChat) {
                      && (task.agent_status === 'failed' || task.agent_status === 'complete' || task.status === 'blocked');
     const hasSlots = isScheduleMeeting && task.body && parseSlots(task.body).length > 0;
     const canSendMessage = task.task_type === 'send-message' && (task.agent_status === 'complete' || task.agent_status === 'needs-human');
+    const isProgramSetup = task.card_type === 'program-setup' && task.status !== 'done';
 
     let leftHtml = `<button class="btn btn-quiet" onclick="closeModal()">Close</button>`;
     if (canRerun) leftHtml += `<button class="btn btn-quiet" id="btn-rerun-agent" onclick="rerunAgent('${task.id}')">Rerun agent</button>`;
+    if (isProgramSetup) leftHtml += `<button class="btn btn-quiet" id="btn-dismiss-program" onclick="dismissProgramSetup('${task.id}')">Dismiss</button>`;
 
     let rightHtml = '';
     if (canDispatch) rightHtml += `<button class="btn btn-schedule" id="btn-start-agent" onclick="startAgent('${task.id}')">Start agent</button>`;
     if (hasSlots) rightHtml += `<button class="btn btn-schedule" id="btn-create-meeting" onclick="scheduleMeeting('${task.id}')" disabled>Create meeting</button>`;
     if (hasJiraDraft && (task.agent_status === 'complete' || task.agent_status === 'needs-human')) rightHtml += `<button class="btn btn-schedule" id="btn-publish-jira" onclick="publishToJira('${task.id}')">Publish to Jira</button>`;
     if (canSendMessage) rightHtml += `<button class="btn btn-schedule" id="btn-send-message" onclick="sendMessage('${task.id}')">${svgIcon('send')}Send message</button>`;
+    if (isProgramSetup) rightHtml += `<button class="btn btn-success" id="btn-create-program" onclick="createProgram('${task.id}')">Create program</button>`;
     // Both approvals sit together on the right
     if (isAgentComplete && task.agent_output) rightHtml += `<button class="btn btn-danger" id="btn-done-delete" onclick="markDoneAndDelete()">Approve & delete</button>`;
     rightHtml += `<button class="btn btn-success" onclick="markDone()">${doneLabel}</button>`;
@@ -428,6 +462,39 @@ async function markDoneAndDelete() {
   if (!ok) return;
   try {
     const res = await fetch(`${API}/tasks/${currentTaskId}/done-and-delete`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    closeModal();
+    fetchTasks();
+  } catch (err) {
+    toast(`Error: ${err.message}`);
+  }
+}
+
+// ─── Program setup actions ──────────────────────────────────────────
+
+async function createProgram(taskId) {
+  const btn = document.getElementById('btn-create-program');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating...'; }
+  try {
+    const res = await fetch(`${API}/tasks/${taskId}/actions/create-program`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || `Failed to create program (${res.status})`);
+      if (btn) { btn.disabled = false; btn.textContent = 'Create program'; }
+      return;
+    }
+    toast(data.message || 'Program created');
+    closeModal();
+    fetchTasks();
+  } catch (err) {
+    toast(`Error: ${err.message}`);
+    if (btn) { btn.disabled = false; btn.textContent = 'Create program'; }
+  }
+}
+
+async function dismissProgramSetup(taskId) {
+  try {
+    const res = await fetch(`${API}/tasks/${taskId}/done`, { method: 'POST' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     closeModal();
     fetchTasks();

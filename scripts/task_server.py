@@ -1587,6 +1587,99 @@ def handle_undo(handler, task_id):
     _json_response(handler, {"ok": True})
 
 
+def _extract_intent(body_text):
+    """Extract the ## Intent section text from a task body.
+
+    Returns the text between '## Intent' and the next '##' header (or end of
+    string). Returns empty string if no Intent section found.
+    """
+    if not body_text:
+        return ""
+    match = re.search(r"^## Intent\s*\n(.*?)(?=^## |\Z)", body_text,
+                      re.MULTILINE | re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def handle_create_program(handler, task_id):
+    """POST /api/tasks/{id}/actions/create-program -- create a Cadence program
+    from a program-setup card.
+
+    Tier-1: writes a local program file via program_lib.create_program, moves
+    the setup card to done, and spawns an informational receipt. No external
+    write, no git commit.
+    """
+    try:
+        card = task_lib.read_task(task_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+        return
+
+    fm = card["frontmatter"]
+    body_text = card.get("body", "")
+
+    if (fm.get("card_type") or "task") != "program-setup":
+        _error_response(handler, "This action requires a program-setup card", status=400)
+        return
+
+    program_type = fm.get("program_type")
+    if not program_type:
+        _error_response(handler, "program-setup card missing program_type", status=400)
+        return
+
+    # Title: strip "Set up: " prefix if present.
+    title = fm.get("title", "")
+    if title.startswith("Set up: "):
+        title = title[len("Set up: "):]
+    if not title:
+        _error_response(handler, "program-setup card has no title", status=400)
+        return
+
+    intent_text = _extract_intent(body_text)
+    owner_role = profile_lib.persona()
+
+    try:
+        program_id, filepath = program_lib.create_program(
+            type=program_type,
+            title=title,
+            owner_role=owner_role,
+            intent=intent_text,
+        )
+    except (ValueError, OSError) as e:
+        _error_response(handler, f"Could not create program: {e}", status=409)
+        return
+
+    # Move setup card to done.
+    task_lib.update_task(task_id,
+                         comment=f"Created program {program_id}: {title}",
+                         actor="human")
+    task_lib.complete_task(task_id, actor="human")
+
+    # Spawn an informational receipt (keep/undo actions).
+    rel_path = os.path.relpath(filepath, PM_OS_DIR)
+    receipt_id, _ = task_lib.create_task(
+        f"Created: {title}", queue="human", domain="ops",
+        creator="agent", card_type="receipt",
+        description=(f"Created {program_type} program {program_id}.\n\n"
+                     f"Program file: {rel_path}"))
+    task_lib.update_task(receipt_id, changes={
+        "receipt_kind": "cadence-apply",
+        "source_recommendation": task_id,
+        "program_id": program_id,
+    })
+
+    _json_response(handler, {"ok": True, "program_id": program_id})
+
+
+def handle_dismiss(handler, task_id):
+    """POST /api/tasks/{id}/actions/dismiss -- dismiss a card (cancel it)."""
+    try:
+        task_lib.cancel_task(task_id, reason="dismissed", actor="human")
+    except Exception as e:
+        _error_response(handler, f"Dismiss failed: {e}", status=500)
+        return
+    _json_response(handler, {"ok": True})
+
+
 def handle_react(handler, task_id):
     """POST /api/tasks/{id}/react — record human 👍/👎 + optional note to frontmatter."""
     body = _read_request_body(handler)
@@ -2935,6 +3028,26 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
                 handle_get_chat(self, task_id)
             else:
                 handle_chat(self, task_id)
+            return True
+
+        # Match /api/tasks/{id}/actions/create-program
+        match = re.match(r"^/api/tasks/([^/]+)/actions/create-program$", path)
+        if match and method == "POST":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_create_program(self, task_id)
+            return True
+
+        # Match /api/tasks/{id}/actions/dismiss
+        match = re.match(r"^/api/tasks/([^/]+)/actions/dismiss$", path)
+        if match and method == "POST":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_dismiss(self, task_id)
             return True
 
         # Match card-action verbs: /api/tasks/{id}/{accept|reject|graduate|keep|undo}
