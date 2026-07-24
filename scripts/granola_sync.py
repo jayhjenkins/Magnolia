@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profile_lib            # noqa: E402
 import transcript_post        # noqa: E402
 
-DEFAULT_MODEL = "claude-haiku-4-5"
+DEFAULT_MODEL = "haiku"
 MAX_NEW_PER_RUN = 20
 SEEN_IN_PROMPT = 200          # cap ledger ids interpolated into the fetch prompt
 FETCH_TIMEOUT = 300           # seconds for the claude -p subprocess

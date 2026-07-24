@@ -74,11 +74,12 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
    script + venv) and from common locations. If it surfaces a candidate with transcripts, say so plainly
    and by the numbers — "I found about N transcripts at `<path>` from your old setup; want me to bring
    those in?" — and on a yes, CLONE the whole history in (copy, **never** symlink):
-   `adopt_lib.adopt_meetings("<path>", also=["tasks","research","voice","skills"])`. That copies the
-   meeting corpus plus their tasks/research, legacy voice into `profile/voice/`, and any custom skills —
-   engine-owned skills are kept and reported in `extras["skills_diverged"]` for them to reconcile,
-   never silently merged. It's non-destructive and idempotent (never clobbers; safe to re-run). Bringing
-   meetings in is the default; offer the other subtrees too since the old system is going away. Hold onto
+   `adopt_lib.adopt_meetings("<path>", also=["tasks","research","voice","skills","cron"])`. That copies the
+   meeting corpus plus their tasks/research, legacy voice into `profile/voice/`, cron jobs (custom
+   recurring automations), and any custom skills — engine-owned skills are kept and reported in
+   `extras["skills_diverged"]` for them to reconcile, never silently merged. It's non-destructive and
+   idempotent (never clobbers; safe to re-run). Bringing meetings in is the default; offer the other
+   subtrees too since the old system is going away. Hold onto
    the detected `agent` dict — step 3 reuses it to re-point their live feed. (If detection finds nothing,
    just move on; not everyone has a prior install.)
 3. **Integrations** — ask: Otter or Granola? Jira / Asana / Linear / none? Teams & Outlook (M365)?

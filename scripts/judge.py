@@ -44,7 +44,7 @@ import platform_lib  # noqa: E402
 import profile_lib  # noqa: E402
 import task_lib  # noqa: E402
 
-JUDGE_MODEL = profile_lib.model("judge", default="claude-opus-4-8")
+JUDGE_MODEL = profile_lib.model("judge", default="opus")
 ARTIFACT_CHAR_LIMIT = 16000
 LOG_TAIL_CHAR_LIMIT = 3000
 CLAUDE_TIMEOUT = 240  # seconds

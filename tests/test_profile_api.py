@@ -284,4 +284,4 @@ def test_model_posture_workers_include_resolved_model(profile_root, monkeypatch)
     p = task_server.build_profile(root=profile_root)   # config posture: balanced
     w = p["model_posture"]["workers"][0]
     assert w["tier"] == "deep"
-    assert w["model"] == "claude-opus-4-8"   # deep @ balanced
+    assert w["model"] == "opus"   # deep @ balanced

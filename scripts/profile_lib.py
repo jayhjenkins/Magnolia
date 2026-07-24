@@ -446,9 +446,9 @@ def set_server_port(p, root=None):
 
 TIER_ORDER = ["light", "standard", "deep"]
 TIER_MODELS = {
-    "light": "claude-haiku-4-5",
-    "standard": "claude-sonnet-4-6",
-    "deep": "claude-opus-4-8",
+    "light": "haiku",
+    "standard": "sonnet",
+    "deep": "opus",
 }
 _POSTURE_SHIFT = {"low": -1, "balanced": 0, "high": 1}
 _DEFAULT_TIER = "standard"

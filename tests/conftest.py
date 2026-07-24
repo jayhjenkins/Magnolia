@@ -35,8 +35,8 @@ def profile_root(tmp_path):
     """))
     (prof / "config.yaml").write_text(textwrap.dedent("""\
         models:
-          judge: "claude-opus-4-8"
-          parser: "claude-haiku-4-5"
+          judge: "opus"
+          parser: "haiku"
           cost_posture: "balanced"
         active_skill_packs: ["core", "pm"]
         server:

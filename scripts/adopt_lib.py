@@ -223,6 +223,10 @@ def adopt_meetings(src_meetings, root=None, also=None):
                 src = os.path.join(prior_root, "profile", "voice")
                 dst = os.path.join(profile_lib.profile_dir(root), "voice")
                 extras["voice"] = _clone_tree(src, dst)
+            elif name == "cron":
+                src = os.path.join(prior_root, "datasets", "cron")
+                dst = os.path.join(base, "datasets", "cron")
+                extras[name] = _clone_tree(src, dst)
             elif name == "skills":
                 src = os.path.join(prior_root, ".claude", "skills")
                 dst = os.path.join(base, ".claude", "skills")

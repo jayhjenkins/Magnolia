@@ -16,7 +16,7 @@ def test_profile_dir_falls_back_to_example(tmp_path):
 def test_raw_loaders_return_dicts(profile_root):
     assert profile_lib.profile(root=profile_root)["display_name"] == "Test User"
     assert profile_lib.integrations(root=profile_root)["project_management"]["provider"] == "jira"
-    assert profile_lib.config(root=profile_root)["models"]["judge"] == "claude-opus-4-8"
+    assert profile_lib.config(root=profile_root)["models"]["judge"] == "opus"
 
 
 def test_missing_file_returns_empty_dict(tmp_path):
@@ -75,7 +75,7 @@ def test_jira_config_empty_when_not_jira(tmp_path):
 
 
 def test_model_accessor(profile_root):
-    assert profile_lib.model("judge", root=profile_root) == "claude-opus-4-8"
+    assert profile_lib.model("judge", root=profile_root) == "opus"
     assert profile_lib.model("missing", default="x", root=profile_root) == "x"
 
 
@@ -264,7 +264,7 @@ def test_set_cost_posture(profile_root):
     profile_lib.set_cost_posture("high", root=profile_root)
     assert profile_lib.config(root=profile_root)["models"]["cost_posture"] == "high"
     # sibling model keys preserved
-    assert profile_lib.config(root=profile_root)["models"]["judge"] == "claude-opus-4-8"
+    assert profile_lib.config(root=profile_root)["models"]["judge"] == "opus"
 
 
 def test_write_preserves_yaml_comments(profile_root):
@@ -286,15 +286,15 @@ def test_write_preserves_yaml_comments(profile_root):
 
 
 @pytest.mark.parametrize("tier,posture,expected", [
-    ("light",    "low",      "claude-haiku-4-5"),
-    ("light",    "balanced", "claude-haiku-4-5"),
-    ("light",    "high",     "claude-sonnet-4-6"),
-    ("standard", "low",      "claude-haiku-4-5"),
-    ("standard", "balanced", "claude-sonnet-4-6"),
-    ("standard", "high",     "claude-opus-4-8"),
-    ("deep",     "low",      "claude-sonnet-4-6"),
-    ("deep",     "balanced", "claude-opus-4-8"),
-    ("deep",     "high",     "claude-opus-4-8"),
+    ("light",    "low",      "haiku"),
+    ("light",    "balanced", "haiku"),
+    ("light",    "high",     "sonnet"),
+    ("standard", "low",      "haiku"),
+    ("standard", "balanced", "sonnet"),
+    ("standard", "high",     "opus"),
+    ("deep",     "low",      "sonnet"),
+    ("deep",     "balanced", "opus"),
+    ("deep",     "high",     "opus"),
 ])
 def test_resolve_model_matrix(tier, posture, expected):
     assert profile_lib.resolve_model(tier, posture=posture) == expected
@@ -302,11 +302,11 @@ def test_resolve_model_matrix(tier, posture, expected):
 
 def test_resolve_model_override_by_model_id_wins():
     assert profile_lib.resolve_model("light", posture="low",
-                                     task_override="claude-opus-4-8") == "claude-opus-4-8"
+                                     task_override="opus") == "opus"
 
 
 def test_resolve_model_override_by_tier_name_wins():
-    assert profile_lib.resolve_model("light", posture="low", task_override="deep") == "claude-opus-4-8"
+    assert profile_lib.resolve_model("light", posture="low", task_override="deep") == "opus"
 
 
 def test_resolve_model_defaults_tier_standard_and_posture_balanced():
@@ -315,13 +315,13 @@ def test_resolve_model_defaults_tier_standard_and_posture_balanced():
     # implicit call is env-coupled and fails wherever the operator set a non-
     # balanced posture. We assert the default-tier mapping, not the machine's
     # posture.
-    assert profile_lib.resolve_model(None, posture="balanced") == "claude-sonnet-4-6"
-    assert profile_lib.resolve_model("bogus", posture="bogus") == "claude-sonnet-4-6"
+    assert profile_lib.resolve_model(None, posture="balanced") == "sonnet"
+    assert profile_lib.resolve_model("bogus", posture="bogus") == "sonnet"
 
 
 def test_resolve_model_reads_posture_from_config(profile_root):
     # profile_root config has cost_posture: balanced -> deep worker => opus
-    assert profile_lib.resolve_model("deep", root=profile_root) == "claude-opus-4-8"
+    assert profile_lib.resolve_model("deep", root=profile_root) == "opus"
 
 
 def test_resolve_model_override_arbitrary_model_id_passthrough():
