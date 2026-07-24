@@ -19,13 +19,16 @@
     "keep":        { "label": "Keep",            "handler": "cardKeep",    "primary": true },
     "undo":        { "label": "Undo",            "handler": "cardUndo" },
     "graduate":    { "label": "Graduate",        "handler": "cardGraduate","primary": true },
-    "confirm":     { "label": "Confirm",         "handler": "cardConfirm", "primary": true }
+    "confirm":     { "label": "Confirm",         "handler": "cardConfirm", "primary": true },
+    "create_program": { "label": "Create program", "handler": "cardCreateProgram", "primary": true },
+    "dismiss":     { "label": "Dismiss",         "handler": "cardDismiss" }
   },
   "cardTypes": {
     "task":           { "signals": "auto", "actions": ["mark_done", "open_output"], "body": null },
     "recommendation": { "signals": [],     "actions": ["accept", "reject"],        "body": "diff" },
     "receipt":        { "signals": [],     "actions": ["keep", "undo"],            "body": "preview" },
     "graduation":     { "signals": [],     "actions": ["graduate"],                "body": "agreement" },
-    "confirm":        { "signals": [],     "actions": ["confirm", "reject"],       "body": "preview" }
+    "confirm":        { "signals": [],     "actions": ["confirm", "reject"],       "body": "preview" },
+    "program-setup":  { "signals": [],     "actions": ["create_program", "dismiss"], "body": "program-preview" }
   }
 }

@@ -151,6 +151,7 @@ const KIND_META = {
   // icon 'jira' is provisional: confirm is a general Tier-2 gate that will serve
   // other families (calendar/doc_sync) later, so this PM-specific glyph is a placeholder.
   confirm:        { label: 'confirm',    icon: 'jira',   cls: 'kind-confirm' },
+  'program-setup': { label: 'program setup', icon: 'spark', cls: 'kind-program-setup' },
 };
 const _TIER_WORD = { shadow: 'observe-only', supervised: 'supervised', autonomous: 'autonomous' };
 function _tierWord(t) { return _TIER_WORD[(t || '').toLowerCase()] || (t || 'observe-only'); }
@@ -200,6 +201,18 @@ const bodyRenderers = {
       <div class="receipt-did">${did}</div>
       ${how}
       <div class="receipt-revert">${svgIcon('undo')}<span>${revert}</span></div>
+    </div>`;
+  },
+  // Program setup — program type + brief prompt; list face has no body, so only
+  // projected fields are available (program_type was added to the list projection).
+  'program-preview'(task) {
+    const ptype = escapeHtml(task.program_type || 'unknown');
+    return `<div class="card-body card-kind-body psetup-body" data-card-body="program-preview">
+      <div class="psetup-type">
+        <span class="psetup-type-label">Program type</span>
+        <span class="psetup-type-value">${ptype}</span>
+      </div>
+      <div class="psetup-hint">Open to add context via chat</div>
     </div>`;
   },
   // Graduation — the evidence, reassuringly: tier move · three numbers · what changes.

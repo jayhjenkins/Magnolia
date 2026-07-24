@@ -217,6 +217,35 @@ def _engine_change_boundary():
     )
 
 
+def _card_type_context(task, name):
+    """Return extra system-prompt context for specific card types, or empty string.
+
+    Each card type can teach the chat agent how to work that kind of card.
+    Identity-free (invariant #1) -- uses ``name`` for addressing only.
+    """
+    card_type = task.get("card_type") or ""
+    if card_type == "program-setup":
+        program_type = task.get("program_type") or "unknown"
+        return (
+            "## Program setup context\n"
+            f"This is a Cadence program setup card. {name} wants to create a "
+            f"program of type `{program_type}`.\n\n"
+            "Your job is to interview them for context: what is this program "
+            "tracking? Who owns it? What are the key items, milestones, or "
+            "metrics? What documents or sheets should inform it?\n\n"
+            "As you learn more, edit the card's body to build a rich `## Intent` "
+            "section. The intent is free text that tells the Cadence sentinels "
+            "what to look for and how to interpret observations about this "
+            "program.\n\n"
+            f"When {name} is satisfied with the intent, they will click "
+            "'Create program' to finalize it. Be proactive about asking for "
+            "context -- do not wait for them to volunteer it. Start by asking "
+            "what this program is about and what it should track, then dig into "
+            "specifics.\n\n"
+        )
+    return ""
+
+
 def build_context_prompt(task, body, user_message):
     """Build the first-turn system/context prompt for a NEW chat session.
 
@@ -236,6 +265,7 @@ def build_context_prompt(task, body, user_message):
 
     task_block = _task_context_block(task)
     body_block = _card_body_block(body)
+    card_ctx = _card_type_context(task, name)
 
     where = f" at {company}" if company else ""
     return (
@@ -259,6 +289,7 @@ def build_context_prompt(task, body, user_message):
         f"can't make a sensible assumption.\n\n"
         f"{_capability_boundary(name)}\n\n"
         f"{_engine_change_boundary()}\n\n"
+        f"{card_ctx}"
         f"{task_block}\n\n"
         f"{body_block}"
         f"## {name}'s message\n"

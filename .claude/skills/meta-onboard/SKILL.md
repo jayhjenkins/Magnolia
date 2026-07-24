@@ -150,6 +150,59 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
    show them: "here's how you sound — change anything?" If M365 isn't ready, keep the placeholder
    voice and leave a recommendation task to regenerate later.
 7. **Pick packs** — confirm `core` + their persona pack in `profile/config.yaml` `active_skill_packs`.
+8. **Cadence setup** — seed the standing-loop programs the user actually runs.
+
+   **Phase A — Discover what they run.** Read `cadence/starter-sets.yaml` via
+   `starter_sets.load_starter_sets()` to see the available bundles (e.g. `eos`). Ask
+   warmly and plainly: "Do you run EOS? Or any other standing cadence I should know
+   about?" Match their answer to a bundle name. If nothing matches, skip to Phase D --
+   Cadence will grow organically from the intake sentinel once they start working.
+
+   **Phase B — Create program-setup cards.** For each program type in the matched
+   bundle, create a collab task card with `card_type: program-setup`. Use `task_lib`
+   directly (the CLI does not support `program_type` as a field):
+
+   ```python
+   python3 -c "
+   import sys; sys.path.insert(0, 'scripts')
+   import task_lib
+
+   tid, path = task_lib.create_task(
+       title='Set up: <label from registry>',
+       queue='collab',
+       domain='ops',
+       description='## Intent\n\n<initial_intent -- see Phase C>\n\n## Notes\n\nUse the task chat to give me context about this program -- documents, sheets, specifics.\nWhen you are ready, click Create program.',
+       card_type='program-setup',
+       tags=['cadence', 'program-setup'],
+       creator='agent',
+   )
+   task_lib.update_task(tid, changes={'program_type': '<type_id>'}, actor='agent')
+   print(f'Created {tid} at {path}')
+   "
+   ```
+
+   Create one card per type in the bundle. Use the registry label for the title (e.g.
+   "Set up: EOS L10 prep", "Set up: EOS rock"). The `update_task` call adds the
+   `program_type` field to frontmatter so the card handler knows which type to create.
+
+   **Phase C — Pre-seed intent from context.** If the user mentioned anything about
+   their cadence during identity (step 1) or integrations (step 3) -- a rocks
+   spreadsheet, a scorecard URL, an issues doc, a specific meeting they prep for --
+   fold that into the `## Intent` section of each relevant card's description. This
+   gives them a head start when they open the card's chat. Use
+   `task_lib.update_task_description(tid, new_description)` to replace the description
+   if you have richer context than the initial stub. If you have nothing specific for a
+   given card, the generic stub is fine -- the chat will draw it out.
+
+   **Phase D — Explain the card flow.** Tell the user warmly: "I have created setup
+   cards for each program. You will see them in your Now feed. Open each one, use the
+   chat to tell me what you know -- your rocks doc, your scorecard metrics, your issues
+   list -- and I will build out the intent. When you are happy with it, hit 'Create
+   program' and the program goes live on your Cadence tab."
+
+   If no bundle matched in Phase A, tell them: "No worries -- Cadence will pick up
+   patterns as you work. When something looks like a standing loop, it will surface a
+   suggestion and you can decide."
 
 ## Close
 Recap what's live and what's pending (and why it's fine). THEN reveal the board — once, here at the end:
