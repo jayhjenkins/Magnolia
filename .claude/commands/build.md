@@ -64,9 +64,8 @@ Before starting, verify these artifacts exist in the package folder:
 > - `datasets/product/templates/prd-template.md`
 > - `.claude/skills/quality-prd-validation/SKILL.md`
 >
-> **Write to disk** (dual location):
-> - `{package}/PRD_{slug}.md`
-> - `datasets/product/prds/{YYYY}/PRD_{slug}.md`
+> **Write to disk** (single canonical location):
+> - `{package}/PRD_{slug}.md` — the only copy; do not mirror to `prds/{YYYY}/` (mirror retired)
 >
 > **PM interaction**: YES — confirm pre-populated sections are accurate, fill genuinely missing sections (timeline, links). Do NOT re-ask for information already in upstream artifacts.
 >
@@ -79,7 +78,7 @@ Before starting, verify these artifacts exist in the package folder:
 After the sub-agent completes:
 1. Verify `{package}/PRD_{slug}.md` exists
 2. Read the PRD status — confirm it is at least "Drafting"
-3. Check that key sections are populated (Objectives, Scope, Requirements)
+3. Check that key sections are populated (Objectives, Scope, Requirements, Value to the Management Company, Shipping Strategy / vertical slices)
 4. If the PRD has critical validation failures, flag to the PM before proceeding
 
 ---
@@ -124,7 +123,7 @@ After the sub-agent completes:
 5. Fold accepted items into the PRD:
    - Read `{package}/PRD_{slug}.md`
    - Add accepted proposals to the appropriate sections (scope, requirements, etc.)
-   - Write updated PRD to both locations
+   - Write updated PRD
 6. No requirement to cut scope — only to confirm scope is intentional
 
 **Gate**: PM has reviewed all expansion proposals. PRD updated with accepted items.
@@ -169,10 +168,10 @@ After the sub-agent completes:
 2. Present all `critical` severity findings to the PM with:
    - Finding ID, PRD reference, description, recommended fix
 3. PM confirms fixes are adequate for each critical finding
-4. Update the PRD with fixes for all critical items (both locations):
+4. Update the PRD with fixes for all critical items:
    - Read `{package}/PRD_{slug}.md`
    - Apply the confirmed fixes
-   - Write to both PRD locations
+   - Write updated PRD
 5. Track `major` findings but do not block on them
 
 **Gate**: All `critical` findings addressed. PRD updated. Major findings tracked.
@@ -244,12 +243,12 @@ datasets/product/packages/{YYYY}/{slug}/
 └── business-case-swag.md         (Phase 6)
 ```
 
-The PRD is also written to `datasets/product/prds/{YYYY}/PRD_{slug}.md` for backlog/roadmap integration.
+The PRD lives only in the package folder. Backlog/roadmap tooling discovers it by globbing `datasets/product/packages/{YYYY}/*/PRD_*.md` — there is no separate `prds/{YYYY}/` copy.
 
 ## Iteration Loops
 
 If the red team review surfaces issues that require revisiting earlier phases:
-- **Minor fixes**: Update PRD in place (both locations), re-run red team on affected sections only
+- **Minor fixes**: Update PRD in place, re-run red team on affected sections only
 - **Vision-level issues**: Go back to `/project:prep` with updated inputs (same package folder)
 - **Scope questions**: Re-run `/project:expand` with PM guidance
 

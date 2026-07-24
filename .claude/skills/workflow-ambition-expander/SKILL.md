@@ -27,7 +27,7 @@ Activate when:
 - User invokes `/project:expand`
 - Phase 4 of `/project:build` or `/project:ship-it` (after PRD generation)
 - PM wants to challenge whether scope is ambitious enough
-- Reviewing a PRD that feels "safe" or incremental
+- Reviewing a PRD that feels "safe" or incremental in scope (note: incremental *delivery* via vertical slices is a feature, not a flaw — this skill pushes scope UP, not delivery strategy)
 
 ## Product Package Folder
 
@@ -39,7 +39,7 @@ datasets/product/packages/{YYYY}/{slug}/
 
 ## Inputs Required
 
-- **Complete PRD** — from `prd-creation` skill (in `{package}/` and `datasets/product/prds/{YYYY}/`)
+- **Complete PRD** — from `prd-creation` skill (`{package}/PRD_{slug}.md` — single canonical location)
 - **Context Brief** (`{package}/context-brief.md`) — customer evidence
 - **Press Releases** (`{package}/press-release-*.md`) — product vision and value prop
 - **Living FAQ** (`{package}/living-faq.md`) — business-user and customer concerns
