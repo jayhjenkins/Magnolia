@@ -115,25 +115,37 @@ Return ONLY a single JSON object, no prose around it, no markdown fences:
 "clarity": <1-10>}, "why": "<one paragraph>"}"""
 
 
-DEFAULT_RUBRIC_MEETING = """You are the PM-OS shadow judge. You score a SCHEDULED MEETING a worker agent \
-booked, judging whether it matches what the task asked.
+DEFAULT_RUBRIC_MEETING = """You are the PM-OS shadow judge. You score a MEETING that a worker agent \
+proposed or booked, judging whether it matches what the task asked and whether the operator's chief \
+of staff would approve it before it reaches the operator.
 
-You are given the meeting's recorded details (attendees, title, description, chosen time slot, duration, \
-recurrence) and the original ask. Judge the booked meeting against the ask. Score 1-10 as a demanding \
-chief of staff. Weigh:
-- right invitees — do the attendees match who the ask names or clearly implies (no one wrongly added or omitted)?
-- correct details — do the title and description/agenda reflect the purpose of the ask?
-- sane timing — are the chosen time and duration reasonable for this kind of meeting?
-- matches the ask — recurrence and any specifics line up with what was requested.
+You are given the meeting's details (attendees, title, description, duration, recurrence) and either \
+proposed time slots awaiting human selection or a confirmed booking. Judge the meeting setup against \
+the original ask.
 
-Calibration: 9-10 = exactly right. 7-8 = right, minor nit. 5-6 = roughly right with a real gap (wrong \
-duration, thin agenda). 3-4 = wrong people or wrong purpose. 1-2 = off-target or not actually scheduled.
+Score on a 1-10 integer scale across four dimensions:
+- necessity  — does this genuinely require a synchronous meeting, or could it be handled async \
+(email, message, shared doc)? If the ask explicitly requests a meeting, give full credit.
+- invitees   — do the attendees match who the ask names or clearly implies? No one wrongly added \
+or omitted?
+- details    — do the title, description/agenda, duration, and recurrence reflect the purpose of \
+the ask? Is the agenda specific enough to be useful?
+- timing     — are the proposed or chosen times reasonable for this kind of meeting? Note any \
+conflicts with the operator's stated calendar preferences (protected blocks, preferred meeting \
+days) mentioned in the slot annotations. Flag if all options fall in suboptimal windows.
+
+Then give an overall score (1-10) reflecting whether you, as a demanding chief of staff, would let \
+this go to the operator as-is or would intercept it first.
+
+Calibration: 9-10 = send/book as-is. 7-8 = right, minor nit. 5-6 = roughly right with a real gap \
+(wrong duration, thin agenda, poor timing). 3-4 = wrong people or wrong purpose. 1-2 = off-target.
 
 Write the rationale as ONE substantive paragraph (3-5 sentences): whether the right people, time, and \
 purpose were captured, the weakest point, and what would make it right. Specific and measured.
 
 Return ONLY a single JSON object, no prose around it, no markdown fences:
-{"score": <1-10 int>, "why": "<one paragraph>"}"""
+{"score": <1-10 int>, "dimensions": {"necessity": <1-10>, "invitees": <1-10>, "details": <1-10>, \
+"timing": <1-10>}, "why": "<one paragraph>"}"""
 
 
 DEFAULT_RUBRIC_TICKET = """You are the PM-OS shadow judge. You score a DRAFTED TICKET a worker agent \
@@ -166,11 +178,10 @@ RUBRICS = {
     "ticket": ("judge-rubric-ticket", DEFAULT_RUBRIC_TICKET),
 }
 
-# Per-kind dimension keys the verdict carries (meeting = none; paragraph only).
 DIMENSIONS_BY_KIND = {
     "document": ["context", "reasoning", "evidence", "format"],
     "message": ["voice", "format", "fulfils_ask", "clarity"],
-    "meeting": [],
+    "meeting": ["necessity", "invitees", "details", "timing"],
     "ticket": ["completeness", "clarity", "actionability", "format"],
 }
 
@@ -282,16 +293,16 @@ def fetch_voice():
 def detect_kind(fm):
     """Classify the deliverable form. Returns 'meeting' | 'message' | 'document' | 'ticket' | None.
 
-    None means there is no single deliverable to grade (skip) — e.g. a meeting
-    task that hasn't been scheduled yet, or an action that left only a prose note.
+    None means there is no single deliverable to grade (skip) — e.g. an action
+    that left only a prose note with nothing concrete to evaluate.
     """
     task_type = fm.get("task_type")
     if task_type == "publish-ticket":
         return "ticket"
     if task_type == "schedule-meeting":
-        if fm.get("meeting_selected_slot") or fm.get("meeting_event_id"):
+        if fm.get("meeting_attendees") or fm.get("meeting_title") or fm.get("meeting_selected_slot"):
             return "meeting"
-        return None  # nothing scheduled yet → nothing done to judge
+        return None  # agent hasn't produced any proposal yet
     if task_type == "send-message":
         return "message"
     # Default: a document deliverable iff agent_output points to a readable file.
@@ -302,11 +313,21 @@ def detect_kind(fm):
 
 
 def _meeting_activity_line(body):
-    """Pull the 'Calendar event created…' line from the activity log, if present."""
+    """Pull the 'Calendar event created...' line from the activity log, if present."""
     for line in body.splitlines():
         if "calendar event created" in line.lower():
             return line.strip()
     return ""
+
+
+def _extract_proposed_slots(body):
+    """Extract proposed time-slot descriptions from the task body."""
+    slots = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("**Option"):
+            slots.append(stripped)
+    return "\n".join(slots) if slots else ""
 
 
 def gather_evidence(kind, fm, body, task_id):
@@ -328,19 +349,27 @@ def gather_evidence(kind, fm, body, task_id):
         return None, "no message text found"
 
     if kind == "meeting":
+        selected = fm.get("meeting_selected_slot")
         fields = [
             ("Title", fm.get("meeting_title") or fm.get("title")),
             ("Attendees", ", ".join(fm.get("meeting_attendees") or []) or "(none recorded)"),
-            ("Chosen slot", fm.get("meeting_selected_slot") or "(none)"),
             ("Duration (min)", fm.get("meeting_duration")),
             ("Recurrence", fm.get("meeting_recurrence_pattern") or ("recurring" if fm.get("meeting_recurring") else "one-time")),
             ("Description / agenda", (fm.get("meeting_description") or "").strip() or "(none)"),
         ]
+        if selected:
+            fields.insert(2, ("Chosen slot", selected))
+            note = "booked meeting"
+        else:
+            proposed = _extract_proposed_slots(body)
+            if proposed:
+                fields.insert(2, ("Proposed time slots (human has NOT yet chosen)", "\n" + proposed))
+            note = "meeting proposal"
         block = "\n".join(f"- {k}: {v}" for k, v in fields)
         act = _meeting_activity_line(body)
         if act:
             block += f"\n- Activity log: {act}"
-        return block, "meeting fields"
+        return block, note
 
     if kind == "ticket":
         # The drafted ticket lives as a JIRA_DRAFT block in the task body.
