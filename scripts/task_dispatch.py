@@ -173,11 +173,16 @@ def get_actionable_tasks():
             log(f"ERROR: Failed to parse {queue} queue JSON: {e}")
             continue
 
+    HUMAN_INTERACTIVE_CARDS = {"program-setup"}
+
     # Filter to actionable tasks
     actionable = []
     for t in tasks:
         status = t.get("status", "")
         agent_status = t.get("agent_status")
+
+        if t.get("card_type") in HUMAN_INTERACTIVE_CARDS:
+            continue
 
         if status == "open":
             actionable.append(t)
