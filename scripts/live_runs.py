@@ -121,7 +121,7 @@ def run_error(key):
     return state.error
 
 
-def tail(key, read_fn, heartbeat=15.0):
+def tail(key, read_fn, heartbeat=15.0, start_from=0):
     """Yield events for `key`: replay the log, then stream new events live.
 
     `read_fn()` returns the full event list so far (a snapshot). The tail yields
@@ -129,6 +129,9 @@ def tail(key, read_fn, heartbeat=15.0):
     blocks on the run's Condition for up to `heartbeat` seconds; on a silent
     timeout it yields {"kind": "heartbeat"}. It terminates once the run is done
     AND the log is fully drained.
+
+    `start_from` skips the first N events (for callers that already have
+    history rendered and only want new events from the current turn).
 
     Closing the generator (GeneratorExit at a yield) only stops the tail. It
     touches nothing the source thread reads, so the source - and the underlying
@@ -138,7 +141,7 @@ def tail(key, read_fn, heartbeat=15.0):
     currently returns and then ends (treated as already-done).
     """
     state = _get(key)
-    last_index = 0
+    last_index = start_from
     try:
         while True:
             # 1. DRAIN FIRST. Yield everything available past last_index.

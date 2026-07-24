@@ -1691,6 +1691,10 @@ def handle_chat(handler, task_id):
         _error_response(handler, "A chat run is already in progress", status=409)
         return
 
+    # Snapshot the event count BEFORE starting the run so the SSE stream
+    # only sends new events (the frontend already has history rendered).
+    pre_run_count = len(chat_transcript.read_events(task_id))
+
     # Start the decoupled run. NO-OP append_fn: run_turn owns the durable log
     # (chat_transcript); passing append_event here would double-log. start() is
     # itself a no-op if a run for this key is already live.
@@ -1706,6 +1710,7 @@ def handle_chat(handler, task_id):
         key,
         lambda: chat_transcript.read_events(task_id),
         "The chat run ended unexpectedly. You can retry.",
+        start_from=pre_run_count,
     )
 
 
@@ -1739,6 +1744,8 @@ def handle_onboarding_run(handler):
         _error_response(handler, "An onboarding run is already in progress", status=409)
         return
 
+    pre_run_count = len(onboard_transcript.read_events())
+
     # Start the decoupled run. NO-OP append_fn: onboard_runner owns the durable
     # log (onboard_transcript); passing append_event here would double-log.
     live_runs.start(
@@ -1753,6 +1760,7 @@ def handle_onboarding_run(handler):
         key,
         lambda: onboard_transcript.read_events(),
         "The onboarding run ended unexpectedly. You can retry.",
+        start_from=pre_run_count,
     )
 
 
@@ -1776,21 +1784,23 @@ def _heartbeat_or_send(handler, event):
         _sse_send(handler, event)
 
 
-def _stream_live_run(handler, key, read_fn, error_text):
+def _stream_live_run(handler, key, read_fn, error_text, start_from=0):
     """Tail the live run for `key` over SSE, then surface a run error if any.
 
     Shared survive-disconnect streaming substrate for both Adapt and the task
-    chat panel. Replays the durable event log and tails new events
-    (live_runs.tail over `read_fn`). On a client disconnect we stop tailing but
-    DO NOT touch the run — it is owned by live_runs, keeps filling its durable
-    log, and reaches completion. After the tail drains with the socket intact,
-    if the run ended abnormally (live_runs.run_error) we emit a terminal error
-    frame (`error_text`) so a crashed run is not mistaken for a clean finish.
-    Always closes with the `event: done` sentinel when the socket is still alive.
+    chat panel. Tails new events (live_runs.tail over `read_fn`) starting from
+    `start_from` (callers pass the pre-run event count so history already
+    rendered by the frontend is not replayed into the live turn). On a client
+    disconnect we stop tailing but DO NOT touch the run — it is owned by
+    live_runs, keeps filling its durable log, and reaches completion. After
+    the tail drains with the socket intact, if the run ended abnormally
+    (live_runs.run_error) we emit a terminal error frame (`error_text`) so a
+    crashed run is not mistaken for a clean finish. Always closes with the
+    `event: done` sentinel when the socket is still alive.
     """
     disconnected = False
     try:
-        for event in live_runs.tail(key, read_fn):
+        for event in live_runs.tail(key, read_fn, start_from=start_from):
             _heartbeat_or_send(handler, event)
     except (BrokenPipeError, ConnectionResetError):
         # Client went away mid-stream. Stop tailing; the run is owned by
@@ -1813,13 +1823,14 @@ def _stream_live_run(handler, key, read_fn, error_text):
         pass
 
 
-def _stream_adapt_run(handler, key):
+def _stream_adapt_run(handler, key, start_from=0):
     """Tail the live Adapt build run for `key` over SSE (see _stream_live_run)."""
     _stream_live_run(
         handler,
         key,
         lambda: adapt_transcript.read_events(key),
         "The build run ended unexpectedly. You can retry.",
+        start_from=start_from,
     )
 
 
@@ -1865,6 +1876,8 @@ def handle_adapt(handler):
             _error_response(handler, "A build run is already in progress", status=409)
             return
 
+    pre_run_count = len(adapt_transcript.read_events(adaptation_id))
+
     # Start the decoupled run if not already live. NO-OP append_fn: adapt_runner
     # owns the durable log (adapt_transcript); passing append_event here would
     # double-log. start() is itself a no-op if a run for this key is live.
@@ -1875,7 +1888,7 @@ def handle_adapt(handler):
     )
 
     _sse_begin(handler)
-    _stream_adapt_run(handler, adaptation_id)
+    _stream_adapt_run(handler, adaptation_id, start_from=pre_run_count)
 
 
 def handle_adapt_stream(handler, query_params):
