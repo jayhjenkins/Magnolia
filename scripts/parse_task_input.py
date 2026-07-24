@@ -7,7 +7,7 @@ Input: raw text blob via stdin or --text argument
 Output: JSON with task fields ready for task_cli.py
 
 Runs the structured extraction through a one-shot headless `claude` CLI call
-(`claude -p ... --model claude-haiku-4-5`), the same invocation pattern the rest
+(`claude -p ... --model haiku`), the same invocation pattern the rest
 of PM-OS uses for Claude (see task_dispatch.py and jira_publish.py). Override
 the model with PM_OS_PARSER_MODEL.
 
@@ -40,7 +40,7 @@ except ImportError:
 
 # Lightweight parsing/routing runs on Claude Haiku via the headless `claude`
 # CLI. Override with PM_OS_PARSER_MODEL.
-PARSER_MODEL = os.environ.get("PM_OS_PARSER_MODEL", "claude-haiku-4-5")
+PARSER_MODEL = os.environ.get("PM_OS_PARSER_MODEL", "haiku")
 
 SYSTEM_PROMPT = """You are a task parser for a Product Manager's task system. You receive raw, unstructured text (often from voice-to-text) and extract a single structured task.
 

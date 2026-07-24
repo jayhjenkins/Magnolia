@@ -3189,6 +3189,15 @@ def main():
     except Exception as e:
         print(f"Warning: legacy onboarding migration skipped: {e}")
 
+    # Seed default cron jobs on first run (jobs.json is gitignored).
+    try:
+        import seed_default_crons
+        added = seed_default_crons.seed()
+        if added:
+            print(f"Seeded {added} default cron job(s).")
+    except Exception as e:
+        print(f"Warning: cron seed skipped: {e}")
+
     # Start cron scheduler background thread
     scheduler = CronScheduler()
     scheduler.start()

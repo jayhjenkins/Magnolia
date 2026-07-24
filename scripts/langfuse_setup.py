@@ -75,7 +75,7 @@ def register_task_parser(langfuse, dry_run=False):
         langfuse.create_prompt(
             name=name,
             prompt=SYSTEM_PROMPT,
-            config={"model": "claude-haiku-4-5", "temperature": 0.1},
+            config={"model": "haiku", "temperature": 0.1},
             labels=["production"],
             type="text",
         )
@@ -202,7 +202,7 @@ def register_cron_parser(langfuse, dry_run=False):
         langfuse.create_prompt(
             name=name,
             prompt=SYSTEM_PROMPT,
-            config={"model": "claude-haiku-4-5", "temperature": 0.1},
+            config={"model": "haiku", "temperature": 0.1},
             labels=["production"],
             type="text",
         )
@@ -229,7 +229,7 @@ def register_worker_router(langfuse, dry_run=False):
         langfuse.create_prompt(
             name=name,
             prompt=_WORKER_MATCH_PROMPT,
-            config={"model": "claude-haiku-4-5", "temperature": 0.1},
+            config={"model": "haiku", "temperature": 0.1},
             labels=["production"],
             type="text",
         )
@@ -254,7 +254,7 @@ def register_judge_rubric(langfuse, dry_run=False):
             langfuse.create_prompt(
                 name=name,
                 prompt=text,
-                config={"model": "claude-opus-4-8", "temperature": 0.0, "kind": kind},
+                config={"model": "opus", "temperature": 0.0, "kind": kind},
                 labels=["production"],
                 type="text",
             )

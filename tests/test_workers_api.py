@@ -12,7 +12,7 @@ def test_workers_payload_has_tier_model_packs():
     # researcher is tier=deep -> balanced resolves to opus
     r = by_name["researcher"]
     assert r["tier"] == "deep"
-    assert r["model"] == "claude-opus-4-8"
+    assert r["model"] == "opus"
     # product-analyst's skills live in the pm pack -> pm membership
     assert "pm" in by_name["product-analyst"]["packs"]
     # default (catch-all) has no skills -> no pack membership
@@ -23,11 +23,11 @@ def test_workers_payload_model_tracks_posture():
     low = {w["name"]: w for w in task_server.workers_payload(posture="low")}
     high = {w["name"]: w for w in task_server.workers_payload(posture="high")}
     # deep worker: low -> sonnet, high -> opus (clamped)
-    assert low["researcher"]["model"] == "claude-sonnet-4-6"
-    assert high["researcher"]["model"] == "claude-opus-4-8"
+    assert low["researcher"]["model"] == "sonnet"
+    assert high["researcher"]["model"] == "opus"
     # light worker (scheduler): low -> haiku, high -> sonnet
-    assert low["scheduler"]["model"] == "claude-haiku-4-5"
-    assert high["scheduler"]["model"] == "claude-sonnet-4-6"
+    assert low["scheduler"]["model"] == "haiku"
+    assert high["scheduler"]["model"] == "sonnet"
 
 
 def test_worker_packs_empty_when_no_manifest(tmp_path):
