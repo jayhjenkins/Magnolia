@@ -88,8 +88,8 @@ Out of Scope:
 - "Out of scope: TBD"
 - Missing out-of-scope section entirely
 
-### 3. Requirements Structured
-**Requirement**: PRD has requirements organized by milestone with priority levels
+### 3. Requirements Structured (with a slicing strategy)
+**Requirement**: PRD has requirements organized by milestone with priority levels **AND** a vertical-slice shipping strategy -- at least one thin, end-to-end slice that delivers standalone customer value, with a named first-delivery audience (dogfood / design partner / early adopter / GA) and what it validates before widening. Ambition governs *what* is built; slicing governs *when* a customer gets value.
 
 **Pass**:
 ```
@@ -99,6 +99,11 @@ Milestone 1: Core Export
 | P0 | Platform   | Export to Google Sheets        | File appears in user's Drive |
 | P0 | Platform   | Include key metrics            | Contains: sends, opens, clicks |
 | P1 | Platform   | Custom date range              | User can select start/end dates |
+
+Shipping Strategy:
+- Slice 1 (design partners): End-to-end on-demand export for 3 design-partner accounts → validates workflow fit before scaling
+- Slice 2 (early adopters): Scheduled exports + custom date range for opt-in customers
+- Slice 3 (GA): All customers, with usage analytics enabled
 ```
 
 **Fail**:
@@ -106,6 +111,9 @@ Milestone 1: Core Export
 - No prioritization (P0/P1/P2)
 - Missing acceptance criteria
 - Just feature descriptions without user stories
+- No slicing strategy / big-bang delivery only
+- Slice 1 delivers no standalone customer value -- horizontal layer, not a usable slice
+- No named early-delivery audience
 
 ### 4. Timeline Present
 **Requirement**: PRD has milestones with expected delivery timeline
@@ -155,7 +163,7 @@ Opportunity Sizing: 500 customers affected, ~$50K ARR at risk from churn
 ### 1. Load PRD
 
 Read PRD from:
-- `datasets/product/prds/{YYYY}/PRD_{slug}.md`, OR
+- `datasets/product/packages/{YYYY}/{slug}/PRD_{slug}.md`, OR
 - PRD proposal in backlog intake section, OR
 - In-memory PRD draft
 
@@ -166,7 +174,7 @@ Check each criterion sequentially:
 ```
 ✓ Objectives Clear? [Yes/No] → [Has customer statement with all elements]
 ✓ Use Cases Defined? [Yes/No] → [Count in-scope, count out-of-scope]
-✓ Requirements Structured? [Yes/No] → [Has milestones with priorities]
+✓ Requirements Structured (with slicing strategy)? [Yes/No] → [Has milestones with priorities + vertical-slice shipping strategy with named first-delivery audience]
 ✓ Timeline Present? [Yes/No] → [Has delivery expectations]
 ✓ Success Measurable? [Yes/No] → [Has metrics/opportunity sizing]
 ```
@@ -183,7 +191,7 @@ Check each criterion sequentially:
 
 ✓ Objectives Clear: Customer statement complete
 ✓ Use Cases Defined: N in-scope, N out-of-scope
-✓ Requirements Structured: N milestones, N requirements with priorities
+✓ Requirements Structured: N milestones, N requirements with priorities, N vertical slices with named first-delivery audience
 ✓ Timeline Present: Milestones with delivery dates
 ✓ Success Measurable: N metrics defined, opportunity sized
 
@@ -238,7 +246,7 @@ Failed criteria:
 **Direct usage:**
 User can invoke validation on existing PRDs:
 ```
-"Validate the PRD at datasets/product/prds/2025/PRD_google-sheets-export.md"
+"Validate the PRD at datasets/product/packages/2025/google-sheets-export/PRD_google-sheets-export.md"
 ```
 
 ## Success Criteria
@@ -261,6 +269,7 @@ PRD validation passes when:
 | Flat requirements list | Organize by milestone with P0/P1/P2 |
 | No timeline | Add milestones table with delivery expectations |
 | No metrics | Define specific success signals and measurements |
+| No slicing strategy / big-bang delivery | Define vertical slices with named first-delivery audience; each slice must stand alone as useful product |
 
 ## Quality Gate Failures
 
@@ -274,9 +283,9 @@ PRD validation passes when:
    - Example: Only feature descriptions
    - Fix: Define specific use cases with descriptions
 
-3. **Unstructured requirements**
-   - Example: Flat bullet list
-   - Fix: Organize by milestone with P0/P1/P2 priorities
+3. **Unstructured requirements / no slicing strategy**
+   - Example: Flat bullet list with no milestones, or milestones defined by layer ("Phase 1 = backend") instead of by audience value
+   - Fix: Organize by milestone with P0/P1/P2 priorities and define vertical slices with a named first-delivery audience
 
 4. **No timeline**
    - Example: "We'll figure it out"

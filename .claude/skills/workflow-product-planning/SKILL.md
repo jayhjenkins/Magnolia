@@ -151,7 +151,7 @@ For high-priority PRD candidates, optionally pull supporting data:
 ```
 
 **Write individual PRD files:**
-`datasets/product/prds/{YYYY}/PRD_{slug}.md`
+`datasets/product/packages/{YYYY}/{slug}/PRD_{slug}.md` (canonical single location)
 
 Slug generation: lowercase, hyphens, remove special chars
 
@@ -172,7 +172,7 @@ Product planning complete when:
 - Signals clustered into PRD themes
 - PRD validation applied (flags issues, doesn't fabricate)
 - PRD proposals written to backlog.md
-- Individual PRD files created in prds/{YYYY}/
+- Individual PRD files created in packages/{YYYY}/{slug}/
 - State file updated with current timestamp
 
 ## PRD Statuses

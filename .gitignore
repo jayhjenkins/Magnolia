@@ -15,6 +15,7 @@ datasets/product/*
 !datasets/product/*/.gitkeep
 datasets/product/*/*
 !datasets/product/templates/
+!datasets/product/templates/*
 !datasets/product/*/*/.gitkeep
 
 # Research folder: keep structure and templates, ignore everything else

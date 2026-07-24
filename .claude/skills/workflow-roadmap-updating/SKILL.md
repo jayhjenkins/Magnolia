@@ -27,7 +27,7 @@ Activate when:
 
 **From:**
 - `datasets/product/backlog.md` (latest PRD Intake section)
-- `datasets/product/prds/{YYYY}/PRD_*.md` files
+- `datasets/product/packages/{YYYY}/*/PRD_*.md` files
 
 **Extract:**
 - PRD titles

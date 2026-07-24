@@ -9,7 +9,7 @@ description: Use when creating standalone PRD from user input or upstream artifa
 
 Create individual Product Requirements Document through interactive session:
 - Ingest and cross-reference upstream Shipping Greatness artifacts when available
-- Structured requirements gathering across 10 phases
+- Structured requirements gathering across 9 phases
 - Apply PRD validation rubric
 - Generate PRD file from template
 - No fabrication - leave unknown sections as TBD
@@ -26,10 +26,12 @@ Activate when:
 
 1. **PRD is a living document** — It will evolve through collaboration and discovery
 2. **Ambitious by default** — Set the ceiling as high as possible. Build the fully-featured version. Code is cheap — ambiguity and timidity are expensive
-3. **Sequence, don't cut** — Instead of asking "what's the minimum?" ask "what's the best possible version, and what do we build first?" Everything ships, sequenced by build phase
-4. **Share and link** — PRDs should be accessible with links to Slack channels
-5. **No fabrication** — Leave sections blank/TBD rather than making up information
-6. **Reflect what was delivered** — At close, PRD should document actual outcomes
+3. **Ambitious scope, incremental delivery** — Ambition governs *what* is built; slicing governs *when* a customer gets value. Set the ceiling high for WHAT we build. Use vertical slices for HOW we ship it. These are different questions.
+4. **Sequence as shippable slices, don't cut** — Start with the thinnest end-to-end slice that delivers standalone customer value. Each delivery slice must stand alone as a useful product for a named audience. "Phase 1 = backend only" is not a slice; "Phase 1 = end-to-end for segment X" is.
+5. **Value to the Management Company** — Every PRD must articulate how this feature creates or protects value for management companies (our customers). If you cannot answer "why does a management company care?", the PRD is not ready.
+6. **Share and link** — PRDs should be accessible with links to Slack channels
+7. **No fabrication** — Leave sections blank/TBD rather than making up information
+8. **Reflect what was delivered** — At close, PRD should document actual outcomes
 
 ## Product Package Folder
 
@@ -41,9 +43,13 @@ datasets/product/packages/{YYYY}/{slug}/
 
 The slug is derived from the product/feature name (lowercase, hyphens, no special chars). If this skill is invoked as part of `/project:build` or `/project:ship-it`, the package folder already exists from earlier phases. If invoked standalone, create the folder if it doesn't exist.
 
-The PRD is written to **two locations**:
-1. `{package}/PRD_{slug}.md` — alongside all other package artifacts
-2. `datasets/product/prds/{YYYY}/PRD_{slug}.md` — the canonical PRD location for the existing backlog/roadmap system
+**Preflight -- check for an existing initiative before scaffolding a new folder.** Creating a duplicate package for work that already has one is a known failure mode (it splits the PRD across two folders and orphans the older one). Before creating:
+1. Glob existing packages: `datasets/product/packages/{YYYY}/*/` (and adjacent years if this could be a continuation). Read the slugs.
+2. Match semantically, not just by slug -- the same initiative is often named differently ("FTUE redesign" vs "new-resident onboarding"). If no obvious slug match, run `context-search` over `product_artifacts` for the topic.
+3. If a plausible match exists, **STOP and ask the PM**: *"This overlaps with `{existing-slug}` -- resume that package, or start a new one?"* Default to resuming. Only scaffold a new folder once the PM confirms it's genuinely new.
+
+The PRD is written to a **single canonical location**:
+- `{package}/PRD_{slug}.md` — the only copy; do not mirror to `prds/{YYYY}/` (mirror retired). Backlog/roadmap tooling discovers PRDs by globbing `datasets/product/packages/{YYYY}/*/PRD_*.md`.
 
 ## Upstream Artifact Ingestion
 
@@ -178,9 +184,8 @@ All phases ship. This is sequencing, not cutting. Include dependency tracking be
 
 **Use template:** `datasets/product/templates/prd-template.md`
 
-**Output (dual location):**
-1. `datasets/product/packages/{YYYY}/{slug}/PRD_{slug}.md` — in the package folder with all other artifacts
-2. `datasets/product/prds/{YYYY}/PRD_{slug}.md` — canonical PRD location for backlog/roadmap integration
+**Output (single canonical location):**
+- `datasets/product/packages/{YYYY}/{slug}/PRD_{slug}.md` — the only copy; do not mirror to `prds/{YYYY}/` (mirror retired)
 
 **Set initial status:** 🚧 Drafting
 
