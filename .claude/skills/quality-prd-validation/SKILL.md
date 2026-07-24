@@ -88,8 +88,8 @@ Out of Scope:
 - "Out of scope: TBD"
 - Missing out-of-scope section entirely
 
-### 3. Requirements Structured
-**Requirement**: PRD has requirements organized by milestone with priority levels
+### 3. Requirements Structured (with a slicing strategy)
+**Requirement**: PRD has requirements organized by milestone with priority levels, and a vertical-slice shipping strategy that names the first-delivery audience
 
 **Pass**:
 ```
@@ -106,6 +106,9 @@ Milestone 1: Core Export
 - No prioritization (P0/P1/P2)
 - Missing acceptance criteria
 - Just feature descriptions without user stories
+- No slicing strategy (phases defined by layer — "Phase 1 = backend only" — instead of by audience value)
+- Slicing strategy names no first-delivery audience
+- Slices that cannot stand alone as useful product for any named segment
 
 ### 4. Timeline Present
 **Requirement**: PRD has milestones with expected delivery timeline
@@ -155,7 +158,7 @@ Opportunity Sizing: 500 customers affected, ~$50K ARR at risk from churn
 ### 1. Load PRD
 
 Read PRD from:
-- `datasets/product/prds/{YYYY}/PRD_{slug}.md`, OR
+- `datasets/product/packages/{YYYY}/{slug}/PRD_{slug}.md`, OR
 - PRD proposal in backlog intake section, OR
 - In-memory PRD draft
 
@@ -238,7 +241,7 @@ Failed criteria:
 **Direct usage:**
 User can invoke validation on existing PRDs:
 ```
-"Validate the PRD at datasets/product/prds/2025/PRD_google-sheets-export.md"
+"Validate the PRD at datasets/product/packages/2025/google-sheets-export/PRD_google-sheets-export.md"
 ```
 
 ## Success Criteria
@@ -261,6 +264,7 @@ PRD validation passes when:
 | Flat requirements list | Organize by milestone with P0/P1/P2 |
 | No timeline | Add milestones table with delivery expectations |
 | No metrics | Define specific success signals and measurements |
+| No slicing strategy | Define vertical slices with named first-delivery audience; each slice must stand alone as useful product |
 
 ## Quality Gate Failures
 
