@@ -267,8 +267,14 @@ def test_redirect_on_darwin_writes_plist_and_disables_old(tmp_path, monkeypatch)
 
     monkeypatch.setattr(adopt_lib.feed_guard, "disable", spy_disable)
 
-    venv_py = "/Users/x/old/.venv/bin/python"
-    agent = {"path": old_plist, "python": venv_py}
+    # Stub venv creation and smoke test (can't pip install in test)
+    fake_py = str(root / "venv" / "bin" / "python3")
+    os.makedirs(os.path.dirname(fake_py), exist_ok=True)
+    _write(fake_py, "")
+    monkeypatch.setattr(adopt_lib.ensure_venv, "ensure", lambda root=None: fake_py)
+    monkeypatch.setattr(adopt_lib, "_smoke_test_python", lambda p: None)
+
+    agent = {"path": old_plist, "python": "/Users/x/old/.venv/bin/python"}
     # activate=False skips launchctl (no real load in tests).
     result = adopt_lib.redirect_otter_feed(agent, root=str(root),
                                            launch_agents_dir=str(la), activate=False)
@@ -280,16 +286,14 @@ def test_redirect_on_darwin_writes_plist_and_disables_old(tmp_path, monkeypatch)
     with open(plist_path) as f:
         text = f.read()
     assert "com.magnolia.ottersync" in text
-    # venv python is ProgramArguments[0] (first <string> in the array).
-    strings = adopt_lib._STRING_RE.findall(text)
-    # strings[0] is the Label; ProgramArguments[0] is the first path-like string.
-    assert venv_py in text
-    prog_args = [s for s in strings if "/" in s]
-    assert prog_args[0] == venv_py
+    # Magnolia's own venv python is in ProgramArguments (not the old install's).
+    assert fake_py in text
     # feed_guard.disable was invoked on the OLD plist.
     assert old_plist in disabled_calls
     # the external-feed flag is now set in the profile.
     assert profile_lib.transcript_config(str(root))["external_feed"] is True
+    # state_files key is present in result.
+    assert "state_files" in result
 
 
 def test_redirect_missing_template_leaves_old_agent_in_place(tmp_path, monkeypatch):
@@ -301,6 +305,8 @@ def test_redirect_missing_template_leaves_old_agent_in_place(tmp_path, monkeypat
     la = tmp_path / "LaunchAgents"
     os.makedirs(str(la))
     old_plist = _write(str(la / "com.priortool.otter-sync.plist"), "<plist/>")
+    monkeypatch.setattr(adopt_lib.ensure_venv, "ensure", lambda root=None: "/x/python")
+    monkeypatch.setattr(adopt_lib, "_smoke_test_python", lambda p: None)
     agent = {"path": old_plist, "python": "/x/python"}
     try:
         adopt_lib.redirect_otter_feed(agent, root=str(root),

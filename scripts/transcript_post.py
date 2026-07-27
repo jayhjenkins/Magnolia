@@ -20,7 +20,7 @@ def _null_log():
 
 
 def _classify_fn():
-    """Late import so openai stays optional (graceful degradation)."""
+    """Late import keeps otter_classify optional for environments without claude CLI."""
     from otter_classify import process_file
     return process_file
 
@@ -54,7 +54,7 @@ def run_downstream(txt_path, item_id, state, log):
     try:
         process_file = _classify_fn()
     except ImportError:
-        log.warning("  openai not installed — skipping classification for %s", item_id)
+        log.warning("  otter_classify not available — skipping classification for %s", item_id)
         process_file = None
     if process_file:
         try:

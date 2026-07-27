@@ -19,10 +19,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from openai import OpenAI
-
 # ── Engine wiring ────────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import platform_lib  # noqa: E402
 import profile_lib  # noqa: E402
 
 # ── Paths (profile-driven) ───────────────────────────────────────────────────────
@@ -38,10 +37,7 @@ if not log.handlers:
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
-# ── LLM setup ─────────────────────────────────────────────────────────────────
-OLLAMA_BASE = "http://localhost:11434/v1"
-CLASSIFY_MODEL = "nemotron-3-nano:30b"
-FALLBACK_MODEL = "qwen3:4b"
+# ── Classification ─────────────────────────────────────────────────────────────
 
 VALID_DOMAINS = {
     "recruiting",
@@ -54,11 +50,7 @@ VALID_DOMAINS = {
     "general",
 }
 
-CLASSIFY_SYSTEM = """\
-You are classifying meeting transcripts for a Director of Product at a B2B SaaS company \
-(Vantaca — property management software). Respond with ONLY the domain path, nothing else.
-
-Domains:
+_DOMAIN_TAXONOMY = """\
 - recruiting           (PM candidate interviews, hiring discussions)
 - product/payments     (payments product meetings, Pay Standup, Payments L10)
 - product/home         (home product feature work, home team meetings)
@@ -69,15 +61,23 @@ Domains:
 - general              (anything else)"""
 
 
-# ── Classification ─────────────────────────────────────────────────────────────
-
-def _ollama_client() -> OpenAI:
-    return OpenAI(base_url=OLLAMA_BASE, api_key="ollama")
+def _build_classify_prompt(title: str, content_preview: str) -> str:
+    name = profile_lib.display_name()
+    company = profile_lib.company()
+    persona = profile_lib.persona()
+    role = "product manager" if persona == "pm" else persona
+    identity = f"a {role} at {company}" if company else f"a {role}"
+    return (
+        f"You are classifying meeting transcripts for {identity}. "
+        f"Respond with ONLY the domain path, nothing else.\n\n"
+        f"Domains:\n{_DOMAIN_TAXONOMY}\n\n"
+        f"Title: {title}\n"
+        f"Content preview: {content_preview[:600]}"
+    )
 
 
 def _keyword_classify(title: str, filename_hint: str = "") -> str:
     """Keyword-based fallback classifier. filename_hint supplements the title."""
-    # Combine title and filename stem for broader keyword coverage
     t = (title + " " + filename_hint).lower()
     if any(w in t for w in ("interview", "hiring", "candidate")):
         return "recruiting"
@@ -101,39 +101,31 @@ def _keyword_classify(title: str, filename_hint: str = "") -> str:
 
 
 def classify_domain(title: str, content_preview: str, filename_hint: str = "") -> str:
-    """
-    Classify a transcript into one of the valid domain paths using the local Ollama LLM.
-    Falls back to qwen3:4b on invalid response, then keyword rules.
-    filename_hint is the file stem used by the keyword fallback if title alone is ambiguous.
-    """
-    user_msg = f"Title: {title}\nContent preview: {content_preview[:600]}"
-
-    for model in (CLASSIFY_MODEL, FALLBACK_MODEL):
-        try:
-            client = _ollama_client()
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": CLASSIFY_SYSTEM},
-                    {"role": "user", "content": user_msg},
-                ],
-                temperature=0,
-                max_tokens=1024,
-            )
-            raw = resp.choices[0].message.content or ""
-            # Strip <think>...</think> blocks (Qwen3/Nemotron thinking mode)
-            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-            raw = raw.strip().lower()
+    """Classify a transcript into one of the valid domain paths via Claude.
+    Falls back to keyword rules on any failure."""
+    prompt = _build_classify_prompt(title, content_preview)
+    try:
+        claude = platform_lib.resolve_claude()
+        result = subprocess.run(
+            [claude, "-p", prompt, "--max-turns", "1"],
+            env=platform_lib.headless_claude_env(),
+            capture_output=True, text=True, timeout=30,
+            cwd=str(profile_lib.PM_OS_DIR),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            raw = result.stdout.strip().lower()
             raw = re.sub(r'["\'\n]', "", raw).strip().rstrip(".")
             if raw in VALID_DOMAINS:
-                log.info("    LLM classified → %s (model=%s)", raw, model)
+                log.info("    Claude classified -> %s", raw)
                 return raw
-            log.warning("    LLM returned invalid domain %r (model=%s), trying fallback", raw, model)
-        except Exception as exc:
-            log.warning("    Ollama error (%s): %s", model, exc)
+            log.warning("    Claude returned invalid domain %r, falling back to keywords", raw)
+        else:
+            log.warning("    Claude classify failed (rc=%d), falling back to keywords", result.returncode)
+    except Exception as exc:
+        log.warning("    Claude classify error: %s, falling back to keywords", exc)
 
     domain = _keyword_classify(title, filename_hint=filename_hint)
-    log.info("    Keyword classified → %s", domain)
+    log.info("    Keyword classified -> %s", domain)
     return domain
 
 

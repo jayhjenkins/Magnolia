@@ -10,6 +10,7 @@ import os
 import shutil
 import socket
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import platform_lib  # noqa: E402
@@ -96,6 +97,23 @@ def probe_server(port):
     return cap
 
 
+def _tail(path, n=20):
+    """Read the last n lines of a file. Best-effort; returns '' on error."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            chunk = min(size, 8192)
+            if chunk == 0:
+                return ""
+            f.seek(-chunk, 2)
+            data = f.read()
+        lines = data.decode("utf-8", errors="ignore").splitlines()
+        return "\n".join(lines[-n:])
+    except OSError:
+        return ""
+
+
 def probe_transcript(root=None):
     tc = profile_lib.transcript_config(root)
     provider = tc["provider"]
@@ -115,18 +133,37 @@ def probe_transcript(root=None):
             cap["status"] = "needs_reauth"
             cap["detail"] = "Connect Granola via /mcp, then finish granola.ai/mcp-signup"
         return cap
-    # otter, external feed: the operator adopted a prior install's already-working
-    # Otter LaunchAgent (re-pointed at Magnolia's otter_sync.py), so the Playwright/
-    # otterai extras may live only in the OLD install's venv - a dep import probe
-    # here would wrongly nag "install the extras". Verify by output marker instead
-    # (mirrors the granola branch above): a synced feed leaves otter_sync.log or
-    # downloaded.json in the state dir.
     if tc["external_feed"]:
-        for marker in ("otter_sync.log", "downloaded.json"):
-            if os.path.isfile(os.path.join(state_dir, marker)):
-                cap["status"] = "ok"
-                return cap
-        cap["status"] = "needs_reauth"
+        log_path = os.path.join(state_dir, "otter_sync.log")
+        dl_path = os.path.join(state_dir, "downloaded.json")
+        has_log = os.path.isfile(log_path)
+        has_dl = os.path.isfile(dl_path)
+        if not has_log and not has_dl:
+            cap["status"] = "needs_reauth"
+            return cap
+        if has_log:
+            try:
+                age_h = (time.time() - os.path.getmtime(log_path)) / 3600
+                if age_h > 48:
+                    cap["status"] = "stale"
+                    cap["detail"] = (f"otter_sync.log last modified "
+                                     f"{age_h:.0f}h ago (>48h)")
+                    cap["remedy"] = ("The transcript sync may be silently "
+                                     "failing. Check logs/otter_sync.log.")
+                    return cap
+            except OSError:
+                pass
+            try:
+                tail = _tail(log_path, 5)
+                last_lines = tail.strip().splitlines()
+                if last_lines and "ERROR" in last_lines[-1]:
+                    cap["status"] = "degraded"
+                    cap["detail"] = last_lines[-1][:120]
+                    cap["remedy"] = "Check logs/otter_sync.log for details."
+                    return cap
+            except OSError:
+                pass
+        cap["status"] = "ok"
         return cap
     # otter: the feed needs the transcript extras (Playwright + otterai) installed
     # BEFORE otter_auth.py can run - it imports Playwright. Check deps first so the
