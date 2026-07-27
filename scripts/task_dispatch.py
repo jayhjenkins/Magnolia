@@ -1015,42 +1015,43 @@ def main():
     )
     args = parser.parse_args()
 
-    # Acquire lock
-    lock_fd = acquire_lock()
-    if lock_fd is None:
-        log("Another dispatcher is already running. Exiting.")
-        sys.exit(0)
-
-    try:
-        log("Dispatcher started" + (" (dry-run)" if args.dry_run else ""))
-
-        # Load worker definitions
+    if args.task:
+        # Single-task mode: no lock needed — each dispatch is independent
+        # and runs its own claude process.
+        log("Dispatcher started (single-task)" + (" (dry-run)" if args.dry_run else ""))
         workers = load_workers()
         log(f"Loaded {len(workers)} worker(s): {', '.join(w['name'] for w in workers)}")
 
-        # Determine which tasks to process
-        if args.task:
-            # Single-task mode: build a minimal task dict and dispatch directly
-            task_id = args.task.upper()
-            log(f"Single-task mode: {task_id}", task_id=task_id)
-            # Try to read full task metadata for better worker matching
-            try:
-                task_data = task_lib.read_task(task_id)
-                fm = task_data.get("frontmatter", {})
-                task = {
-                    "id": task_id,
-                    "title": fm.get("title", "(single dispatch)"),
-                    "priority": fm.get("priority", "medium"),
-                    "domain": fm.get("domain"),
-                    "task_type": fm.get("task_type"),
-                    "model": fm.get("model"),
-                    "tier": fm.get("tier"),
-                }
-            except Exception:
-                task = {"id": task_id, "title": "(single dispatch)", "priority": "medium"}
-            results = [dispatch_task(task, dry_run=args.dry_run, rerun=args.rerun, workers=workers)]
-        else:
-            # Normal mode: scan the agent queue for actionable tasks
+        task_id = args.task.upper()
+        log(f"Single-task mode: {task_id}", task_id=task_id)
+        try:
+            task_data = task_lib.read_task(task_id)
+            fm = task_data.get("frontmatter", {})
+            task = {
+                "id": task_id,
+                "title": fm.get("title", "(single dispatch)"),
+                "priority": fm.get("priority", "medium"),
+                "domain": fm.get("domain"),
+                "task_type": fm.get("task_type"),
+                "model": fm.get("model"),
+                "tier": fm.get("tier"),
+            }
+        except Exception:
+            task = {"id": task_id, "title": "(single dispatch)", "priority": "medium"}
+        result = dispatch_task(task, dry_run=args.dry_run, rerun=args.rerun, workers=workers)
+        log(f"Dispatcher finished: {'succeeded' if result['success'] else 'failed'}")
+    else:
+        # Queue-scan mode: lock prevents two scanners from double-dispatching.
+        lock_fd = acquire_lock()
+        if lock_fd is None:
+            log("Another dispatcher is already running. Exiting.")
+            sys.exit(0)
+
+        try:
+            log("Dispatcher started (queue-scan)" + (" (dry-run)" if args.dry_run else ""))
+            workers = load_workers()
+            log(f"Loaded {len(workers)} worker(s): {', '.join(w['name'] for w in workers)}")
+
             tasks = get_actionable_tasks()
             if not tasks:
                 log("No actionable tasks found in agent queue.")
@@ -1058,19 +1059,17 @@ def main():
 
             log(f"Found {len(tasks)} actionable task(s)")
 
-            # Process sequentially, highest priority first (already sorted)
             results = []
             for task in tasks:
                 result = dispatch_task(task, dry_run=args.dry_run, workers=workers)
                 results.append(result)
 
-        # Summary
-        succeeded = sum(1 for r in results if r["success"])
-        failed = sum(1 for r in results if not r["success"])
-        log(f"Dispatcher finished: {succeeded} succeeded, {failed} failed, {len(results)} total")
+            succeeded = sum(1 for r in results if r["success"])
+            failed = sum(1 for r in results if not r["success"])
+            log(f"Dispatcher finished: {succeeded} succeeded, {failed} failed, {len(results)} total")
 
-    finally:
-        release_lock(lock_fd)
+        finally:
+            release_lock(lock_fd)
 
 
 if __name__ == "__main__":
