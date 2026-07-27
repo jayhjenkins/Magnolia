@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 
+import ensure_venv
 import feed_guard
 import platform_lib
 import profile_lib
@@ -287,15 +288,66 @@ def _launchctl_load(plist_path):
     subprocess.run(["launchctl", "load", plist_path], capture_output=True)
 
 
+def _smoke_test_python(python_path):
+    """Verify the python at python_path can import required modules."""
+    test_imports = ["ruamel.yaml", "otterai"]
+    import subprocess
+    result = subprocess.run(
+        [python_path, "-c",
+         "import " + "; import ".join(test_imports)],
+        capture_output=True, text=True, timeout=15,
+    )
+    if result.returncode != 0:
+        missing = []
+        for mod in test_imports:
+            r = subprocess.run(
+                [python_path, "-c", f"import {mod}"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode != 0:
+                missing.append(mod)
+        raise RuntimeError(
+            f"Python at {python_path} missing modules: {', '.join(missing)}")
+
+
+def _copy_state_files(agent, root=None):
+    """Copy session.json + downloaded.json from the prior install to Magnolia."""
+    dst_dir = profile_lib.transcript_state_dir(root)
+    os.makedirs(dst_dir, exist_ok=True)
+    prior_script = agent.get("script")
+    if not prior_script:
+        return {"copied": [], "skipped": []}
+    prior_dirs = [
+        os.path.dirname(prior_script),
+        os.path.join(os.path.dirname(os.path.dirname(prior_script)),
+                     "profile", "transcript"),
+    ]
+    copied, skipped = [], []
+    for fname in ("session.json", "downloaded.json"):
+        dst = os.path.join(dst_dir, fname)
+        if os.path.exists(dst):
+            skipped.append(fname)
+            continue
+        for src_dir in prior_dirs:
+            src = os.path.join(src_dir, fname)
+            if os.path.isfile(src) and not os.path.islink(src):
+                shutil.copy2(src, dst)
+                copied.append(fname)
+                break
+        else:
+            skipped.append(fname)
+    return {"copied": copied, "skipped": skipped}
+
+
 def redirect_otter_feed(agent, root=None, launch_agents_dir=None, activate=True):
     """Re-point a prior Otter feed at Magnolia's otter_sync.py (macOS only).
 
-    Sequence: disable the OLD agent first (feed_guard.disable), then render +
-    write Magnolia's plist and (if activate) launchctl-load it, then set the
-    external-feed flag so the Doctor stops nagging.
+    Sequence: ensure Magnolia's venv, smoke-test the python, copy state files,
+    disable the OLD agent, render + write Magnolia's plist and (if activate)
+    launchctl-load it, then set the external-feed flag.
 
-    Returns {"supported": True, "plist", "label", "python", "disabled"} on darwin,
-    or {"supported": False, "reason": ...} off darwin (writing NOTHING).
+    Returns {"supported": True, "plist", "label", "python", "disabled", "state_files"}
+    on darwin, or {"supported": False, "reason": ...} off darwin (writing NOTHING).
     """
     if platform_lib.os_kind() != "darwin":
         return {"supported": False,
@@ -304,9 +356,12 @@ def redirect_otter_feed(agent, root=None, launch_agents_dir=None, activate=True)
 
     base = root or profile_lib.PM_OS_DIR
     label = "com.magnolia.ottersync"
-    python = agent.get("python") or "python3"
+    python = ensure_venv.ensure(base)
     la_dir = launch_agents_dir or platform_lib.launch_agents_dir()
     plist_path = os.path.join(la_dir, label + ".plist")
+
+    _smoke_test_python(python)
+    state_files = _copy_state_files(agent, root)
 
     template_path = os.path.join(base, "scripts", "templates",
                                  "transcript-otter-sync.plist.template")
@@ -333,4 +388,4 @@ def redirect_otter_feed(agent, root=None, launch_agents_dir=None, activate=True)
     profile_lib.set_transcript_external(True, root)
 
     return {"supported": True, "plist": plist_path, "label": label,
-            "python": python, "disabled": disabled}
+            "python": python, "disabled": disabled, "state_files": state_files}
