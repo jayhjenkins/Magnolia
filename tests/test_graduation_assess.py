@@ -149,3 +149,47 @@ def test_no_demote_on_insufficient_data(tasks_root, tmp_path):
     graduation_assess.assess(ladder_path=p, now_iso="2026-06-10T00:00:00Z")
     graduation_assess.assess(ladder_path=p, now_iso="2026-06-17T00:00:00Z")
     assert ladder_lib.tier_of("prd-draft", path=p) == "supervised"  # sparse window must NOT demote
+
+
+def test_no_autonomous_proposal_when_autonomy_off(tasks_root, tmp_path, monkeypatch):
+    import task_lib, graduation_assess, ladder_lib, profile_lib
+    p = str(tmp_path / "ladder.json")
+    ladder_lib.set_tier("prd-draft", "supervised", path=p)
+    _judged(task_lib, "prd-draft", 9, react="up", n=15)
+    monkeypatch.setattr(profile_lib, "autonomy_enforcement", lambda root=None: False)
+    created = graduation_assess.assess(ladder_path=p, now_iso="2026-06-10T00:00:00Z")
+    assert created == []
+    cards = [t for t in task_lib.list_tasks() if t.get("card_type") == "graduation"]
+    assert len(cards) == 0
+
+
+def test_autonomous_proposal_when_autonomy_on(tasks_root, tmp_path, monkeypatch):
+    import task_lib, graduation_assess, ladder_lib, profile_lib
+    p = str(tmp_path / "ladder.json")
+    ladder_lib.set_tier("prd-draft", "supervised", path=p)
+    _judged(task_lib, "prd-draft", 9, react="up", n=15)
+    monkeypatch.setattr(profile_lib, "autonomy_enforcement", lambda root=None: True)
+    created = graduation_assess.assess(ladder_path=p, now_iso="2026-06-10T00:00:00Z")
+    assert any(c["proposed_tier"] == "autonomous" for c in created)
+
+
+def test_dismissed_grad_not_recreated(tasks_root, tmp_path):
+    import task_lib, graduation_assess
+    p = str(tmp_path / "ladder.json")
+    _judged(task_lib, "prd-draft", 9, react="up", n=8)
+    graduation_assess.assess(ladder_path=p, now_iso="2026-06-10T00:00:00Z")
+    cards = [t for t in task_lib.list_tasks() if t.get("card_type") == "graduation"]
+    assert len(cards) == 1
+    task_lib.cancel_task(cards[0]["id"], reason="rejected", actor="human")
+    graduation_assess.assess(ladder_path=p, now_iso="2026-06-11T00:00:00Z")
+    active_grads = [t for t in task_lib.list_tasks()
+                    if t.get("card_type") == "graduation" and t.get("status") == "open"]
+    assert len(active_grads) == 0
+
+
+def test_action_types_no_implicit_approval(tasks_root):
+    import graduation_assess as g
+    t = {"id": "X", "status": "done", "task_type": "send-message"}
+    assert g.effective_react(t) is None
+    t["human_react"] = "up"
+    assert g.effective_react(t) == "up"
