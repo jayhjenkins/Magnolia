@@ -640,7 +640,7 @@ async function cardAction(id, action, ev) {
     const data = await res.json().catch(() => ({}));
     if (res.status === 409) {
       if (inModal) { toast(data.error || ‘That could not be applied automatically.’); return; }
-      showCardNotice(card, data.error || ‘That couldn’t be applied automatically.’, ‘warn’);
+      showCardNotice(card, data.error || 'That couldn’t be applied automatically.', 'warn');
       return;
     }
     if (!res.ok) {
@@ -652,7 +652,7 @@ async function cardAction(id, action, ev) {
     settleCard(card, () => fetchTasks());
   } catch (e) {
     if (inModal) { toast(‘Could not reach the server - try again in a moment.’); return; }
-    showCardNotice(card, ‘Couldn’t reach the server — try again in a moment.’, ‘error’);
+    showCardNotice(card, 'Couldn’t reach the server — try again in a moment.', 'error');
   }
 }
 
