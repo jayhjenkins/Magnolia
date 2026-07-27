@@ -3324,8 +3324,8 @@ def main():
     except Exception as e:
         print(f"Warning: cron seed skipped: {e}")
 
-    # Start cron scheduler background thread
-    scheduler = CronScheduler()
+    # Start cron scheduler background thread (with auto-dispatch wired)
+    scheduler = CronScheduler(dispatch_fn=_spawn_task_dispatch)
     scheduler.start()
 
     # Start the deterministic Cadence reconcile scheduler (separate from cron:
