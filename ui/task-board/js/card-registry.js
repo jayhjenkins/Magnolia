@@ -272,8 +272,7 @@ function _renderActions(task, actionIds) {
       parts.push(`<button class="card-action" onclick="cardAction('${task.id}','reject',event)">Reject</button>`);
     } else if (id === 'graduate') {
       parts.push(`<button class="card-action primary" onclick="cardAction('${task.id}','graduate',event)">${svgIcon('done')}Graduate</button>`);
-      // "Not yet" — a quiet dismiss; not wired server-side yet, so it just settles locally.
-      parts.push(`<button class="card-action card-action-quiet" onclick="cardDismiss('${task.id}',event)">Not yet</button>`);
+      parts.push(`<button class="card-action card-action-quiet" onclick="cardAction('${task.id}','reject',event)">Not yet</button>`);
     } else if (id === 'keep') {
       parts.push(`<button class="card-action primary" onclick="cardAction('${task.id}','keep',event)">${svgIcon('done')}Keep</button>`);
     } else if (id === 'undo') {

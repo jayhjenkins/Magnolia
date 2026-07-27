@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import task_lib       # noqa: E402
 import ladder_lib     # noqa: E402
 import chat_transcript  # noqa: E402
+import profile_lib    # noqa: E402
 
 JUDGE_GOOD_THRESHOLD = 7
 NEXT = {"shadow": "supervised", "supervised": "autonomous"}
@@ -34,6 +35,9 @@ def user_chat_turns(task_id):
     return sum(1 for e in events if e.get("role") == "user")
 
 
+ACTION_TASK_TYPES = {"send-message", "schedule-meeting"}
+
+
 def effective_react(t):
     """The operator's reaction to a task, explicit or passively inferred.
 
@@ -42,11 +46,20 @@ def effective_react(t):
     agent:complete leaves status 'open') with at most FRICTION_MAX follow-up
     chat turns is read as an implicit 'up'. Never infers a 'down': abandonment
     and heavy iteration are too ambiguous to punish, so explicit 👎 stays the
-    only hard negative. Returns 'up' | 'down' | None.
+    only hard negative.
+
+    Action-type tasks (send-message, schedule-meeting) are excluded from
+    implicit approval: the user archiving a draft they never sent is not
+    approval of the draft's quality. These types require explicit 👍/👎.
+
+    Returns 'up' | 'down' | None.
     """
     react = t.get("human_react")
     if react in ("up", "down"):
         return react
+    tt = t.get("task_type") or ""
+    if tt in ACTION_TASK_TYPES:
+        return None
     if t.get("id") and t.get("status") == "done" and user_chat_turns(t["id"]) <= FRICTION_MAX:
         return "up"
     return None
@@ -106,6 +119,10 @@ def assess(ladder_path=None, now_iso=None):
 
     existing_grad = {t.get("grad_task_type") for t in active
                      if t.get("card_type") == "graduation" and t.get("status") == "open"}
+    recently_dismissed = {t.get("grad_task_type") for t in (active + archived)
+                          if t.get("card_type") == "graduation"
+                          and t.get("status") in ("cancelled", "done")
+                          and _within(t, cutoff_iso)}
     created = []
     for task_type, tasks in by_type.items():
         cur = ladder_lib.tier_of(task_type, path=ladder_path)
@@ -114,6 +131,9 @@ def assess(ladder_path=None, now_iso=None):
         # --- promotion check ---
         nxt = NEXT.get(cur)
         if nxt:
+            if nxt == "autonomous" and not profile_lib.autonomy_enforcement():
+                nxt = None
+        if nxt:
             bar = th[ENTRY_KEY[nxt]]
             # min_reacted is a belt-and-suspenders floor: at the default thresholds it
             # is redundant with min_approval (approval counts only real 'up's, so passing
@@ -121,7 +141,7 @@ def assess(ladder_path=None, now_iso=None):
             # user lowers min_approval via a datasets/evals/ladder.json override.
             ready = (n >= bar["min_judged"] and reacted >= bar["min_reacted"]
                      and approval >= bar["min_approval"] and agreement >= bar["min_agreement"])
-            if ready and task_type not in existing_grad:
+            if ready and task_type not in existing_grad and task_type not in recently_dismissed:
                 _create_graduation_card(task_type, cur, nxt, n, approval, agreement,
                                         [t["id"] for t in tasks[:5]])
                 created.append({"task_type": task_type, "proposed_tier": nxt})
