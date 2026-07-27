@@ -1087,6 +1087,15 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
         action = em.get("action")
         on = em.get("on")
 
+        fire_weekday = em.get("fire_weekday")
+        if fire_weekday is not None:
+            try:
+                target = int(fire_weekday)
+            except (TypeError, ValueError):
+                target = None
+            if target is not None and now.isoweekday() != target:
+                continue
+
         if action == "escalate":
             if on != f"drift:{verdict}":
                 continue

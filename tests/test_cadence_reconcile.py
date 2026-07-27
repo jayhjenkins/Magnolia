@@ -1525,6 +1525,28 @@ def test_draft_message_cap_is_period_scoped_not_lifetime(tmp_path):
     assert (fm.get("nudge_counts") or {}).get(OTHER_PERIOD, {}).get(recipient) == 1
 
 
+def test_fire_weekday_blocks_wrong_day(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    reg = _nudge_registry(cap=1)
+    reg["types"][0]["emitters"][0]["fire_weekday"] = 3  # Wednesday
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(program, reg, now=NOW, force=True)
+    real_ids = [e for e in result["emitted"] if e and e.startswith("TASK-")]
+    assert len(real_ids) == 0  # NOW is Tuesday (2), emitter wants Wednesday (3)
+
+
+def test_fire_weekday_allows_matching_day(tmp_path):
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    reg = _nudge_registry(cap=1)
+    reg["types"][0]["emitters"][0]["fire_weekday"] = 2  # Tuesday = NOW
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(program, reg, now=NOW, force=True)
+    real_ids = [e for e in result["emitted"] if e and e.startswith("TASK-")]
+    assert len(real_ids) == 1
+
+
 # ─── birth proposals (inc4a Task 6, the birth path) ──────────────────────────
 #
 # The reconciler already processes the program-intake register. _propose_births
@@ -2250,3 +2272,149 @@ def test_silent_and_fact_dedupe_to_one_archive_card(tmp_path):
     card = task_lib.read_task(task_id)
     proposal = card["frontmatter"].get("proposal", {})
     assert proposal.get("op") == "archive"
+
+
+# ─── fire_weekday emitter scheduling (day-of-week timing) ─────────────────────
+#
+# The `fire_weekday` field (1-7, ISO weekday Mon-Sun) gates emitter evaluation.
+# When set, the emitter fires ONLY on that weekday; other days are skipped.
+
+
+def _day_registry(fire_weekday=None):
+    """A minimal registry with a draft-message emitter and optional fire_weekday."""
+    emitter = {"on": "cycle-fresh", "action": "draft-message", "template": "nudge"}
+    if fire_weekday is not None:
+        emitter["fire_weekday"] = fire_weekday
+    return {
+        "types": [
+            {
+                "id": "weekly-priorities",
+                "label": "Weekly priorities",
+                "state_model": "cycle",
+                "cadence": "weekly",
+                "emitters": [emitter],
+            }
+        ]
+    }
+
+
+def test_fire_weekday_fires_on_matching_day(tmp_path):
+    # NOW = 2026-06-16, which is a Tuesday (ISO weekday 2).
+    # fire_weekday=2 -> should fire.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=NOW, force=True
+    )
+
+    # The emitter fired: one send-message collab card created.
+    assert len(result["emitted"]) == 1
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 1
+
+
+def test_fire_weekday_skips_on_non_matching_day(tmp_path):
+    # NOW = 2026-06-16 = Tuesday (ISO weekday 2).
+    # fire_weekday=3 (Wednesday) -> should NOT fire.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=3), now=NOW, force=True
+    )
+
+    # The emitter was skipped: no card created.
+    assert result["emitted"] == []
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 0
+
+
+def test_fire_weekday_monday_iso_1(tmp_path):
+    # ISO weekday 1 = Monday. Test it works (regression for off-by-one bugs).
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    # Monday in the same week: 2026-06-15
+    monday = date(2026, 6, 15)
+    assert monday.isoweekday() == 1  # Verify it's Monday
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=1), now=monday, force=True
+    )
+
+    # fire_weekday=1 on Monday -> should fire.
+    assert len(result["emitted"]) == 1
+
+
+def test_fire_weekday_sunday_iso_7(tmp_path):
+    # ISO weekday 7 = Sunday. Test it works (regression for off-by-one bugs).
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    # Sunday in the same week: 2026-06-21
+    sunday = date(2026, 6, 21)
+    assert sunday.isoweekday() == 7  # Verify it's Sunday
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=7), now=sunday, force=True
+    )
+
+    # fire_weekday=7 on Sunday -> should fire.
+    assert len(result["emitted"]) == 1
+
+
+def test_fire_weekday_absent_fires_every_day(tmp_path):
+    # When fire_weekday is absent, emitter fires regardless of weekday.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    program = pl.read_program(program_id, root=root)
+    # No fire_weekday set -> should fire on any day.
+    result = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=None), now=NOW, force=True
+    )
+
+    assert len(result["emitted"]) == 1
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 1
+
+
+def test_fire_weekday_invalid_value_treated_as_none(tmp_path):
+    # If fire_weekday is not a valid int (or out of 1-7), it should not filter.
+    # The validation gate (program_schema.py) rejects invalid values at save time,
+    # but the emitter handler should gracefully skip invalid values at runtime.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+
+    # Build a registry with invalid fire_weekday (bypasses schema validation).
+    registry = {
+        "types": [
+            {
+                "id": "weekly-priorities",
+                "label": "Weekly priorities",
+                "state_model": "cycle",
+                "cadence": "weekly",
+                "emitters": [
+                    {
+                        "on": "cycle-fresh",
+                        "action": "draft-message",
+                        "template": "nudge",
+                        "fire_weekday": "invalid",  # Not an int
+                    }
+                ],
+            }
+        ]
+    }
+
+    program = pl.read_program(program_id, root=root)
+    result = reconcile.reconcile_program(
+        program, registry, now=NOW, force=True
+    )
+
+    # Invalid fire_weekday is treated as "not set" -> emitter fires.
+    assert len(result["emitted"]) == 1

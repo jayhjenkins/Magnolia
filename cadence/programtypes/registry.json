@@ -99,7 +99,7 @@
       "sentinels": ["sheet-watch"],
       "emitters": [
         { "on": "drift:broken", "action": "escalate" },
-        { "on": "cycle-fresh", "action": "draft-message", "template": "l10-prep-nudge", "max_nudges_per_person_per_week": 2 }
+        { "on": "cycle-fresh", "action": "draft-message", "template": "l10-prep-nudge", "max_nudges_per_person_per_week": 2, "fire_weekday": 2 }
       ],
       "intake": { "route": "capture" },
       "presentation": { "chip_tokens": {} } },
