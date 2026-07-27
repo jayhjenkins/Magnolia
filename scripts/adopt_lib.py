@@ -266,16 +266,18 @@ def _xml_escape(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _weekday_hourly_interval_block():
-    """Build the weekday (Mon-Fri) hourly 9..17 StartCalendarInterval block —
-    the same cadence the granola installer writes, in pure Python."""
+def _weekday_halfhour_interval_block():
+    """Build the weekday (Mon-Fri) half-hourly :15/:45 StartCalendarInterval
+    block, 9:15am through 5:45pm."""
     lines = []
     for weekday in range(1, 6):
         for hour in range(9, 18):
-            lines.append(
-                "        <dict><key>Weekday</key><integer>{}</integer>"
-                "<key>Hour</key><integer>{}</integer>"
-                "<key>Minute</key><integer>0</integer></dict>".format(weekday, hour))
+            for minute in (15, 45):
+                lines.append(
+                    "        <dict><key>Weekday</key><integer>{}</integer>"
+                    "<key>Hour</key><integer>{}</integer>"
+                    "<key>Minute</key><integer>{}</integer></dict>".format(
+                        weekday, hour, minute))
     return "\n".join(lines)
 
 
@@ -316,7 +318,7 @@ def redirect_otter_feed(agent, root=None, launch_agents_dir=None, activate=True)
                 .replace("__LABEL__", label)
                 .replace("__PYTHON__", _xml_escape(python))
                 .replace("__PM_OS_DIR__", _xml_escape(base))
-                .replace("__INTERVAL_BLOCK__", _weekday_hourly_interval_block()))
+                .replace("__INTERVAL_BLOCK__", _weekday_halfhour_interval_block()))
 
     # Disable the OLD agent FIRST (rename aside; launchctl unload gated on activate).
     disabled = feed_guard.disable(agent["path"], activate=activate)
