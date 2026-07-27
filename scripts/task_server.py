@@ -791,6 +791,36 @@ def handle_get_output(handler, task_id):
     _json_response(handler, {"path": rel.strip(), "format": "markdown", "content": content, "exists": True})
 
 
+def handle_get_patch(handler, task_id):
+    """GET /api/tasks/{id}/patch — return the recommendation's patch file content."""
+    try:
+        task_data = task_lib.read_task(task_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Failed to read task: {e}", status=500)
+        return
+    patch_path = task_data["frontmatter"].get("patch_path")
+    if not patch_path:
+        _error_response(handler, "Task has no patch file", status=404)
+        return
+    abspath = patch_path if os.path.isabs(patch_path) else os.path.join(PM_OS_DIR, patch_path)
+    if not os.path.abspath(abspath).startswith(os.path.abspath(PM_OS_DIR)):
+        _error_response(handler, "Invalid patch path", status=400)
+        return
+    try:
+        with open(abspath, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        _json_response(handler, {"path": patch_path, "content": ""})
+        return
+    except Exception as e:
+        _error_response(handler, f"Failed to read patch: {e}", status=500)
+        return
+    _json_response(handler, {"path": patch_path, "content": content})
+
+
 def _utc_now_iso():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
@@ -3171,6 +3201,16 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
                 _error_response(self, "Invalid task ID format", status=400)
             else:
                 handle_add_comment(self, task_id)
+            return True
+
+        # Match /api/tasks/{id}/patch — GET reads the recommendation's patch file.
+        match = re.match(r"^/api/tasks/([^/]+)/patch$", path)
+        if match and method == "GET":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_get_patch(self, task_id)
             return True
 
         # Match /api/tasks/{id}/output — GET reads, PUT writes the .md artifact.

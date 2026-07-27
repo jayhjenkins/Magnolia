@@ -9,10 +9,13 @@
 //   agent   / blocked    / failed              -> now.agent-queue   (Rerun lives here)
 //   collab  / done       / *                   -> now.decide        (Needs Your Action)
 //   collab  / open|inprog/ complete|needs-human-> now.decide        (slot pick / jira publish ready)
-//   collab  / *         / * + program-setup    -> now.decide        (human-interactive from the start)
+//   collab  / *         / * + human-interactive -> now.decide       (needs human from the start)
 //   collab  / open|inprog/ other               -> now.agent-queue
 //   human   / any active                       -> now.people
 //   waiting / any active                       -> now.people
+const _HUMAN_INTERACTIVE_CARDS = new Set([
+  'program-setup', 'recommendation', 'graduation', 'confirm',
+]);
 function deriveAttentionState(task) {
   const q = task.queue, s = task.status, a = task.agent_status;
   if (q === 'agent') {
@@ -21,7 +24,7 @@ function deriveAttentionState(task) {
   }
   if (q === 'collab') {
     if (s === 'done' || a === 'complete' || a === 'needs-human') return { surface: 'now', lane: 'decide' };
-    if (task.card_type === 'program-setup') return { surface: 'now', lane: 'decide' };
+    if (_HUMAN_INTERACTIVE_CARDS.has(task.card_type)) return { surface: 'now', lane: 'decide' };
     return { surface: 'now', lane: 'agent-queue' };
   }
   // human + waiting
