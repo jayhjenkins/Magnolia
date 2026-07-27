@@ -182,11 +182,16 @@ def _capability_boundary(name):
     return (
         f"What you can and can't do from here: you can read, search, and "
         f"draft/edit this task's local artifacts, and run the local task CLI "
-        f"(./scripts/task.sh) to update or complete THIS task. You CANNOT perform "
-        f"external writes (sending messages, filing tickets, scheduling) or run "
-        f"other shell commands from this chat — those are gated behind buttons on "
-        f"the task detail. If asked for one, say so plainly and point to the "
-        f"button; never claim {name} can 'approve it in the terminal'."
+        f"(./scripts/task.sh) to update or complete THIS task. You can also "
+        f"CREATE new tasks with ./scripts/task.sh add \"Title\" --queue <queue> "
+        f"--priority <priority> --domain <domain> — do this whenever the work "
+        f"naturally breaks into multiple cards. External writes (sending "
+        f"messages, editing Jira tickets, scheduling meetings) cannot be done "
+        f"directly from this chat — those are gated behind action buttons on "
+        f"the task detail view. But you CAN create a new task card that carries "
+        f"the work to a place where those buttons exist: draft the content, "
+        f"create the card via task.sh, and tell {name} it's ready. Never claim "
+        f"{name} can 'approve it in the terminal'."
     )
 
 
