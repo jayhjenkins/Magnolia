@@ -25,11 +25,13 @@ LABEL="com.magnolia.granolasync"
 TEMPLATE="$PM_OS_DIR/scripts/templates/transcript-granola-sync.plist.template"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
-# 4. Build the weekday (1–5) hourly 9..17 StartCalendarInterval block.
+# 4. Build the weekday (1–5) half-hourly :15/:45, 9:15–17:45 StartCalendarInterval block.
 INTERVAL_BLOCK=""
 for weekday in 1 2 3 4 5; do
     for hour in $(seq 9 17); do
-        INTERVAL_BLOCK+="        <dict><key>Weekday</key><integer>${weekday}</integer><key>Hour</key><integer>${hour}</integer><key>Minute</key><integer>0</integer></dict>"$'\n'
+        for minute in 15 45; do
+            INTERVAL_BLOCK+="        <dict><key>Weekday</key><integer>${weekday}</integer><key>Hour</key><integer>${hour}</integer><key>Minute</key><integer>${minute}</integer></dict>"$'\n'
+        done
     done
 done
 # Trim the trailing newline so the block sits cleanly inside the array.
@@ -74,7 +76,7 @@ Installed Granola transcript-sync LaunchAgent.
   Label:    $LABEL
   Plist:    $PLIST
   Runs:     $PYTHON $PM_OS_DIR/scripts/granola_sync.py
-  Schedule: weekdays (Mon–Fri), hourly on the hour, 9:00–17:00 local
+  Schedule: weekdays (Mon–Fri), every 30 min at :15 and :45, 9:15–17:45 local
   Logs:     $PM_OS_DIR/logs/granola_sync.log
 
 Note: granola_sync.py self-gates on transcript.provider == "granola". It only
