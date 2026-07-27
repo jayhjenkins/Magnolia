@@ -339,8 +339,9 @@ def gather_evidence(kind, fm, body, task_id):
         return artifact, f"document {len(artifact)} chars"
 
     if kind == "message":
-        # The drafted message is usually a file at agent_output; else fall back
-        # to the task body (rare).
+        msg = fm.get("message_body")
+        if msg and msg.strip():
+            return msg.strip(), f"message_body {len(msg.strip())} chars"
         artifact, _ = read_artifact(fm.get("agent_output"))
         if artifact:
             return artifact, f"message {len(artifact)} chars"
