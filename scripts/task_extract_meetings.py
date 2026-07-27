@@ -15,8 +15,10 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import platform_lib  # noqa: E402
+import task_lib  # noqa: E402
 
 PM_OS_DIR = Path(__file__).resolve().parent.parent
+_DISPATCHABLE_QUEUES = ("agent", "collab")
 PROCESSED_FILE = PM_OS_DIR / "datasets" / "tasks" / "_processed-meetings.txt"
 
 _WIN_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
@@ -66,6 +68,38 @@ Only create a new task if no existing task covers the same work.
 Use the task-extract-from-meeting skill at .claude/skills/task-extract-from-meeting/SKILL.md to identify action items and create tasks. For each action item, use ./scripts/task.sh add with appropriate --queue, --priority, --domain, --source-meeting flags. Apply the auto-queue rules: human decisions -> human queue, autonomous work -> agent queue, joint work -> collab queue, delegated to others -> waiting queue."""
 
 
+def _snapshot_task_ids():
+    """Return the set of task IDs currently in dispatchable queues."""
+    ids = set()
+    for q in _DISPATCHABLE_QUEUES:
+        for t in task_lib.list_tasks(queue=q):
+            ids.add(t.get("id"))
+    return ids
+
+
+def _dispatch_new_tasks(before_ids):
+    """Dispatch any tasks in agent/collab that weren't there before extraction."""
+    dispatch_script = str(PM_OS_DIR / "scripts" / "task_dispatch.py")
+    env = platform_lib.headless_claude_env()
+    dispatched = 0
+    for q in _DISPATCHABLE_QUEUES:
+        for t in task_lib.list_tasks(queue=q, status="open"):
+            tid = t.get("id")
+            if tid and tid not in before_ids and not t.get("agent_status"):
+                try:
+                    subprocess.Popen(
+                        [sys.executable, dispatch_script, "--task", tid],
+                        cwd=str(PM_OS_DIR), env=env,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        **platform_lib.process_group_kwargs(),
+                    )
+                    dispatched += 1
+                    print(f"[DISPATCH] {tid}")
+                except Exception as exc:
+                    print(f"[DISPATCH-FAIL] {tid}: {exc}")
+    return dispatched
+
+
 def process_transcript(filepath):
     target = resolve_path(filepath)
     if not target.is_file():
@@ -77,6 +111,8 @@ def process_transcript(filepath):
         print(f"[SKIP] Already processed: {relative}")
         return 0
     print(f"[PROCESSING] {relative}")
+
+    before_ids = _snapshot_task_ids()
 
     claude = platform_lib.resolve_claude()
     env = platform_lib.headless_claude_env()
@@ -97,7 +133,8 @@ def process_transcript(filepath):
                 sys.stderr.write(stderr_text)
             else:
                 mark_processed(relative)
-                print(f"[DONE] {relative}")
+                dispatched = _dispatch_new_tasks(before_ids)
+                print(f"[DONE] {relative} ({dispatched} task(s) dispatched)")
         else:
             print(f"[ERROR] claude exited non-zero for: {relative} (not marking as processed)")
             sys.stderr.write(stderr_text)
