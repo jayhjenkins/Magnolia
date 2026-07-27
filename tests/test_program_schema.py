@@ -279,6 +279,66 @@ def test_rejects_bool_nudge_cap():
     assert any("max_nudges_per_person_per_week" in e for e in errs)
 
 
+# ─── fire_weekday emitter scheduling (day-of-week timing) ─────────────────────
+
+
+def test_accepts_valid_fire_weekday_monday_1():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "fire_weekday": 1}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_accepts_valid_fire_weekday_sunday_7():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "fire_weekday": 7}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert errs == []
+
+
+def test_rejects_fire_weekday_zero():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "fire_weekday": 0}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("fire_weekday" in e and "1-7" in e for e in errs)
+
+
+def test_rejects_fire_weekday_eight():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "fire_weekday": 8}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("fire_weekday" in e and "1-7" in e for e in errs)
+
+
+def test_rejects_fire_weekday_string():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "fire_weekday": "monday"}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("fire_weekday" in e for e in errs)
+
+
+def test_rejects_fire_weekday_bool():
+    # bool is an int subclass in Python; it must be rejected explicitly.
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "fire_weekday": True}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("fire_weekday" in e for e in errs)
+
+
+def test_rejects_fire_weekday_negative():
+    reg = _type_with_emitters([
+        {"on": "cycle-fresh", "action": "draft-message",
+         "fire_weekday": -1}])
+    errs = ps.validate_doc(reg, tokens={"--accent"})
+    assert any("fire_weekday" in e for e in errs)
+
+
 def _type_with_items(items):
     return {"families": [{"id": "x", "label": "X", "order": 1}],
             "types": [{"id": "t", "label": "T", "family": "x", "state_model": "cycle",

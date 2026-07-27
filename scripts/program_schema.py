@@ -149,6 +149,12 @@ def validate_doc(reg, tokens):
                             errors.append(
                                 f"type '{tid}': emitter min_active_families must "
                                 f"be a non-negative int, got {type(v).__name__}")
+                    if "fire_weekday" in em:
+                        v = em["fire_weekday"]
+                        if isinstance(v, bool) or not isinstance(v, int) or v < 1 or v > 7:
+                            errors.append(
+                                f"type '{tid}': emitter fire_weekday must be "
+                                f"1-7 (ISO Mon-Sun), got {v!r}")
 
         # Archive field (Task 3) — when to archive a program after silent cycles.
         if "archive_after_silent_cycles" in t:
