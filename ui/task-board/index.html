@@ -904,6 +904,17 @@
   .dt-textbtn { font-size: 11.5px; padding: 3px 10px; border-radius: 7px; border: 1px solid var(--border-soft); background: transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: border-color var(--ease), color var(--ease); }
   .dt-textbtn:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* ── Patch preview (recommendation cards) ──────────────────────── */
+  .dt-patch-preview {
+    font-family: var(--font-mono, 'SF Mono', 'Menlo', monospace);
+    font-size: 12px; line-height: 1.55;
+    background: color-mix(in oklab, var(--surface-hover) 45%, transparent);
+    border: 1px solid var(--border-soft); border-radius: 10px;
+    padding: 14px 16px; margin: 0;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--text); max-height: 400px; overflow-y: auto;
+  }
+
   /* ── Pipeline — calm stacked panels, robust (no spine) ──────────── */
   .dt-pipe { display: flex; flex-direction: column; gap: 8px; }
   .dt-step {

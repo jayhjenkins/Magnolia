@@ -289,6 +289,20 @@ async function openTask(taskId, keepChat) {
       }
     }
 
+    // ── Recommendation patch preview — show what the suggestion changes ──
+    const isRecommendation = task.card_type === 'recommendation';
+    if (isRecommendation && task.patch_path) {
+      html += `<div class="dt-section">`;
+      html += `<div class="dt-sec-head"><span class="dt-sec-title">Proposed change</span><span class="dt-sec-hint">${escapeHtml(task.patch_path.split('/').pop())}</span></div>`;
+      html += `<pre class="dt-patch-preview" id="patch-preview"><span class="dim">Loading diff...</span></pre>`;
+      html += `</div>`;
+    } else if (isRecommendation) {
+      html += `<div class="dt-section">`;
+      html += `<div class="dt-sec-head"><span class="dt-sec-title">Proposed change</span><span class="dt-sec-hint">manual</span></div>`;
+      html += `<div class="dt-prose dim" style="font-size:12.5px;">This suggestion has no patch file - apply the change described above by hand.</div>`;
+      html += `</div>`;
+    }
+
     // ── Details — the demoted metadata, parked next to the pipeline ──
     html += `<div class="dt-section">`;
     html += `<div class="dt-sec-head"><span class="dt-sec-title">Details</span></div>`;
@@ -356,6 +370,19 @@ async function openTask(taskId, keepChat) {
       else slot.remove();
     });
 
+    // Load patch preview for recommendation cards (async)
+    if (isRecommendation && task.patch_path) {
+      fetch(`${API}/tasks/${task.id}/patch`).then(r => r.ok ? r.json() : null).then(data => {
+        const el = document.getElementById('patch-preview');
+        if (!el || !data) return;
+        if (!data.content) { el.textContent = 'Patch file not found.'; return; }
+        el.textContent = data.content;
+      }).catch(() => {
+        const el = document.getElementById('patch-preview');
+        if (el) el.textContent = 'Could not load patch.';
+      });
+    }
+
     // Set up attendee typeahead if this is a schedule-meeting task
     // (emailCache already loaded above during chip rendering)
     if (isScheduleMeeting) {
@@ -373,10 +400,12 @@ async function openTask(taskId, keepChat) {
     const hasSlots = isScheduleMeeting && task.body && parseSlots(task.body).length > 0;
     const canSendMessage = task.task_type === 'send-message' && (task.agent_status === 'complete' || task.agent_status === 'needs-human');
     const isProgramSetup = task.card_type === 'program-setup' && task.status !== 'done';
+    const isRecCard = isRecommendation && task.status !== 'done';
 
     let leftHtml = `<button class="btn btn-quiet" onclick="closeModal()">Close</button>`;
     if (canRerun) leftHtml += `<button class="btn btn-quiet" id="btn-rerun-agent" onclick="rerunAgent('${task.id}')">Rerun agent</button>`;
     if (isProgramSetup) leftHtml += `<button class="btn btn-quiet" id="btn-dismiss-program" onclick="dismissProgramSetup('${task.id}')">Dismiss</button>`;
+    if (isRecCard) leftHtml += `<button class="btn btn-quiet" onclick="cardAction('${task.id}','reject',event)">Reject</button>`;
 
     let rightHtml = '';
     if (canDispatch) rightHtml += `<button class="btn btn-schedule" id="btn-start-agent" onclick="startAgent('${task.id}')">Start agent</button>`;
@@ -384,9 +413,10 @@ async function openTask(taskId, keepChat) {
     if (hasJiraDraft && (task.agent_status === 'complete' || task.agent_status === 'needs-human')) rightHtml += `<button class="btn btn-schedule" id="btn-publish-jira" onclick="publishToJira('${task.id}')">Publish to Jira</button>`;
     if (canSendMessage) rightHtml += `<button class="btn btn-schedule" id="btn-send-message" onclick="sendMessage('${task.id}')">${svgIcon('send')}Send message</button>`;
     if (isProgramSetup) rightHtml += `<button class="btn btn-success" id="btn-create-program" onclick="createProgram('${task.id}')">Create program</button>`;
+    if (isRecCard) rightHtml += `<button class="btn btn-success" onclick="cardAction('${task.id}','accept',event)">${svgIcon('done')}Accept</button>`;
     // Both approvals sit together on the right
     if (isAgentComplete && task.agent_output) rightHtml += `<button class="btn btn-danger" id="btn-done-delete" onclick="markDoneAndDelete()">Approve & delete</button>`;
-    rightHtml += `<button class="btn btn-success" onclick="markDone()">${doneLabel}</button>`;
+    if (!isRecCard) rightHtml += `<button class="btn btn-success" onclick="markDone()">${doneLabel}</button>`;
 
     modalActions.innerHTML = `<div class="dt-foot-left">${leftHtml}</div><div class="dt-foot-right">${rightHtml}</div>`;
 
@@ -599,16 +629,30 @@ async function cardAction(id, action, ev) {
   if (ev) ev.stopPropagation();
   const card = _cardEl(id, ev);
   clearCardNotice(card);
-  if (card) card.querySelectorAll('.card-action').forEach(b => { b.disabled = true; });
+  if (card) card.querySelectorAll(‘.card-action’).forEach(b => { b.disabled = true; });
+  const inModal = (typeof currentTaskId !== ‘undefined’ && currentTaskId === id);
+  if (inModal) {
+    const btns = document.querySelectorAll(‘.dt-foot-right .btn, .dt-foot-left .btn’);
+    btns.forEach(b => { b.disabled = true; });
+  }
   try {
-    const res = await fetch(`${API}/tasks/${id}/${action}`, { method: 'POST' });
+    const res = await fetch(`${API}/tasks/${id}/${action}`, { method: ‘POST’ });
     const data = await res.json().catch(() => ({}));
-    if (res.status === 409) { showCardNotice(card, data.error || 'That couldn’t be applied automatically.', 'warn'); return; }
-    if (!res.ok) { showCardNotice(card, data.error || `Something went wrong (${res.status}).`, 'error'); return; }
-    // success — settle gently, then let the refresh remove the card from its lane
+    if (res.status === 409) {
+      if (inModal) { toast(data.error || ‘That could not be applied automatically.’); return; }
+      showCardNotice(card, data.error || ‘That couldn’t be applied automatically.’, ‘warn’);
+      return;
+    }
+    if (!res.ok) {
+      if (inModal) { toast(data.error || `Something went wrong (${res.status}).`); return; }
+      showCardNotice(card, data.error || `Something went wrong (${res.status}).`, ‘error’);
+      return;
+    }
+    if (inModal) { closeModal(); fetchTasks(); return; }
     settleCard(card, () => fetchTasks());
   } catch (e) {
-    showCardNotice(card, 'Couldn’t reach the server — try again in a moment.', 'error');
+    if (inModal) { toast(‘Could not reach the server - try again in a moment.’); return; }
+    showCardNotice(card, ‘Couldn’t reach the server — try again in a moment.’, ‘error’);
   }
 }
 
