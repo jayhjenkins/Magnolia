@@ -629,29 +629,29 @@ async function cardAction(id, action, ev) {
   if (ev) ev.stopPropagation();
   const card = _cardEl(id, ev);
   clearCardNotice(card);
-  if (card) card.querySelectorAll(‘.card-action’).forEach(b => { b.disabled = true; });
-  const inModal = (typeof currentTaskId !== ‘undefined’ && currentTaskId === id);
+  if (card) card.querySelectorAll('.card-action').forEach(b => { b.disabled = true; });
+  const inModal = (typeof currentTaskId !== 'undefined' && currentTaskId === id);
   if (inModal) {
-    const btns = document.querySelectorAll(‘.dt-foot-right .btn, .dt-foot-left .btn’);
+    const btns = document.querySelectorAll('.dt-foot-right .btn, .dt-foot-left .btn');
     btns.forEach(b => { b.disabled = true; });
   }
   try {
-    const res = await fetch(`${API}/tasks/${id}/${action}`, { method: ‘POST’ });
+    const res = await fetch(`${API}/tasks/${id}/${action}`, { method: 'POST' });
     const data = await res.json().catch(() => ({}));
     if (res.status === 409) {
-      if (inModal) { toast(data.error || ‘That could not be applied automatically.’); return; }
+      if (inModal) { toast(data.error || 'That could not be applied automatically.'); return; }
       showCardNotice(card, data.error || 'That couldn’t be applied automatically.', 'warn');
       return;
     }
     if (!res.ok) {
       if (inModal) { toast(data.error || `Something went wrong (${res.status}).`); return; }
-      showCardNotice(card, data.error || `Something went wrong (${res.status}).`, ‘error’);
+      showCardNotice(card, data.error || `Something went wrong (${res.status}).`, 'error');
       return;
     }
     if (inModal) { closeModal(); fetchTasks(); return; }
     settleCard(card, () => fetchTasks());
   } catch (e) {
-    if (inModal) { toast(‘Could not reach the server - try again in a moment.’); return; }
+    if (inModal) { toast('Could not reach the server - try again in a moment.'); return; }
     showCardNotice(card, 'Couldn’t reach the server — try again in a moment.', 'error');
   }
 }
