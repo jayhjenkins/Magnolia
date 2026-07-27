@@ -56,8 +56,9 @@ def _trace_execution(job, task_id, success, error=None):
 class CronScheduler:
     """Background cron scheduler that checks jobs every 30 seconds."""
 
-    def __init__(self, tick_interval=30):
+    def __init__(self, tick_interval=30, dispatch_fn=None):
         self.tick_interval = tick_interval
+        self.dispatch_fn = dispatch_fn
         self._thread = None
         self._running = False
 
@@ -142,6 +143,13 @@ class CronScheduler:
                 _log(f"Created {task_id} from {job['id']}")
                 _trace_execution(job, task_id, success=True)
                 executed += 1
+
+                if job.get("auto_dispatch", True) and self.dispatch_fn:
+                    try:
+                        self.dispatch_fn(task_id)
+                        _log(f"Dispatched {task_id}")
+                    except Exception as de:
+                        _log(f"Dispatch failed for {task_id}: {de} (task is queued; manual start available)")
             except Exception as e:
                 _log(f"Error executing {job['id']}: {e}")
                 _trace_execution(job, job["id"], success=False, error=str(e))
