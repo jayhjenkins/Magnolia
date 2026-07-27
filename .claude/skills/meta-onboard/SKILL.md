@@ -86,18 +86,20 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
    Default M365 Teams+Outlook ON. Write `profile/integrations.yaml`. Pick one transcript feed (single
    active provider):
    - **Reuse an existing Otter feed (the smooth path — default when step 2 found one).** If the
-     adoption check surfaced a WORKING Otter feed (a running LaunchAgent with its own venv), do NOT make
-     them reinstall anything — re-point it at Magnolia: `adopt_lib.redirect_otter_feed(<agent dict from
-     step 2 detection>)`. That stands up a Magnolia-owned LaunchAgent running their existing venv's
-     python (which already has the Otter extras) against Magnolia's own `scripts/otter_sync.py`, and
-     disables the old agent (renamed aside, never deleted). It records `transcript.external_feed`, so the
-     doctor verifies the feed by its output and won't nag about playwright/otterai — those live in the
-     reused venv; Magnolia's own python never needs them. (macOS only; off macOS it reports unsupported —
-     the history is already cloned, so just note the live feed is a quick manual follow-up.)
-   - **Fresh Otter (no existing feed).** Authe via `python3 scripts/otter_auth.py`. This is the ONLY
-     case that needs the transcript extras — the doctor will call for `pip install -r
-     requirements-transcript.txt && python3 -m playwright install chromium`. Frame it that way: the
-     extras are only for a brand-new Otter feed; a reused feed or Granola needs none of it.
+     adoption check surfaced a WORKING Otter feed (a running LaunchAgent), re-point it at Magnolia:
+     `adopt_lib.redirect_otter_feed(<agent dict from step 2 detection>)`. This creates a
+     **Magnolia-owned venv** (`ensure_venv.ensure()`) with all transcript deps, smoke-tests the
+     python before writing the plist, copies `session.json` and `downloaded.json` from the prior
+     install's state directory automatically, stands up a Magnolia-owned LaunchAgent running the
+     new venv's python against Magnolia's `scripts/otter_sync.py`, and disables the old agent
+     (renamed aside, never deleted). Everything is self-contained — no dependency on the prior
+     install's venv. (macOS only; off macOS it reports unsupported — the history is already cloned,
+     so just note the live feed is a quick manual follow-up.)
+   - **Fresh Otter (no existing feed).** Create the Magnolia venv first with
+     `python3 scripts/ensure_venv.py` (installs otterai + playwright into `venv/`), then auth via
+     `venv/bin/python3 scripts/otter_auth.py`. Then install the LaunchAgent — the `redirect` path
+     handles this too if given a synthetic agent dict, or run `install_granola_sync.sh` adapted for
+     Otter (the template is at `scripts/templates/transcript-otter-sync.plist.template`).
    - **Granola** runs through its claude.ai MCP connector (connect via `/mcp`, then finish the one-time
      signup at granola.ai/mcp-signup) and syncs hourly through `scripts/granola_sync.py`.
    - **Any leftover competing downloader:** if they choose a feed while some OTHER downloader still runs
@@ -126,10 +128,10 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
    **`npm install -g @tobilu/qmd`** (https://github.com/tobi/qmd, Node ≥ 22) — never `brew install
    qmd` or any other "qmd" repo. Still: if a tool can't be fixed, degraded features just stay
    disabled with a reason; onboarding never blocks.
-   - **Transcript feed:** if you reused an existing Otter feed in step 3 (`transcript.external_feed`
-     set), the doctor verifies it by its output marker and reports `ok` — it will NOT ask for
-     playwright/otterai (those live in the reused venv). A playwright "needs_setup" nag only appears for
-     a genuinely fresh Otter feed. Don't route a reused-feed user to install the extras.
+   - **Transcript feed:** the doctor checks log recency (stale after 48h) and scans the last few
+     log lines for errors — not just file existence. If it reports `stale` or `degraded`, check
+     `logs/otter_sync.log` for the root cause. A `needs_setup` nag means the Magnolia venv is
+     missing deps — run `python3 scripts/ensure_venv.py` to fix it.
 5. **Spin up the board** — pick a free port with `server_lib.free_port()` if 8742 is taken, and
    record it in `profile/config.yaml` `server.port` BEFORE launching (the server reads its port from
    config). Launch with `server_lib.start(cmd=server_lib.default_cmd())` and verify it serves —
