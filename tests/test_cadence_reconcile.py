@@ -447,24 +447,46 @@ def test_reconcile_program_new_cycle_writes(tmp_path):
     assert "next:" in cycles_section
 
 
-def test_reconcile_program_same_period_is_noop(tmp_path):
+def test_reconcile_program_same_period_skips_emitters(tmp_path):
     root = str(tmp_path)
-    # Seed already-reconciled-this-period: last_cycle == current period.
     program_id = _seed_broken_pipeline(root, last_cycle=PERIOD)
     program = pl.read_program(program_id, root=root)
-    filepath = program["filepath"]
-
-    with open(filepath, "rb") as f:
-        before = f.read()
 
     result = reconcile.reconcile_program(program, _registry(), now=NOW, force=False)
 
     assert result["new_cycle"] is False
     assert result["verdict"] == "broken"
     assert result["emitted"] == []
-    with open(filepath, "rb") as f:
-        after = f.read()
-    assert before == after  # NO writes at all
+
+
+def test_mid_cycle_persists_drift_and_last_run(tmp_path):
+    root = str(tmp_path)
+    program_id = _seed_broken_pipeline(root, last_cycle=PERIOD)
+    program = pl.read_program(program_id, root=root)
+    old_fm = program["frontmatter"]
+    old_drift = old_fm.get("drift")
+    old_run = old_fm.get("last_run", "")
+
+    result = reconcile.reconcile_program(program, _registry(), now=NOW, force=False)
+
+    assert result["new_cycle"] is False
+    reread = pl.read_program(program_id, root=root)
+    assert reread["frontmatter"]["drift"] == "broken"
+    assert reread["frontmatter"]["last_run"] >= old_run
+
+
+def test_mid_cycle_does_not_append_cycle_entry(tmp_path):
+    root = str(tmp_path)
+    program_id = _seed_broken_pipeline(root, last_cycle=PERIOD)
+    program = pl.read_program(program_id, root=root)
+    body_before = program["body"]
+
+    reconcile.reconcile_program(program, _registry(), now=NOW, force=False)
+
+    reread = pl.read_program(program_id, root=root)
+    cycle_entries_before = body_before.count("## Cycles")
+    cycle_entries_after = reread["body"].count("## Cycles")
+    assert cycle_entries_after == cycle_entries_before
 
 
 def test_reconcile_program_force_reruns_same_period(tmp_path):

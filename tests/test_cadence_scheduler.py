@@ -68,3 +68,66 @@ def test_double_start_guard(monkeypatch):
     finally:
         scheduler.stop()
     assert scheduler._running is False
+
+
+# ─── Sentinel scheduling ─────────────────────────────────────────────────────
+
+from cadence.scheduler import _should_run_sentinels, _is_workday, SENTINEL_HOURS
+from datetime import datetime, timezone
+
+
+def test_should_run_sentinels_on_workday_at_sentinel_hour():
+    tue_9am = datetime(2026, 7, 28, 9, 15, tzinfo=timezone.utc)
+    assert _is_workday(tue_9am)
+    assert _should_run_sentinels(tue_9am, (None, None))
+
+
+def test_should_not_run_sentinels_on_weekend():
+    sat_9am = datetime(2026, 7, 25, 9, 0, tzinfo=timezone.utc)
+    assert not _is_workday(sat_9am)
+    assert not _should_run_sentinels(sat_9am, (None, None))
+
+
+def test_should_not_run_sentinels_at_wrong_hour():
+    tue_11am = datetime(2026, 7, 28, 11, 0, tzinfo=timezone.utc)
+    assert _is_workday(tue_11am)
+    assert not _should_run_sentinels(tue_11am, (None, None))
+
+
+def test_should_not_run_sentinels_twice_same_hour():
+    tue_9am = datetime(2026, 7, 28, 9, 30, tzinfo=timezone.utc)
+    already = ("2026-07-28", 9)
+    assert not _should_run_sentinels(tue_9am, already)
+
+
+def test_tick_dispatches_sentinels_at_sentinel_hour(monkeypatch):
+    dispatched = []
+    monkeypatch.setattr(reconcile, "reconcile_all", lambda *a, **k: [])
+    from cadence import scheduler as sched_mod
+    monkeypatch.setattr(sched_mod, "_dispatch_sentinel", lambda name: dispatched.append(name))
+    tue_9am = datetime(2026, 7, 28, 9, 15, tzinfo=timezone.utc)
+    monkeypatch.setattr(sched_mod, "datetime", type("FakeDT", (), {
+        "now": staticmethod(lambda tz=None: tue_9am),
+    }))
+
+    scheduler = CadenceScheduler()
+    scheduler.tick()
+
+    assert "movement-watch" in dispatched
+    assert "tracker-truth" in dispatched
+
+
+def test_tick_skips_sentinels_at_non_sentinel_hour(monkeypatch):
+    dispatched = []
+    monkeypatch.setattr(reconcile, "reconcile_all", lambda *a, **k: [])
+    from cadence import scheduler as sched_mod
+    monkeypatch.setattr(sched_mod, "_dispatch_sentinel", lambda name: dispatched.append(name))
+    tue_11am = datetime(2026, 7, 28, 11, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sched_mod, "datetime", type("FakeDT", (), {
+        "now": staticmethod(lambda tz=None: tue_11am),
+    }))
+
+    scheduler = CadenceScheduler()
+    scheduler.tick()
+
+    assert dispatched == []

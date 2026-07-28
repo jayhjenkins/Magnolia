@@ -1631,6 +1631,16 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     is_new_cycle = force or fm.get("last_cycle") != period
 
     if not is_new_cycle:
+        drift_changed = fm.get("drift") != verdict
+        if drift_changed or fm.get("last_run", "") < program_lib._now_iso()[:13]:
+            fm["drift"] = verdict
+            fm["last_run"] = program_lib._now_iso()
+            filepath = program.get("filepath")
+            if not filepath:
+                filepath = os.path.join(
+                    program_lib._program_dir(root), f"{fm['program_id']}.md"
+                )
+            program_lib._write_program_file(filepath, fm, body)
         return {
             "program_id": fm.get("program_id"),
             "verdict": verdict,

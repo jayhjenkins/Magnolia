@@ -211,3 +211,10 @@ Task {task_id}. Follow these steps:
 - Write outputs to disk — do not just print them.
 - Be thorough but concise. Prefer completing the task over asking questions.
 - If you ask a question, STOP immediately after. Do not guess the answer.
+- **Cadence program files** (datasets/programs/PROG-*.md) have strict YAML
+  frontmatter requirements. NEVER write these files directly — use the CLI:
+  `./scripts/task.sh program:create "Title" --type eos-rock --owner-role product --intent-file /path/to/intent.md`
+  This guarantees valid YAML. Write your intent content to a temp file first,
+  then pass it via --intent-file. If you need to UPDATE an existing program's
+  intent, use Edit to modify the ## Intent section — never rewrite the
+  frontmatter block.
