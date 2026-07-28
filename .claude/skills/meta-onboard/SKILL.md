@@ -152,81 +152,134 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
    show them: "here's how you sound — change anything?" If M365 isn't ready, keep the placeholder
    voice and leave a recommendation task to regenerate later.
 7. **Pick packs** — confirm `core` + their persona pack in `profile/config.yaml` `active_skill_packs`.
-8. **Cadence setup** — seed the standing-loop programs the user actually runs.
+8. **Set up Cadence (optional)** — Cadence is the standing-loop engine: it keeps an eye on
+   your initiatives, rocks, meetings, and metrics, and gives you a nudge when something drifts.
+   Each thing it watches is a "program." You can start with none and add them later, or seed a
+   starter set right now based on how you work.
 
-   **Phase A — Discover what they run.** Read `cadence/starter-sets.yaml` via
-   `starter_sets.load_starter_sets()` to see the available bundles (roadmap, weekly,
-   eng-sync, outcomes, eos). Ask warm, LEADING questions about activities — not
-   frameworks. Walk through these one at a time, briefly explaining what each does:
+   Frame it warmly: "This next part is optional, but if your team runs a standing rhythm -- like
+   EOS, or any repeating weekly/quarterly loop -- I can wire Cadence up to watch it for you. It
+   reads your sheets and transcripts, tracks what's moving and what's stuck, and gives you a
+   nudge when something drifts. Want to take a look?"
 
-   1. **Roadmap** — "Do you track a product roadmap — features or initiatives moving
-      through stages like discovery, build, ship? Cadence can watch each one for
-      drift and flag when something stalls." → matches `roadmap` bundle.
-   2. **Weekly** — "Do you do any kind of weekly planning or prep for a standing
-      meeting — like a team sync, a 1:1 with your manager, or a priorities check-in?
-      Cadence can surface your top items and track whether they moved." → matches
-      `weekly` bundle. If yes, ask the follow-up: "Any of those specifically with
-      engineering leads? I have a specialized eng-sync variant that pulls dev
-      context." → matches `eng-sync` bundle if yes.
-   3. **Outcomes** — "After you ship something, do you go back and check whether it
-      actually worked — like reviewing metrics a few weeks later? Cadence can track
-      a shipped feature against its success criteria and tell you when the data is
-      in." → matches `outcomes` bundle.
-   4. **EOS** — "Do you run EOS — the Entrepreneurial Operating System? Rocks, L10s,
-      scorecards? Cadence can prep your L10 and track your quarterly rocks." →
-      matches `eos` bundle.
+   If they say no or nothing in the conversation suggests a standing rhythm, skip warmly --
+   "No worries at all. Cadence is always here when you're ready -- you can add programs later
+   from the board or just ask me." Move on to Close.
 
-   Collect `matched_bundles` — the list of bundle names the user said yes to. Gather
-   the union of all `types` from matched bundles and hand them to Phase B. If no
-   bundles match, skip to Phase D — Cadence will grow organically from the intake
-   sentinel once they start working.
+   If they're interested, walk through these phases:
 
-   **Phase B — Create program-setup cards.** For each program type in the matched
-   bundle, create a collab task card with `card_type: program-setup`. Use `task_lib`
-   directly (the CLI does not support `program_type` as a field):
+   **Phase A -- Discover EOS sheets (if M365 is configured)**
 
-   ```python
-   python3 -c "
-   import sys; sys.path.insert(0, 'scripts')
-   import task_lib
+   If M365 was set up in step 3 (check `profile/integrations.yaml` calendar or messaging
+   provider is `m365`), search for their EOS/L10 sheets. Use the M365 MCP tools:
 
-   tid, path = task_lib.create_task(
-       title='Set up: <label from registry>',
-       queue='collab',
-       domain='ops',
-       description='## Intent\n\n<initial_intent -- see Phase C>\n\n## Notes\n\nUse the task chat to give me context about this program -- documents, sheets, specifics.\nWhen you are ready, click Create program.',
-       card_type='program-setup',
-       tags=['cadence', 'program-setup'],
-       creator='agent',
-   )
-   task_lib.update_task(tid, changes={'program_type': '<type_id>'}, actor='agent')
-   print(f'Created {tid} at {path}')
-   "
-   ```
+   Search for common EOS sheet names -- try each of these searches:
+   - `mcp__claude_ai_Microsoft_365__sharepoint_search` with query "L10"
+   - `mcp__claude_ai_Microsoft_365__sharepoint_search` with query "EOS scorecard"
+   - `mcp__claude_ai_Microsoft_365__sharepoint_search` with query "rocks"
 
-   Create one card per type in the bundle. Use the registry label for the title (e.g.
-   "Set up: EOS L10 prep", "Set up: EOS rock"). The `update_task` call adds the
-   `program_type` field to frontmatter so the card handler knows which type to create.
+   If the MCP tools aren't available or error, degrade gracefully -- just ask them directly:
+   "Do you have an EOS/L10 spreadsheet in SharePoint or OneDrive? If so, can you paste the
+   link or tell me what it's called?"
 
-   **Phase C — Pre-seed intent from context.** If the user mentioned anything about
-   their cadence during identity (step 1) or integrations (step 3) -- a rocks
-   spreadsheet, a scorecard URL, an issues doc, a specific meeting they prep for --
-   fold that into the `## Intent` section of each relevant card's description. This
-   gives them a head start when they open the card's chat. Use
-   `task_lib.update_task_description(tid, new_description)` to replace the description
-   if you have richer context than the initial stub. If you have nothing specific for a
-   given card, the generic stub is fine -- the chat will draw it out.
+   Present what you found: "I found these spreadsheets that look like EOS sheets: [list with
+   names and locations]. Which ones are yours?" They may have MULTIPLE L10 sheets -- one they
+   lead, others they attend. Ask about each: "Which L10 do you lead? And are there others you
+   sit in on?"
 
-   **Phase D — Explain the card flow.** Tell the user warmly: "I have created setup
-   cards for each program. You will see them in your Now feed. Open each one, use the
-   chat to tell me what you know — your roadmap doc, your rocks spreadsheet, the
-   meeting you prep for, the feature you just shipped — and I will build out the
-   intent. When you are happy with it, hit 'Create program' and the program goes live
-   on your Cadence tab."
+   For their PRIMARY L10 sheet (the one they lead), configure it as the EOS sheet binding.
+   Write the sheet locator (the SharePoint resource URL or path) into
+   `profile/integrations.yaml` under `eos.sheet`:
+   `python3 -c "import sys; sys.path.insert(0,'scripts'); from profile_lib import _update_yaml; _update_yaml('integrations.yaml', lambda doc: doc.setdefault('eos', {}).update({'sheet': '<sheet_locator>'}))`
 
-   If no bundle matched in Phase A, tell them: "No worries -- Cadence will pick up
-   patterns as you work. When something looks like a standing loop, it will surface a
-   suggestion and you can decide."
+   Substitute `<sheet_locator>` with the actual SharePoint URL or resource path. If they
+   don't have M365 or don't have a sheet, leave `eos.sheet` empty -- the sentinel just runs
+   blind (it still works from transcripts, it just can't read the sheet directly). Tell them:
+   "No sheet? That's fine -- the sentinel will still pick up L10 topics from your meeting
+   transcripts. You can always add the sheet later."
+
+   If they mentioned L10 sheets they attend but don't lead, note that per-program sheet
+   bindings are a future feature -- "For now the sentinel watches your primary sheet. The
+   others you sit in on -- we'll be able to bind those individually down the road."
+
+   **Phase B -- Offer and seed starter sets**
+
+   Load the available starter sets:
+   `python3 -c "import sys; sys.path.insert(0,'scripts'); import starter_sets, json; ss = starter_sets.load_starter_sets(); print(json.dumps(ss, indent=2))"`
+
+   Look at what you learned during onboarding. If they mentioned EOS, Traction, L10s, or
+   quarterly rocks -- or if Phase A found EOS sheets -- the EOS bundle is the obvious match.
+
+   Present the set by its label and description, listing what it would create by name. Frame
+   it conversationally: "Based on what you told me, it sounds like your team runs EOS. I can
+   seed the standing programs for that -- L10 meeting prep, quarterly rocks, the weekly
+   scorecard cycle, and the issues list. They'll start watching and nudging once the sentinels
+   have something to read. Want me to set those up?"
+
+   If they say yes, load the registry to get each type's label:
+   `python3 -c "import sys; sys.path.insert(0,'scripts'); import program_lib, json; reg = program_lib.load_registry(); print(json.dumps({t['id']: t['label'] for t in reg['types']}, indent=2))"`
+
+   Read their persona from `profile/profile.yaml` to use as the `owner_role` (falls back to
+   `product` if not set).
+
+   For the L10 prep program, give it a SPECIFIC title based on what you learned -- e.g.
+   "Resident Experience L10 prep" or "Home App L10 prep," not generic "Weekly L10 meeting
+   prep." Use their team name, product area, or the name from the sheet. For the other EOS
+   programs (rocks, scorecard cycle, issues), the registry label is fine as-is since they
+   apply across their whole role.
+
+   Create each program:
+   `python3 -c "import sys; sys.path.insert(0,'scripts'); import program_lib; pid, fp = program_lib.create_program(type='<type_id>', title='<specific_title>', owner_role='<persona>'); print(f'{pid} -> {fp}')"`
+
+   Run that once per type in the bundle's `types` list.
+
+   **Phase C -- Pre-seed programs with real context**
+
+   Now search for recent context to ground the programs so they start with real knowledge
+   instead of sitting empty.
+
+   If qmd is available, search meeting transcripts for EOS/L10-related context:
+   - Search for current quarter's rocks: use qmd `query` with intent "quarterly rocks goals
+     OKRs" and a vec search for "what are our rocks this quarter"
+   - Search for recent L10 topics: use qmd with intent "L10 meeting agenda topics issues"
+   - Search for scorecard metrics: use qmd with intent "EOS scorecard measurables KPIs"
+   - Search for open issues: use qmd with intent "EOS issues list problems to solve"
+
+   If qmd isn't available, try a grep through recent meeting transcripts:
+   `grep -ril "rocks\|scorecard\|L10\|EOS" datasets/meetings/ 2>/dev/null | head -10`
+   and read the matching files to extract context.
+
+   For each program you created, read the program file and update its `## Intent` section
+   with the real context you discovered. For example, the rocks program might get:
+   "Q3 2026 rocks: 1. Launch payments v2 (on track), 2. Complete Granola integration
+   (behind -- blocked on MCP signup), 3. Hit 95% CSAT (trending 91%)." The L10 prep
+   program might get: "Watches the [Team Name] L10 meeting. Recent recurring topics:
+   payments migration timeline, support ticket volume, onboarding completion rate."
+
+   Use the Edit tool to update each program file's Intent section. If you didn't find
+   relevant context, leave Intent empty -- the sentinels will populate it from the first
+   transcript or sheet read.
+
+   If the EOS sheet was configured in Phase A, note what it contains in the relevant
+   programs: "Sheet binding configured -- the sheet-watch sentinel will read the rocks
+   list, scorecard measurables, and issues directly from the sheet on its next cycle."
+
+   **Phase D -- Explain what happens next**
+
+   After creating and grounding the programs, tell them what to expect:
+
+   "Those programs are live now. Here's what happens next:"
+   - "The sheet-watch sentinel will read your L10 sheet on its next cycle -- within the
+     hour -- and start tracking your rocks, scorecard, and issues." (Only say this if a
+     sheet was configured in Phase A.)
+   - "When a meeting transcript comes in that touches one of these programs, the sentinel
+     will log an observation. You'll see those appear on the Cadence tab."
+   - "If something drifts -- a rock falls behind, a scorecard metric drops, an issue goes
+     stale -- you'll get a card about it."
+   - "You can always add more programs later, or ask me to set up new ones."
+
+   List what you created -- each program by its ID and title -- and let them know these
+   will show up on the Cadence tab of their board, grouped by family.
 
 ## Close
 Recap what's live and what's pending (and why it's fine). THEN reveal the board — once, here at the end:

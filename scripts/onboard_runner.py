@@ -84,10 +84,10 @@ def _strip_sentinel(text):
         kept.append(line.replace(COMPLETE_SENTINEL, ""))
     return "\n".join(kept).rstrip()
 
-# Onboarding runs on DEEP (opus): the concierge session needs stronger reasoning
-# during context discovery, program setup card creation, and integration
-# orchestration. Passed as a task_override so it wins over posture
-# (profile_lib.resolve_model).
+# Onboarding pins DEEP (opus): it runs a long, judgment-heavy concierge
+# conversation with context discovery, program setup, and multi-step tool
+# orchestration that benefits from stronger reasoning. Passed as a task_override
+# so it wins over posture (profile_lib.resolve_model).
 ONBOARD_MODEL_TIER = "deep"
 
 # --- The HIGH-PRIVILEGE allowlist (see the module docstring for WHY) ---------
