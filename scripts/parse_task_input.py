@@ -38,9 +38,9 @@ except ImportError:
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
-# Lightweight parsing/routing runs on Claude Haiku via the headless `claude`
+# Lightweight parsing/routing runs on Claude Sonnet via the headless `claude`
 # CLI. Override with PM_OS_PARSER_MODEL.
-PARSER_MODEL = os.environ.get("PM_OS_PARSER_MODEL", "haiku")
+PARSER_MODEL = os.environ.get("PM_OS_PARSER_MODEL", "sonnet")
 
 SYSTEM_PROMPT = """You are a task parser for a Product Manager's task system. You receive raw, unstructured text (often from voice-to-text) and extract a single structured task.
 
@@ -51,7 +51,7 @@ Return ONLY valid JSON with these fields:
   "queue": "One of: human, agent, collab, waiting",
   "priority": "One of: critical, high, medium, low",
   "domain": "One of: product, strategy, marketing, recruiting, metrics, learning, ops",
-  "description": "2-3 sentence description with context from the input. Include why this matters if mentioned.",
+  "description": null,
   "due": null,
   "tags": [],
   "project": null,
@@ -94,6 +94,8 @@ For sending a message (the lighter, communicative case — "talk to / share with
 
 Only include fields that are clearly indicated. Use null for anything not mentioned.
 Only set "due" if a specific date is mentioned. Today is {today}.
+
+IMPORTANT: Do NOT generate a "description" field. The user's raw input is preserved verbatim as the task description. Your job is ONLY to extract metadata (title, queue, priority, domain, tags, task_type, message fields). Set description to null.
 
 Return ONLY the JSON object. No markdown, no code fences, no explanation, no thinking."""
 

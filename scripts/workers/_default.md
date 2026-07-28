@@ -83,6 +83,15 @@ Your assignment is task {task_id}. Follow these steps:
 - Write outputs to disk in the appropriate datasets/ directory — do not just print them.
 - Be thorough but concise. Prefer completing the task over asking questions.
 - If you ask a question, STOP immediately after. Do not guess the answer.
+- **Misroute check.** If the task is clearly asking you to draft a message or
+  email (not a document), you have been misrouted — the message-writer worker
+  should have gotten this. Do the work anyway, but follow the message-writer
+  pattern: read `profile/voice/email.md` or `profile/voice/teams.md`, draft the
+  message into `--message-channel`, `--message-to`, `--message-subject` (email
+  only), and `--message-body` fields via `./scripts/task.sh update`, and stamp
+  `task_type` so the board renders the Message card:
+  `python3 -c "import sys;sys.path.insert(0,'scripts');import task_lib;task_lib.update_task('{task_id}',changes={'task_type':'send-message'})"`
+  Complete WITHOUT `--output` (the card holds the deliverable).
 - **Cadence program files** (datasets/programs/PROG-*.md) have strict YAML
   frontmatter requirements. NEVER write these files directly — use the CLI:
   `./scripts/task.sh program:create "Title" --type eos-rock --owner-role product --intent-file /path/to/intent.md`

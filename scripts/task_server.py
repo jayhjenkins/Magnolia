@@ -1101,6 +1101,10 @@ def quick_add_task(text, auto_dispatch=True):
     if not kwargs.get("title"):
         kwargs["title"] = text.strip()[:120]
     kwargs.setdefault("queue", "agent")
+    # Always preserve the user's raw input as the description. The parser
+    # extracts metadata (title, queue, priority, tags, task_type) but must
+    # never summarize away the user's specifics — the agent needs every detail.
+    kwargs["description"] = text.strip()
 
     tags = parsed.get("tags") or []
     if isinstance(tags, str):
