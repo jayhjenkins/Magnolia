@@ -55,7 +55,7 @@ from cadence.scheduler import CadenceScheduler
 import shipper
 from shipper import (
     _message_draft_from_task, _attempt_send_message, _record_manual_send,
-    _attempt_publish, _emit_confirm_card, _note, _load_email_cache,
+    _attempt_publish, _attempt_update, _emit_confirm_card, _note, _load_email_cache,
 )
 
 # ─── Chat concurrency ────────────────────────────────────────────────────────
@@ -2324,6 +2324,40 @@ def handle_publish_jira(handler, task_id):
     _error_response(handler, msg, status=code)
 
 
+def handle_update_jira(handler, task_id):
+    """POST /api/tasks/{id}/update-jira — update an existing Jira issue (Tier-2 gated)."""
+    try:
+        task_data = task_lib.read_task(task_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+        return
+    update = jira_publish.parse_jira_update(task_data.get("body", ""))
+    status, payload = _attempt_update(task_id, update)
+    if status == "needs_confirm":
+        cid = _emit_confirm_card("project_management", task_id)
+        _json_response(handler, {
+            "status": "needs_confirmation",
+            "confirm_task": cid,
+            "message": "First external write needs a one-time confirm — see the collab queue.",
+        })
+        return
+    if status == "already_updated":
+        _json_response(handler, {"status": "ok", "message": "Already processed — no duplicate update."})
+        return
+    if status == "ok":
+        issue_key, issue_url = payload
+        action = update.get("action", "comment")
+        action_label = {"comment": "Commented on", "edit": "Updated", "comment_and_edit": "Updated"}.get(action, "Updated")
+        _json_response(handler, {
+            "status": "ok",
+            "message": f"{action_label} {issue_key}",
+            "issue_key": issue_key, "issue_url": issue_url,
+        })
+        return
+    code, msg = payload
+    _error_response(handler, msg, status=code)
+
+
 def handle_confirm(handler, task_id):
     """POST /api/tasks/{id}/confirm — Tier-2: record consent for an integration's
     first external write, then re-drive the blocked publish."""
@@ -3123,6 +3157,16 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
                 _error_response(self, "Invalid task ID format", status=400)
             else:
                 handle_publish_jira(self, task_id)
+            return True
+
+        # Match /api/tasks/{id}/update-jira
+        match = re.match(r"^/api/tasks/([^/]+)/update-jira$", path)
+        if match and method == "POST":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_update_jira(self, task_id)
             return True
 
         # Match /api/tasks/{id}/meeting-details

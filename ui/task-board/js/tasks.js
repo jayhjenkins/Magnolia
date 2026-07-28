@@ -120,7 +120,7 @@ async function openTask(taskId, keepChat) {
       const lastOut = (task.activity_log || []).filter(e => e.type === 'output').pop();
       if (lastOut) html += `<div class="dt-output-note">${escapeHtml(lastOut.content)}</div>`;
       html += `</div>`;
-    } else if (isAgentish && task.task_type !== 'schedule-meeting' && task.task_type !== 'send-message' && !(task.body && task.body.includes('<!-- JIRA_DRAFT -->'))) {
+    } else if (isAgentish && task.task_type !== 'schedule-meeting' && task.task_type !== 'send-message' && !(task.body && task.body.includes('<!-- JIRA_DRAFT -->')) && !(task.body && task.body.includes('<!-- JIRA_UPDATE -->'))) {
       let msg = 'No output yet.', mIcon = svgIcon('waiting');
         if (task.agent_status === 'running') { msg = 'Agent is working — the output will land here when it’s done.'; mIcon = '<span class="mark-running"></span>'; }
         else if (task.agent_status === 'failed') { msg = 'Agent stopped before producing an output.'; mIcon = svgIcon('failed'); }
@@ -289,6 +289,29 @@ async function openTask(taskId, keepChat) {
       }
     }
 
+    // Jira update panel (when agent has drafted an update to an existing issue)
+    const hasJiraUpdate = task.body && task.body.includes('<!-- JIRA_UPDATE -->');
+    if (hasJiraUpdate) {
+      const jiraUpdate = parseJiraUpdate(task.body);
+      if (jiraUpdate) {
+        const actionLabel = {comment: 'Add Comment', edit: 'Edit Fields', comment_and_edit: 'Comment & Edit'}[jiraUpdate.action] || 'Update';
+        html += `<div class="dt-section">`;
+        html += `<div class="dt-sec-head"><div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;"><span class="dt-sec-title">Jira update</span><span class="dt-sec-hint">${escapeHtml(jiraUpdate.issue_key)} - ${escapeHtml(actionLabel)}</span></div></div>`;
+        if (jiraUpdate.comment_body) html += `<div class="dt-prose" style="margin-bottom:8px;"><strong>Comment:</strong></div><div class="dt-prose dim" style="margin-bottom:13px;">${escapeHtml(jiraUpdate.comment_body)}</div>`;
+        if (jiraUpdate.description) html += `<div class="dt-prose" style="margin-bottom:8px;"><strong>Description:</strong></div><div class="dt-prose dim" style="margin-bottom:13px;">${escapeHtml(jiraUpdate.description)}</div>`;
+        const meta = [];
+        if (jiraUpdate.summary) meta.push(['Summary', jiraUpdate.summary]);
+        if (jiraUpdate.priority) meta.push(['Priority', jiraUpdate.priority]);
+        if (jiraUpdate.labels.length) meta.push(['Labels', jiraUpdate.labels.join(', ')]);
+        if (meta.length) {
+          html += `<div class="dt-summary">`;
+          meta.forEach(([k, v]) => html += `<div class="dt-sum-item"><span class="dt-sum-k">${k}</span><span class="dt-sum-v">${escapeHtml(v)}</span></div>`);
+          html += `</div>`;
+        }
+        html += `</div>`;
+      }
+    }
+
     // ── Recommendation patch preview — show what the suggestion changes ──
     const isRecommendation = task.card_type === 'recommendation';
     if (isRecommendation && task.patch_path) {
@@ -411,6 +434,12 @@ async function openTask(taskId, keepChat) {
     if (canDispatch) rightHtml += `<button class="btn btn-schedule" id="btn-start-agent" onclick="startAgent('${task.id}')">Start agent</button>`;
     if (hasSlots) rightHtml += `<button class="btn btn-schedule" id="btn-create-meeting" onclick="scheduleMeeting('${task.id}')" disabled>Create meeting</button>`;
     if (hasJiraDraft && (task.agent_status === 'complete' || task.agent_status === 'needs-human')) rightHtml += `<button class="btn btn-schedule" id="btn-publish-jira" onclick="publishToJira('${task.id}')">Publish to Jira</button>`;
+    const hasJiraUpdate2 = task.body && task.body.includes('<!-- JIRA_UPDATE -->');
+    if (hasJiraUpdate2 && (task.agent_status === 'complete' || task.agent_status === 'needs-human')) {
+      const _upd = parseJiraUpdate(task.body);
+      const _updLabel = _upd ? {comment: 'Add Comment', edit: 'Update Issue', comment_and_edit: 'Update & Comment'}[_upd.action] || 'Update Jira' : 'Update Jira';
+      rightHtml += `<button class="btn btn-schedule" id="btn-update-jira" onclick="updateJira('${task.id}')">${_updLabel}</button>`;
+    }
     if (canSendMessage) rightHtml += `<button class="btn btn-schedule" id="btn-send-message" onclick="sendMessage('${task.id}')">${svgIcon('send')}Send message</button>`;
     if (isProgramSetup) rightHtml += `<button class="btn btn-success" id="btn-create-program" onclick="createProgram('${task.id}')">Create program</button>`;
     if (isRecCard) rightHtml += `<button class="btn btn-success" onclick="cardAction('${task.id}','accept',event)">${svgIcon('done')}Accept</button>`;
@@ -1242,6 +1271,25 @@ function parseJiraDraft(body) {
   };
 }
 
+function parseJiraUpdate(body) {
+  if (!body || !body.includes('<!-- JIRA_UPDATE -->')) return null;
+  const block = body.match(/<!-- JIRA_UPDATE -->([\s\S]+?)<!-- \/JIRA_UPDATE -->/);
+  if (!block) return null;
+  const b = block[1];
+  const field = (name) => { const m = b.match(new RegExp(`<!-- ${name}:(.+?) -->`)); return m ? m[1].trim() : ''; };
+  const commentMatch = b.match(/### Comment\s*\n([\s\S]*?)(?=\n### |\n<!-- \/JIRA_UPDATE)/);
+  const descMatch = b.match(/### Description\s*\n([\s\S]*?)(?=\n### |\n<!-- \/JIRA_UPDATE)/);
+  return {
+    issue_key: field('JIRA_ISSUE_KEY') || '',
+    action: field('JIRA_ACTION') || 'comment',
+    summary: field('JIRA_SUMMARY') || '',
+    priority: field('JIRA_PRIORITY') || '',
+    labels: field('JIRA_LABELS').split(',').map(s => s.trim()).filter(Boolean),
+    comment_body: commentMatch ? commentMatch[1].trim() : '',
+    description: descMatch ? descMatch[1].trim() : '',
+  };
+}
+
 async function publishToJira(taskId) {
   const ok = await confirmAction({
     title: 'Publish to Jira?',
@@ -1260,5 +1308,29 @@ async function publishToJira(taskId) {
   } catch (err) {
     toast(`Publish failed: ${err.message}`);
     if (btn) { btn.disabled = false; btn.textContent = 'Publish to Jira'; }
+  }
+}
+
+async function updateJira(taskId) {
+  const task = _taskCache && _taskCache.find(t => t.id === taskId);
+  const update = task ? parseJiraUpdate(task.body) : null;
+  const actionLabel = update ? {comment: 'Add Comment', edit: 'Update Issue', comment_and_edit: 'Update & Comment'}[update.action] || 'Update' : 'Update';
+  const ok = await confirmAction({
+    title: actionLabel + '?',
+    message: update ? `This will ${update.action === 'comment' ? 'add a comment to' : 'update'} ${update.issue_key} in Jira.` : 'This updates an existing Jira issue.',
+    confirmLabel: actionLabel,
+  });
+  if (!ok) return;
+  const btn = document.getElementById('btn-update-jira');
+  if (btn) { btn.disabled = true; btn.textContent = 'Updating…'; }
+  try {
+    const res = await fetch(`${API}/tasks/${taskId}/update-jira`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    fetchTasks();
+    closeModal();
+  } catch (err) {
+    toast(`Update failed: ${err.message}`);
+    if (btn) { btn.disabled = false; btn.textContent = actionLabel; }
   }
 }

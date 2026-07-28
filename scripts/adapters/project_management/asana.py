@@ -23,3 +23,13 @@ def fetch_status(issue_key, root=None):
     adapters.fetch_status turns that into a clean None (graceful degrade)."""
     raise NotConfigured(
         "Asana adapter is a stub — implement fetch_status() against the Asana MCP")
+
+
+def update(update_dict, root=None):
+    raise NotConfigured(
+        "Asana adapter is a stub — implement update() against the Asana MCP")
+
+
+def comment(update_dict, root=None):
+    raise NotConfigured(
+        "Asana adapter is a stub — implement comment() against the Asana MCP")

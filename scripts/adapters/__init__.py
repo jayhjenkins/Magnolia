@@ -71,6 +71,16 @@ def publish(family, draft, root=None):
     return mod.publish(draft, root)
 
 
+def update_issue(family, update_dict, root=None):
+    """Tier-2 gated issue update. Same gating pattern as publish()."""
+    mod = get(family, root)
+    if mod is None:
+        return None
+    if not _is_confirmed(family, mod, root):
+        raise NeedsConfirmation(family)
+    return mod.update(update_dict, root)
+
+
 def fetch_status(family, issue_key, root=None):
     """FREE read of the family's system of record. Returns the provider's facts
     dict, or None.

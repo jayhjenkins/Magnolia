@@ -208,25 +208,129 @@ Do not output anything else. No explanation, no markdown, no summary."""
     return prompt
 
 
+# ─── Update Parsing ─────────────────────────────────────────────────────────
+
+def parse_jira_update(body):
+    """Extract JIRA_UPDATE fields from a task body string.
+
+    Returns dict with: issue_key, action, summary, priority, labels,
+    comment_body, description.
+    Returns None if no update block found or issue_key is missing.
+    """
+    if not body or "<!-- JIRA_UPDATE -->" not in body:
+        return None
+
+    match = re.search(r"<!-- JIRA_UPDATE -->(.+?)<!-- /JIRA_UPDATE -->", body, re.DOTALL)
+    if not match:
+        return None
+
+    block = match.group(1)
+
+    def _field(name):
+        m = re.search(rf"<!-- {name}:(.+?) -->", block)
+        return m.group(1).strip() if m else ""
+
+    issue_key = _field("JIRA_ISSUE_KEY")
+    if not issue_key:
+        return None
+
+    action = _field("JIRA_ACTION") or "comment"
+
+    labels_raw = _field("JIRA_LABELS")
+    labels = [l.strip() for l in labels_raw.split(",") if l.strip()] if labels_raw else []
+
+    # Extract ### Comment section
+    comment_match = re.search(r"### Comment\s*\n(.*?)(?=\n### |\Z)", block, re.DOTALL)
+    comment_body = comment_match.group(1).strip() if comment_match else ""
+
+    # Extract ### Description section
+    desc_match = re.search(r"### Description\s*\n(.*?)(?=\n### |\Z)", block, re.DOTALL)
+    description = desc_match.group(1).strip() if desc_match else ""
+
+    return {
+        "issue_key": issue_key,
+        "action": action,
+        "summary": _field("JIRA_SUMMARY") or "",
+        "priority": _field("JIRA_PRIORITY") or "",
+        "labels": labels,
+        "comment_body": comment_body,
+        "description": description,
+    }
+
+
+def build_comment_prompt(update):
+    """Build a constrained prompt for Claude to call addCommentToJiraIssue."""
+    issue_key = update["issue_key"]
+    comment_body = update["comment_body"].replace('"', '\\"')
+
+    prompt = f"""You must call the mcp__claude_ai_Jira__addCommentToJiraIssue tool with EXACTLY these parameters. Do not modify any values. Do not add any extra fields. Just call the tool and report the result.
+
+Call mcp__claude_ai_Jira__addCommentToJiraIssue with:
+- cloudId: "{JIRA_CLOUD_ID}"
+- issueIdOrKey: "{issue_key}"
+- commentBody: "{comment_body}"
+- contentFormat: "markdown"
+
+After the tool returns, output EXACTLY one line in this format:
+JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
+
+If the tool fails, output: JIRA_ERROR:description of what went wrong
+
+Do not output anything else. No explanation, no markdown, no summary."""
+
+    return prompt
+
+
+def build_edit_prompt(update):
+    """Build a constrained prompt for Claude to call editJiraIssue."""
+    issue_key = update["issue_key"]
+
+    fields = {}
+    if update.get("summary"):
+        fields["summary"] = update["summary"]
+    if update.get("priority"):
+        fields["priority"] = {"name": update["priority"]}
+    if update.get("labels"):
+        fields["labels"] = update["labels"]
+    if update.get("description"):
+        fields["description"] = update["description"]
+
+    fields_json = json.dumps(fields)
+
+    prompt = f"""You must call the mcp__claude_ai_Jira__editJiraIssue tool with EXACTLY these parameters. Do not modify any values. Do not add any extra fields. Just call the tool and report the result.
+
+Call mcp__claude_ai_Jira__editJiraIssue with:
+- cloudId: "{JIRA_CLOUD_ID}"
+- issueIdOrKey: "{issue_key}"
+- fields: {fields_json}
+- contentFormat: "markdown"
+
+After the tool returns, output EXACTLY one line in this format:
+JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
+
+If the tool fails, output: JIRA_ERROR:description of what went wrong
+
+Do not output anything else. No explanation, no markdown, no summary."""
+
+    return prompt
+
+
 # ─── Publishing ──────────────────────────────────────────────────────────────
 
-def publish_to_jira(draft):
-    """Spawn a mini Claude session to publish the draft to Jira.
+def _run_jira_session(prompt, allowed_tools):
+    """Spawn a mini Claude session to execute a Jira MCP call.
 
+    Takes the full prompt and a comma-separated string of allowed tool names.
     Returns (issue_key, issue_url) on success.
     Raises RuntimeError on failure.
     """
-    prompt = build_claude_prompt(draft)
-
-    # Strip Claude env vars + fix PATH per-OS (same pattern as handle_dispatch_task)
     env = platform_lib.headless_claude_env()
-
     claude_bin = platform_lib.resolve_claude()
 
     try:
         result = subprocess.run(
             [claude_bin, "-p", prompt, "--max-turns", "3",
-             "--allowedTools", "mcp__claude_ai_Jira__createJiraIssue"],
+             "--allowedTools", allowed_tools],
             cwd=PM_OS_DIR,
             env=env,
             capture_output=True,
@@ -246,7 +350,7 @@ def publish_to_jira(draft):
     # Check for error
     err_match = re.search(r"JIRA_ERROR:(.+)", output)
     if err_match:
-        raise RuntimeError(f"Jira creation failed: {err_match.group(1).strip()}")
+        raise RuntimeError(f"Jira operation failed: {err_match.group(1).strip()}")
 
     # Without a configured project key the fallback pattern degrades to
     # ``-\d+``, which false-positive matches dates/error codes (e.g. "403-1").
@@ -264,6 +368,55 @@ def publish_to_jira(draft):
         return key_match.group(1), url
 
     raise RuntimeError(f"Could not parse Jira result from Claude output. Exit code: {result.returncode}. Output: {output[:500]}")
+
+
+def publish_to_jira(draft):
+    """Spawn a mini Claude session to publish the draft to Jira.
+
+    Returns (issue_key, issue_url) on success.
+    Raises RuntimeError on failure.
+    """
+    prompt = build_claude_prompt(draft)
+    return _run_jira_session(prompt, "mcp__claude_ai_Jira__createJiraIssue")
+
+
+# ─── Updating ──────────────────────────────────────────────────────────────
+
+def execute_jira_update(update):
+    """Execute a Jira update based on the parsed update action.
+
+    Based on update["action"]:
+    - "comment"          -> add a comment
+    - "edit"             -> edit issue fields
+    - "comment_and_edit" -> edit first, then comment
+
+    Returns (issue_key, issue_url) on success.
+    Raises RuntimeError on failure.
+    """
+    action = update.get("action", "comment")
+
+    if action == "comment":
+        return _run_jira_session(
+            build_comment_prompt(update),
+            "mcp__claude_ai_Jira__addCommentToJiraIssue",
+        )
+    elif action == "edit":
+        return _run_jira_session(
+            build_edit_prompt(update),
+            "mcp__claude_ai_Jira__editJiraIssue",
+        )
+    elif action == "comment_and_edit":
+        # Edit first, then comment. Return the result from the last successful call.
+        _run_jira_session(
+            build_edit_prompt(update),
+            "mcp__claude_ai_Jira__editJiraIssue",
+        )
+        return _run_jira_session(
+            build_comment_prompt(update),
+            "mcp__claude_ai_Jira__addCommentToJiraIssue",
+        )
+    else:
+        raise RuntimeError(f"Unknown JIRA_UPDATE action: {action}")
 
 
 # ─── LangFuse Tracing ───────────────────────────────────────────────────────
@@ -285,6 +438,35 @@ def _trace_publish(task_id, draft, issue_key=None, issue_url=None, error=None):
                 "summary": draft.get("summary"),
                 "priority": draft.get("priority"),
                 "labels": draft.get("labels"),
+            },
+            output_data={
+                "issue_key": issue_key,
+                "issue_url": issue_url,
+                "error": error,
+            },
+        )
+    except Exception:
+        pass
+
+
+def _trace_update(task_id, update, issue_key=None, issue_url=None, error=None):
+    """Create a LangFuse trace for the update operation."""
+    try:
+        from langfuse_client import create_trace
+        create_trace(
+            name="jira-update",
+            session_id=task_id,
+            metadata={
+                "jira_issue_key": update.get("issue_key"),
+                "jira_action": update.get("action"),
+            },
+            tags=["jira", "update"],
+            input_data={
+                "issue_key": update.get("issue_key"),
+                "action": update.get("action"),
+                "summary": update.get("summary"),
+                "priority": update.get("priority"),
+                "labels": update.get("labels"),
             },
             output_data={
                 "issue_key": issue_key,

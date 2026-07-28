@@ -19,6 +19,19 @@ def publish(draft, root=None):
     return jira_publish.publish_to_jira(draft)
 
 
+def update(update_dict, root=None):
+    if not is_configured(root):
+        raise NotConfigured("Jira is not configured in this profile")
+    return jira_publish.execute_jira_update(update_dict)
+
+
+def comment(update_dict, root=None):
+    if not is_configured(root):
+        raise NotConfigured("Jira is not configured in this profile")
+    update_dict = dict(update_dict, action="comment")
+    return jira_publish.execute_jira_update(update_dict)
+
+
 def fetch_status(issue_key, root=None):
     """READ op: return {"status","title","due"} for an issue, or None if absent.
 
