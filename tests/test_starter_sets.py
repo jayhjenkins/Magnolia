@@ -25,6 +25,18 @@ def test_roadmap_bundle():
     assert set(b["types"]) == {"roadmap-initiative"}
 
 
+def test_weekly_bundle():
+    b = starter_sets.bundle("weekly")
+    assert set(b["types"]) == {"weekly-priorities"}
+    assert b["label"]
+
+
+def test_eng_sync_bundle():
+    b = starter_sets.bundle("eng-sync")
+    assert set(b["types"]) == {"eng-sync-prep"}
+    assert b["label"]
+
+
 def test_outcomes_bundle():
     b = starter_sets.bundle("outcomes")
     assert set(b["types"]) == {"did-it-work"}
