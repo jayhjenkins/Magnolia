@@ -1,19 +1,52 @@
-# Cadence starter sets - curated program-type bundles the onboarding concierge
-# offers ONCE at setup (design brief section 8). NEVER consulted at runtime: a
-# program type is "live" iff the operator has >=1 active program of it, so a
-# starter set is purely a cold-start convenience ("you run EOS - want the L10-prep
-# and scorecard programs seeded?"). Each bundle lists program-type ids that must
-# exist in cadence/programtypes/registry.json (the starter_sets.validate guard).
+# Cadence starter sets — curated program-type bundles the onboarding concierge
+# offers ONCE at setup. NEVER consulted at runtime: a program type is "live" iff
+# the operator has >=1 active program of it. Each bundle maps to one leading
+# question in the onboarding conversation (meta-onboard step 8, Phase A).
 sets:
+  roadmap:
+    label: "Roadmap tracking"
+    description: >
+      Track product initiatives through their lifecycle — from discovery through
+      shipped to verified. Each initiative becomes a pipeline program that the
+      sentinels watch for drift (stalled phases, missed checkpoints). Best for
+      PMs who maintain a roadmap of features or epics.
+    types:
+      - roadmap-initiative
+
+  weekly:
+    label: "Weekly priorities"
+    description: >
+      A standing weekly-cycle program that surfaces your top priorities each
+      week and watches whether they move. Useful for anyone who runs a personal
+      weekly planning rhythm or preps for a regular team sync.
+    types:
+      - weekly-priorities
+
+  eng-sync:
+    label: "Eng sync prep"
+    description: >
+      Specialized weekly prep for engineering-facing syncs — pulls recent
+      commits, open PRs, blockers, and sprint status so you walk in prepared.
+      Only relevant if you regularly sync with engineering leads.
+    types:
+      - eng-sync-prep
+
+  outcomes:
+    label: "Outcome validation"
+    description: >
+      After something ships, did it actually work? A target-model program that
+      tracks a shipped feature against its success metrics and tells you when
+      the data is in and whether the needle moved. Best for PMs who define
+      success criteria up front and want to close the loop.
+    types:
+      - did-it-work
+
   eos:
     label: "EOS facilitation"
     description: >
-      Seed the standing EOS programs for a team running EOS: L10 meeting prep,
-      quarterly rocks, the weekly scorecard cycle, and the issues list. The EOS
-      sheet stays manual-on-purpose (read-only); these programs read, prepare,
-      and nudge - they never write to the sheet.
+      Seed the standing EOS programs for a team running EOS: L10 meeting prep
+      and quarterly rocks. The EOS sheet stays manual-on-purpose (read-only);
+      these programs read, prepare, and nudge — they never write to the sheet.
     types:
       - eos-l10-prep
       - eos-rock
-      - eos-cycle
-      - eos-issues
