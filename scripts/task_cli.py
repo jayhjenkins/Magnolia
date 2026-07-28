@@ -336,6 +336,23 @@ def cmd_agent_ask(args):
 
 # ─── Command: inbox ──────────────────────────────────────────────────────────
 
+def cmd_program_create(args):
+    """Create a Cadence program via program_lib (guarantees valid YAML)."""
+    import program_lib
+    intent = args.intent
+    if args.intent_file:
+        with open(args.intent_file, "r", encoding="utf-8") as f:
+            intent = f.read()
+    program_id, filepath = program_lib.create_program(
+        type=args.type,
+        title=args.title,
+        owner_role=args.owner_role,
+        intent=intent,
+    )
+    print(f"Created {program_id} at {filepath}")
+    print(f"Edit the ## Intent section to add details, then the reconciler picks it up automatically.")
+
+
 def cmd_inbox(args):
     """Show human inbox digest."""
     inbox = task_lib.get_inbox()
@@ -494,6 +511,16 @@ def main():
     p_aask.add_argument("task_id", help="Task ID")
     p_aask.add_argument("question", help="Question for the human")
     p_aask.set_defaults(func=cmd_agent_ask)
+
+    # ─── program:create ─────────────────────────────────────────────────
+    p_pcreate = subparsers.add_parser("program:create",
+                                       help="Create a Cadence program with proper YAML frontmatter")
+    p_pcreate.add_argument("title", help="Program title")
+    p_pcreate.add_argument("--type", required=True, help="Program type (e.g. eos-rock, eos-l10-prep)")
+    p_pcreate.add_argument("--owner-role", default="product", help="Owner role (default: product)")
+    p_pcreate.add_argument("--intent", default="", help="Intent text for the ## Intent section")
+    p_pcreate.add_argument("--intent-file", default=None, help="Read intent from a file instead of --intent")
+    p_pcreate.set_defaults(func=cmd_program_create)
 
     # ─── inbox ───────────────────────────────────────────────────────────
     p_inbox = subparsers.add_parser("inbox", help="Show human inbox digest")
