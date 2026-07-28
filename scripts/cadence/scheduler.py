@@ -9,15 +9,19 @@ CronScheduler: the cron path is create-task -> dispatch-an-LLM-agent, whereas
 cadence reconcile must stay in-process and write nothing externally beyond the
 existing local escalate card.
 
-The default tick is hourly: reconcile_all is idempotent and once-per-cadence-
-period guarded, so an hourly tick is plenty - the first tick of a new ISO week
-runs each weekly program's cycle. A reconcile error is logged and swallowed; it
-must never propagate or kill the thread.
+The reconciler ticks hourly and persists drift + last_run on every tick so the
+Cadence tab always shows current state. Emitters (nudges, worker dispatches)
+remain cycle-gated so they only fire once per period.
+
+Sentinels (the read-only observers that feed the reconciler) are dispatched as
+background subprocesses twice daily on workdays (9am and 1pm local). They run
+outside this thread so a slow LLM call never blocks the reconcile loop.
 
 All runtime/log strings are ASCII-safe (hyphen, never em-dash) per invariant #8.
 """
 
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -36,13 +40,49 @@ def _log(msg):
 
 # ─── Scheduler ───────────────────────────────────────────────────────────────
 
+SENTINEL_HOURS = {9, 13}
+SENTINEL_NAMES = ["movement-watch", "tracker-truth"]
+
+
+def _is_workday(now):
+    return now.weekday() < 5
+
+
+def _should_run_sentinels(now, last_sentinel_hour):
+    """True when it is a workday, the current hour is a sentinel hour, and we
+    have not already dispatched sentinels this hour."""
+    if not _is_workday(now):
+        return False
+    h = now.hour
+    if h not in SENTINEL_HOURS:
+        return False
+    return last_sentinel_hour != (now.date().isoformat(), h)
+
+
+def _dispatch_sentinel(name):
+    """Fire sentinel_runner.py in the background (fire-and-forget)."""
+    script = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "sentinel_runner.py",
+    )
+    try:
+        subprocess.Popen(
+            [sys.executable, script, name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        _log(f"Failed to dispatch sentinel {name}: {e}")
+
+
 class CadenceScheduler:
-    """Background reconcile scheduler that ticks hourly by default."""
+    """Background reconcile + sentinel scheduler that ticks hourly by default."""
 
     def __init__(self, tick_interval=3600):
         self.tick_interval = tick_interval
         self._thread = None
         self._running = False
+        self._last_sentinel_hour = (None, None)
 
     def start(self):
         """Start the scheduler as a daemon thread."""
@@ -62,7 +102,6 @@ class CadenceScheduler:
 
     def _loop(self):
         """Main loop: tick, sleep, repeat."""
-        # On startup, do an initial tick to catch the current period.
         self.tick()
         while self._running:
             time.sleep(self.tick_interval)
@@ -70,18 +109,22 @@ class CadenceScheduler:
                 self.tick()
 
     def tick(self):
-        """Reconcile every active program. Errors are logged and swallowed."""
+        """Reconcile every active program, dispatch sentinels when due."""
+        now = datetime.now(timezone.utc)
+
+        if _should_run_sentinels(now, self._last_sentinel_hour):
+            self._last_sentinel_hour = (now.date().isoformat(), now.hour)
+            for name in SENTINEL_NAMES:
+                _dispatch_sentinel(name)
+            _log(f"Dispatched sentinels: {', '.join(SENTINEL_NAMES)}")
+
         try:
             results = reconcile.reconcile_all()
         except Exception as e:
-            # A reconcile error must NEVER propagate or kill the thread.
             _log(f"Error during reconcile: {e}")
             return
 
         total = len(results)
-        # `emitted` carries real card ids AND non-card markers (e.g. a
-        # `nudge suppressed (cap N/wk)` string). Count only real cards (TASK-*)
-        # so the log reports cards emitted, not suppressions, accurately.
         emitted = sum(
             1
             for r in results
@@ -90,8 +133,6 @@ class CadenceScheduler:
         )
         broke = sum(1 for r in results if r.get("verdict") == "broken")
         errored = sum(1 for r in results if "error" in r)
-        # Only log when something actually happened (mirrors cron_scheduler's
-        # `if executed > 0` guard) so an idle board stays quiet hour to hour.
         if emitted or errored:
             _log(
                 f"Tick complete: {total} program(s) reconciled, "
