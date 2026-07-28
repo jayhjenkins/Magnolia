@@ -81,6 +81,9 @@ const signalPredicates = {
   jira_draft(task) {
     return !!(task.body && task.body.includes('<!-- JIRA_DRAFT -->'));
   },
+  jira_update(task) {
+    return !!(task.body && task.body.includes('<!-- JIRA_UPDATE -->'));
+  },
   cron(task) {
     return isCronTask(task);
   },
@@ -115,6 +118,9 @@ const _signalRenderers = {
   jira_draft(task) {
     return `<span class="chip chip-cron" style="color:var(--accent);background:var(--accent-soft)">${svgIcon('jira')}jira draft</span>`;
   },
+  jira_update(task) {
+    return `<span class="chip chip-cron" style="color:var(--accent);background:var(--accent-soft)">${svgIcon('jira')}jira update</span>`;
+  },
   cron(task) {
     return `<span class="chip chip-cron">${svgIcon('cron')}cron</span>`;
   },
@@ -124,7 +130,7 @@ const _signalRenderers = {
 // waiting_on, waiting_due (only when waiting), due/overdue (only when not waiting),
 // schedule, message, jira_draft, cron. The predicates already gate queue, so we
 // just keep this fixed sequence for `signals: "auto"`.
-const _autoSignalOrder = ['waiting_on', 'waiting_due', 'due', 'overdue', 'schedule', 'message', 'jira_draft', 'cron'];
+const _autoSignalOrder = ['waiting_on', 'waiting_due', 'due', 'overdue', 'schedule', 'message', 'jira_draft', 'jira_update', 'cron'];
 
 function _renderSignals(task, signalsSpec) {
   // signalsSpec: "auto" → every matching signal in canonical order;

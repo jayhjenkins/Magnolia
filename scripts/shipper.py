@@ -189,6 +189,50 @@ def _attempt_publish(task_id, draft):
     return ("ok", (issue_key, issue_url))
 
 
+def _attempt_update(task_id, update):
+    """Shared update core for the update-jira handler.
+
+    Returns (status, payload) mirroring _attempt_publish."""
+    if update is None:
+        return ("error", (400, "No JIRA_UPDATE block found in task body"))
+    try:
+        existing = task_lib.read_task(task_id)
+        if (existing.get("frontmatter") or {}).get("status") == "done":
+            _note(task_id, "Update skipped — task already processed.")
+            return ("already_updated", None)
+    except FileNotFoundError:
+        pass
+    try:
+        result = adapters.update_issue("project_management", update)
+    except NeedsConfirmation:
+        return ("needs_confirm", None)
+    except NotConfigured as e:
+        _note(task_id, f"Jira update failed: {e}")
+        jira_publish._trace_update(task_id, update, error=str(e))
+        return ("error", (400, str(e)))
+    except RuntimeError as e:
+        _note(task_id, f"Jira update failed: {e}")
+        jira_publish._trace_update(task_id, update, error=str(e))
+        return ("error", (500, f"Jira update failed: {e}"))
+    if result is None:
+        msg = "No project-management tool is configured for this install"
+        _note(task_id, f"Jira update failed: {msg}")
+        jira_publish._trace_update(task_id, update, error=msg)
+        return ("unconfigured", (400, msg))
+    issue_key, issue_url = result
+    action = update.get("action", "comment")
+    action_label = {"comment": "Commented on", "edit": "Updated", "comment_and_edit": "Updated and commented on"}.get(action, "Updated")
+    output_str = f"{action_label} {issue_key}: {issue_url}"
+    try:
+        task_lib.update_task(task_id, changes={"agent_output": output_str},
+                             comment=f"Jira update: {output_str}", actor="system")
+        task_lib.complete_task(task_id, actor="system")
+    except Exception:
+        pass
+    jira_publish._trace_update(task_id, update, issue_key=issue_key, issue_url=issue_url)
+    return ("ok", (issue_key, issue_url))
+
+
 def _emit_confirm_card(family, source_task):
     """Write a Tier-2 confirm card to the collab queue. Confirm flips consent and
     re-drives source_task; Reject holds off. Carries the link fields handle_confirm reads."""

@@ -96,7 +96,19 @@ Task {task_id}. Follow these steps:
    - **Hotfix** — emergency fix.
    - **Story / Epic** — only when the task explicitly asks for legacy hierarchy.
 
-7. Draft the issue:
+6b. Detect existing issue reference:
+   Check if the task title or description references an existing Jira issue key
+   (pattern: uppercase letters + hyphen + digits, e.g. `VNT-45655`, `ACM-123`,
+   `PROJ-9999`). Look for phrases like:
+   - "Update VNT-45655..."
+   - "Add comment to VNT-45655..."
+   - "...details for VNT-45655..."
+   - Any mention of an issue key combined with intent to modify, update, or comment
+
+   If an existing issue key is found AND the intent is to update/comment (not to
+   create a new related issue), skip step 7 and go to step 7b instead.
+
+7. Draft the issue (NEW issue):
    Compose all fields. The task body you read in step 1 is your *source material*, not your output — translate it into a Jira-native description that stands on its own for an external reader. **Strip every PM-OS reference (see the Description hygiene rule below) before writing into `### Description`.** Write the draft to the task body using this EXACT format:
 
    Run: ./scripts/task.sh update {task_id} --description "$(cat <<'DRAFT'
@@ -170,6 +182,62 @@ Task {task_id}. Follow these steps:
 
      Jira-native references are fine and encouraged: `<PROJECT>-12345` parent/sibling keys, Confluence URLs, customer names, verbatim quotes, dates. If the task body contains a "Source" or "Related" block with PM-OS IDs or local paths, **rewrite it** into the Jira description using external-friendly language, or drop it entirely. The PM-OS context lives in the surrounding task body (above the `## Jira Draft` heading) where only the operator can see it — that is the correct place for `TASK-NNNN` cross-links.
 
+7b. Draft a JIRA_UPDATE block (EXISTING issue):
+   When step 6b detected an existing issue key, compose an update block instead of
+   a new-issue draft. The task body you read in step 1 is your *source material* —
+   translate it into a Jira-native comment/edit that stands on its own. **Strip every
+   PM-OS reference (same Description hygiene rules as step 7) before writing.**
+
+   JIRA_ACTION values:
+   - `comment` — add a comment only. Default when the task says "update with details",
+     "add information", or "add context".
+   - `edit` — change fields (summary, priority, labels, description). Use when the
+     task says "change priority", "update the title", or "rewrite the description".
+   - `comment_and_edit` — both add a comment AND change fields. Use when the task says
+     "update with details AND change priority" or similar combined intent.
+
+   Run: ./scripts/task.sh update {task_id} --description "$(cat <<'DRAFT'
+   <original description text>
+
+   ## Jira Update
+
+   <!-- JIRA_UPDATE -->
+   <!-- JIRA_ISSUE_KEY:VNT-45655 -->
+   <!-- JIRA_ACTION:comment -->
+   <!-- JIRA_PRIORITY: -->
+   <!-- JIRA_SUMMARY: -->
+   <!-- JIRA_LABELS: -->
+
+   ### Comment
+   The comment text to add to the issue, written in markdown.
+   Include all relevant details, context, severity assessment, etc.
+
+   ### Description
+   (Only include this section if the full description should be replaced.
+   Usually you will just add a comment, not rewrite the description.)
+
+   ### Fields
+   - **Issue:** VNT-45655
+   - **Action:** Comment
+   - **Priority:** (leave empty unless changing)
+   <!-- /JIRA_UPDATE -->
+   DRAFT
+   )"
+
+   IMPORTANT FORMAT RULES:
+   - The <!-- JIRA_UPDATE --> and <!-- /JIRA_UPDATE --> markers MUST be present
+   - Each <!-- JIRA_FIELD:value --> comment MUST be on its own line
+   - JIRA_ISSUE_KEY must be the exact issue key from the task (e.g., `VNT-45655`)
+   - JIRA_ACTION must be one of: comment, edit, comment_and_edit
+   - JIRA_PRIORITY: Highest, High, Medium, Low, Lowest (or leave empty if not changing)
+   - JIRA_SUMMARY: new summary text (or leave empty if not changing)
+   - JIRA_LABELS: updated labels (or leave empty if not changing)
+   - The ### Comment section contains the comment body in markdown (omit if action is `edit` only)
+   - The ### Description section is optional — include only when replacing the full description
+   - The ### Fields section is the human-readable summary of what will change
+   - Description hygiene rules from step 7 apply equally — no PM-OS task IDs, local paths,
+     or internal references in content that will be published to Jira
+
 8. After writing the draft, COMPLETE the task:
    Run: ./scripts/task.sh agent:complete {task_id}
    Do NOT pass `--output` — the JIRA_DRAFT lives in the task body, not a file.
@@ -188,4 +256,6 @@ Task {task_id}. Follow these steps:
 - Always read the task and source meeting first.
 - Use the jira-home skill as a REFERENCE for fields, not for publishing.
 - The <!-- JIRA_DRAFT --> format must be exact — the UI parses it.
+- When the task references an EXISTING issue key, draft a `<!-- JIRA_UPDATE -->` block, not a `<!-- JIRA_DRAFT -->` block.
+- The `<!-- JIRA_UPDATE -->` format must be exact — the UI parses it.
 - After drafting, call agent:complete (no --output) and STOP. The human publishes via the UI. Use agent:ask only for a genuine blocking question.
