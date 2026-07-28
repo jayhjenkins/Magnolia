@@ -155,10 +155,31 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
 8. **Cadence setup** — seed the standing-loop programs the user actually runs.
 
    **Phase A — Discover what they run.** Read `cadence/starter-sets.yaml` via
-   `starter_sets.load_starter_sets()` to see the available bundles (e.g. `eos`). Ask
-   warmly and plainly: "Do you run EOS? Or any other standing cadence I should know
-   about?" Match their answer to a bundle name. If nothing matches, skip to Phase D --
-   Cadence will grow organically from the intake sentinel once they start working.
+   `starter_sets.load_starter_sets()` to see the available bundles (roadmap, weekly,
+   eng-sync, outcomes, eos). Ask warm, LEADING questions about activities — not
+   frameworks. Walk through these one at a time, briefly explaining what each does:
+
+   1. **Roadmap** — "Do you track a product roadmap — features or initiatives moving
+      through stages like discovery, build, ship? Cadence can watch each one for
+      drift and flag when something stalls." → matches `roadmap` bundle.
+   2. **Weekly** — "Do you do any kind of weekly planning or prep for a standing
+      meeting — like a team sync, a 1:1 with your manager, or a priorities check-in?
+      Cadence can surface your top items and track whether they moved." → matches
+      `weekly` bundle. If yes, ask the follow-up: "Any of those specifically with
+      engineering leads? I have a specialized eng-sync variant that pulls dev
+      context." → matches `eng-sync` bundle if yes.
+   3. **Outcomes** — "After you ship something, do you go back and check whether it
+      actually worked — like reviewing metrics a few weeks later? Cadence can track
+      a shipped feature against its success criteria and tell you when the data is
+      in." → matches `outcomes` bundle.
+   4. **EOS** — "Do you run EOS — the Entrepreneurial Operating System? Rocks, L10s,
+      scorecards? Cadence can prep your L10 and track your quarterly rocks." →
+      matches `eos` bundle.
+
+   Collect `matched_bundles` — the list of bundle names the user said yes to. Gather
+   the union of all `types` from matched bundles and hand them to Phase B. If no
+   bundles match, skip to Phase D — Cadence will grow organically from the intake
+   sentinel once they start working.
 
    **Phase B — Create program-setup cards.** For each program type in the matched
    bundle, create a collab task card with `card_type: program-setup`. Use `task_lib`
@@ -198,9 +219,10 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
 
    **Phase D — Explain the card flow.** Tell the user warmly: "I have created setup
    cards for each program. You will see them in your Now feed. Open each one, use the
-   chat to tell me what you know -- your rocks doc, your scorecard metrics, your issues
-   list -- and I will build out the intent. When you are happy with it, hit 'Create
-   program' and the program goes live on your Cadence tab."
+   chat to tell me what you know — your roadmap doc, your rocks spreadsheet, the
+   meeting you prep for, the feature you just shipped — and I will build out the
+   intent. When you are happy with it, hit 'Create program' and the program goes live
+   on your Cadence tab."
 
    If no bundle matched in Phase A, tell them: "No worries -- Cadence will pick up
    patterns as you work. When something looks like a standing loop, it will surface a

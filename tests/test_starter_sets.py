@@ -9,10 +9,25 @@ import textwrap
 import starter_sets
 
 
-def test_eos_bundle_lists_the_four_eos_types():
+def test_eos_bundle_lists_the_eos_types():
     b = starter_sets.bundle("eos")
-    assert set(b["types"]) == {"eos-l10-prep", "eos-rock", "eos-cycle", "eos-issues"}
+    assert set(b["types"]) == {"eos-l10-prep", "eos-rock"}
     assert b["label"]
+
+
+def test_all_five_bundles_exist():
+    sets = starter_sets.load_starter_sets()
+    assert set(sets["sets"].keys()) == {"roadmap", "weekly", "eng-sync", "outcomes", "eos"}
+
+
+def test_roadmap_bundle():
+    b = starter_sets.bundle("roadmap")
+    assert set(b["types"]) == {"roadmap-initiative"}
+
+
+def test_outcomes_bundle():
+    b = starter_sets.bundle("outcomes")
+    assert set(b["types"]) == {"did-it-work"}
 
 
 def test_real_starter_sets_validate_against_the_registry():
