@@ -933,6 +933,7 @@ async function saveMeetingDetails(taskId) {
   const body = {};
   if (titleInput) body.meeting_title = titleInput.value.trim();
   if (descInput) body.meeting_description = descInput.value.trim();
+  body.meeting_attendees = getCurrentAttendees();
 
   btn.textContent = 'Saving...';
   btn.disabled = true;
@@ -992,6 +993,7 @@ function getCurrentAttendees() {
 
 function removeAttendee(el) {
   el.closest('.dt-att').remove();
+  _persistAttendees();
 }
 
 function addAttendeeChip(email) {
@@ -1006,6 +1008,17 @@ function addAttendeeChip(email) {
   const initial = (email[0] || '?').toUpperCase();
   row.innerHTML = `<span class="dt-att-avatar">${initial}</span><span class="dt-att-main"><span class="dt-att-name">${escapeHtml(email)}</span></span><span class="dt-att-remove" onclick="removeAttendee(this)">&times;</span>`;
   container.appendChild(row);
+  _persistAttendees();
+}
+
+function _persistAttendees() {
+  if (!currentTaskId) return;
+  const attendees = getCurrentAttendees();
+  fetch(`${API}/tasks/${currentTaskId}/meeting-details`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ meeting_attendees: attendees }),
+  }).catch(() => {});
 }
 
 function setupAttendeeTypeahead() {

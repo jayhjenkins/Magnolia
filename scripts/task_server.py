@@ -2447,6 +2447,15 @@ def handle_update_meeting_details(handler, task_id):
         changes["meeting_title"] = body["meeting_title"].strip()
     if "meeting_description" in body:
         changes["meeting_description"] = body["meeting_description"].strip()
+    if "meeting_attendees" in body:
+        attendees = body["meeting_attendees"]
+        if isinstance(attendees, list):
+            changes["meeting_attendees"] = [a.strip() for a in attendees if a and a.strip()]
+    if "meeting_duration" in body:
+        try:
+            changes["meeting_duration"] = int(body["meeting_duration"])
+        except (TypeError, ValueError):
+            pass
 
     if not changes:
         _error_response(handler, "No meeting fields to update", status=400)
