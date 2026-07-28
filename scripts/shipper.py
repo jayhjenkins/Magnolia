@@ -185,6 +185,10 @@ def _attempt_publish(task_id, draft):
         task_lib.complete_task(task_id, actor="system")
     except Exception:
         pass
+    try:
+        _emit_jira_receipt(task_id, issue_key, issue_url, "Created")
+    except Exception:
+        pass
     jira_publish._trace_publish(task_id, draft, issue_key=issue_key, issue_url=issue_url)
     return ("ok", (issue_key, issue_url))
 
@@ -229,8 +233,34 @@ def _attempt_update(task_id, update):
         task_lib.complete_task(task_id, actor="system")
     except Exception:
         pass
+    try:
+        _emit_jira_receipt(task_id, issue_key, issue_url, action_label)
+    except Exception:
+        pass
     jira_publish._trace_update(task_id, update, issue_key=issue_key, issue_url=issue_url)
     return ("ok", (issue_key, issue_url))
+
+
+def _emit_jira_receipt(source_task_id, issue_key, issue_url, action_label):
+    """Emit a lightweight receipt card with the Jira link so the operator can
+    verify the result without searching Jira manually."""
+    src = task_lib.read_task(source_task_id)
+    src_title = (src.get("frontmatter") or {}).get("title", "")
+    cid, _ = task_lib.create_task(
+        f"{action_label} {issue_key}",
+        queue="collab", domain="ops", creator="agent",
+        description=(f"**[{issue_key}]({issue_url})**\n\n"
+                     f"Source: {src_title}\n\n"
+                     f"Open the link above to verify in Jira."),
+        card_type="receipt")
+    task_lib.update_task(cid, changes={
+        "receipt_kind": "jira",
+        "receipt_summary": f"{action_label} {issue_key}",
+        "issue_key": issue_key,
+        "issue_url": issue_url,
+    })
+    task_lib.complete_task(cid, actor="system")
+    return cid
 
 
 def _emit_confirm_card(family, source_task):

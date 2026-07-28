@@ -200,6 +200,13 @@ const bodyRenderers = {
     // sent) — "Undo" can't unsend it; what it CAN do is stop this type from
     // auto-shipping again. Branch on receipt_kind (projected onto the list face
     // and the detail object; missing → safe default).
+    if (task.receipt_kind === 'jira' && task.issue_url) {
+      return `<div class="card-body card-kind-body receipt-body" data-card-body="preview">
+        <div class="receipt-did">${did}</div>
+        ${how}
+        <div class="receipt-revert">${svgIcon('jira')}<span><a href="${escapeHtml(task.issue_url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">Open in Jira</a></span></div>
+      </div>`;
+    }
     const revert = task.receipt_kind === 'autoship'
       ? `Already sent — <b>Undo</b> stops auto-shipping this type.`
       : `Applied — <b>Undo</b> reverts this change.`;
