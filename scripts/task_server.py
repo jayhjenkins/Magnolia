@@ -1231,6 +1231,7 @@ def _apply_cadence_proposal(task_id, t):
         "program_id": program_id})
 
     _maybe_emit_jira_sync(program_id, op, result, summary)
+    _maybe_birth_did_it_work(program_id, op, result)
 
     return receipt_id
 
@@ -1294,6 +1295,87 @@ def _maybe_emit_jira_sync(program_id, op, result, summary):
         )
         task_lib.update_task(tid, changes={"task_type": "ticket-creator"})
         _dispatch_bootstrap_task(tid)
+
+
+def _maybe_birth_did_it_work(program_id, op, result):
+    """When a roadmap-initiative advances to 'shipped', auto-birth a did-it-work
+    program that inherits the initiative's tracker bindings and metric context.
+
+    The outcome tracker monitors whether the shipped feature actually moved
+    the metrics it was supposed to move. Tier-1: local file only."""
+    if op != "advance-phase" or result.get("to") != "shipped":
+        return
+    try:
+        prog = program_lib.read_program(program_id)
+    except FileNotFoundError:
+        return
+    fm = prog.get("frontmatter") or {}
+    if fm.get("type") != "roadmap-initiative":
+        return
+
+    src_title = fm.get("title") or program_id
+    bindings = fm.get("bindings") or []
+    tracker_bindings = [
+        b for b in bindings
+        if b.get("kind") == "project_management" and b.get("anchor")
+    ]
+    body = prog.get("body") or ""
+    north_star = ""
+    for line in body.splitlines():
+        lower = line.lower()
+        if "north star" in lower or "primary metric" in lower:
+            north_star = line.strip()
+            break
+
+    intent = (
+        f"Outcome tracker for **{src_title}** ({program_id}), which shipped.\n\n"
+        f"**Question:** Did this feature actually move the numbers it was "
+        f"supposed to move?\n\n"
+    )
+    if north_star:
+        intent += f"**Target metric:** {north_star}\n\n"
+    if tracker_bindings:
+        anchors = ", ".join(b["anchor"] for b in tracker_bindings)
+        intent += f"**Jira feature(s):** {anchors}\n\n"
+    intent += (
+        f"Monitor Pendo usage data, Zendesk ticket volume, and scorecard "
+        f"metrics against the targets defined at ship time. Surface weekly "
+        f"whether the trend is on-track, flat, or regressing."
+    )
+
+    extra = {"drift": "holding"}
+    if tracker_bindings:
+        extra["bindings"] = [
+            {k: v for k, v in b.items()}
+            for b in tracker_bindings
+        ]
+
+    try:
+        new_id, _ = program_lib.create_program(
+            type="did-it-work",
+            title=f"Did it work: {src_title}",
+            owner_role=fm.get("owner_role") or "product",
+            intent=intent,
+            frontmatter_extra=extra,
+        )
+    except Exception:
+        return
+
+    receipt_id, _ = task_lib.create_task(
+        f"Born: Did it work - {src_title}",
+        queue="human", domain="ops", creator="cadence",
+        card_type="receipt",
+        description=(
+            f"Auto-created outcome tracker {new_id} because {program_id} "
+            f"({src_title}) advanced to shipped.\n\n"
+            f"The new program monitors whether the feature moved its target "
+            f"metrics. It inherits the tracker bindings from the initiative."
+        ),
+    )
+    task_lib.update_task(receipt_id, changes={
+        "receipt_kind": "cadence-apply",
+        "program_id": new_id,
+    })
 
 
 def _dispatch_bootstrap_task(task_id):

@@ -261,6 +261,60 @@ def test_accept_cadence_proposal_no_jira_sync_without_binding(
     assert len(agent_tasks) == 0
 
 
+def test_advance_to_shipped_births_did_it_work(tasks_root, tmp_path, monkeypatch):
+    """Advancing a roadmap-initiative to 'shipped' auto-creates a did-it-work program."""
+    import task_server, task_lib, program_lib
+    pid = _seed_cadence_program(tmp_path, monkeypatch)
+    monkeypatch.setattr(task_server, "PM_OS_DIR", str(tmp_path / "not-a-repo"))
+    monkeypatch.setattr(task_server, "_dispatch_bootstrap_task", lambda tid: None)
+    prog = program_lib.read_program(pid, root=str(tmp_path))
+    fm = prog["frontmatter"]
+    fm["phase"] = "execution"
+    fm["phase_entered"] = {"discovery": "2026-05-01", "planning": "2026-05-20",
+                           "execution": "2026-06-01"}
+    fm["bindings"] = [{"id": "tracker", "role": "truth",
+                       "kind": "project_management", "anchor": "VNT-42411",
+                       "mode": "read", "health": "ok"}]
+    fm["checkpoints"] = [
+        {"id": "discovery-exit", "label": "Discovery exit",
+         "due": "2026-05-19", "instrument": "human attestation", "status": "met"},
+        {"id": "ship", "label": "Ship",
+         "due": "2026-09-15", "instrument": "the PM tracker", "status": "pending"},
+    ]
+    program_lib._write_program_file(prog["filepath"], fm, prog["body"])
+    proposal = {"op": "advance-phase", "to": "shipped", "from": "execution"}
+    tid, _ = task_lib.create_task(
+        "ship it", queue="human", card_type="recommendation",
+        task_type="cadence-propose-update", tags=[pid, "cadence"],
+        proposal=proposal)
+    task_server.apply_recommendation(tid)
+    diw = [p for p in program_lib.list_programs(root=str(tmp_path))
+           if p["frontmatter"].get("type") == "did-it-work"]
+    assert len(diw) == 1
+    diw_fm = diw[0]["frontmatter"]
+    assert "Payments revamp" in diw_fm["title"]
+    diw_bindings = diw_fm.get("bindings") or []
+    assert any(b.get("anchor") == "VNT-42411" for b in diw_bindings)
+
+
+def test_advance_to_non_shipped_does_not_birth(tasks_root, tmp_path, monkeypatch):
+    """Advancing to planning does NOT birth a did-it-work program."""
+    import task_server, task_lib, program_lib
+    pid = _seed_cadence_program(tmp_path, monkeypatch)
+    monkeypatch.setattr(task_server, "PM_OS_DIR", str(tmp_path / "not-a-repo"))
+    monkeypatch.setattr(task_server, "_dispatch_bootstrap_task", lambda tid: None)
+    proposal = {"op": "advance-phase", "to": "planning",
+                "checkpoint": "discovery-exit", "from": "discovery"}
+    tid, _ = task_lib.create_task(
+        "advance", queue="human", card_type="recommendation",
+        task_type="cadence-propose-update", tags=[pid, "cadence"],
+        proposal=proposal)
+    task_server.apply_recommendation(tid)
+    diw = [p for p in program_lib.list_programs(root=str(tmp_path))
+           if p["frontmatter"].get("type") == "did-it-work"]
+    assert len(diw) == 0
+
+
 def test_cadence_propose_update_defaults_to_shadow(tmp_path):
     """The proposal action-type rides the ladder at shadow (propose-only) by default."""
     import ladder_lib
