@@ -84,8 +84,8 @@ def _next_id(root=None):
         current = int(raw) if raw else 1
         program_id = f"PROG-{current:04d}"
         fd.seek(0)
-        fd.write(str(current + 1))
         fd.truncate()
+        fd.write(str(current + 1))
         return program_id
     finally:
         platform_lib.unlock(fd)

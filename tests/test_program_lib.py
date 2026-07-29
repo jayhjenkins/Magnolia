@@ -32,6 +32,29 @@ def test_next_id_increments(tmp_path):
     assert (a, b) == ("PROG-0001", "PROG-0002")
 
 
+def test_next_id_counter_no_concatenation(tmp_path):
+    """Counter must overwrite, not append. Regression: open('a+') appends
+    writes regardless of seek(0), producing '4243' instead of '43'."""
+    root = str(tmp_path)
+    for i in range(5):
+        pl.create_program(type="weekly-priorities", title=f"P{i}", owner_role="product", root=root)
+    counter_path = os.path.join(root, "datasets", "programs", "_counter")
+    with open(counter_path) as f:
+        raw = f.read().strip()
+    assert raw == "6", f"Counter should be '6', got '{raw}' (concatenation bug)"
+
+
+def test_build_cadence_payload_nonempty_with_programs(tmp_path):
+    """build_cadence_payload must return families when active programs exist."""
+    root = str(tmp_path)
+    pl.create_program(type="roadmap-initiative", title="Test initiative",
+                      owner_role="product", root=root,
+                      frontmatter_extra={"status": "active", "drift": "holding"})
+    payload = pl.build_cadence_payload(root=root)
+    total = sum(len(f["programs"]) for f in payload["families"])
+    assert total > 0, "Payload has no programs despite an active program on disk"
+
+
 def test_list_programs_filters_status(tmp_path):
     root = str(tmp_path)
     pl.create_program(type="weekly-priorities", title="active one", owner_role="product",
