@@ -216,6 +216,51 @@ def test_accept_normal_recommendation_still_git_applies(tasks_root, tmp_path, mo
     assert rc.get("revert_commit")  # git path: receipt records the revert commit
 
 
+def test_accept_cadence_proposal_emits_jira_sync_when_tracker_bound(
+        tasks_root, tmp_path, monkeypatch):
+    """Accepting a proposal on a program with a project_management binding
+    emits a ticket-creator agent task to draft a Jira update."""
+    import task_server, task_lib, program_lib
+    pid = _seed_cadence_program(tmp_path, monkeypatch)
+    monkeypatch.setattr(task_server, "PM_OS_DIR", str(tmp_path / "not-a-repo"))
+    monkeypatch.setattr(task_server, "_dispatch_bootstrap_task", lambda tid: None)
+    prog = program_lib.read_program(pid, root=str(tmp_path))
+    fm = prog["frontmatter"]
+    fm["bindings"] = [{"id": "tracker", "role": "truth",
+                       "kind": "project_management", "anchor": "VNT-42411",
+                       "mode": "read", "health": "ok"}]
+    program_lib._write_program_file(prog["filepath"], fm, prog["body"])
+    proposal = {"op": "advance-phase", "to": "planning",
+                "checkpoint": "discovery-exit", "from": "discovery"}
+    tid, _ = task_lib.create_task(
+        "advance?", queue="human", card_type="recommendation",
+        task_type="cadence-propose-update", tags=[pid, "cadence"],
+        proposal=proposal)
+    task_server.apply_recommendation(tid)
+    agent_tasks = [t for t in task_lib.list_tasks(queue="agent")
+                   if "VNT-42411" in t.get("title", "")]
+    assert len(agent_tasks) == 1
+    assert agent_tasks[0].get("task_type") == "ticket-creator"
+
+
+def test_accept_cadence_proposal_no_jira_sync_without_binding(
+        tasks_root, tmp_path, monkeypatch):
+    """No Jira sync task when the program has no project_management binding."""
+    import task_server, task_lib
+    pid = _seed_cadence_program(tmp_path, monkeypatch)
+    monkeypatch.setattr(task_server, "PM_OS_DIR", str(tmp_path / "not-a-repo"))
+    proposal = {"op": "advance-phase", "to": "planning",
+                "checkpoint": "discovery-exit", "from": "discovery"}
+    tid, _ = task_lib.create_task(
+        "advance?", queue="human", card_type="recommendation",
+        task_type="cadence-propose-update", tags=[pid, "cadence"],
+        proposal=proposal)
+    task_server.apply_recommendation(tid)
+    agent_tasks = [t for t in task_lib.list_tasks(queue="agent")
+                   if "Jira" in t.get("title", "") or "VNT" in t.get("title", "")]
+    assert len(agent_tasks) == 0
+
+
 def test_cadence_propose_update_defaults_to_shadow(tmp_path):
     """The proposal action-type rides the ladder at shadow (propose-only) by default."""
     import ladder_lib

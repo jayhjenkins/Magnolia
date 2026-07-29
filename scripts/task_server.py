@@ -1229,7 +1229,71 @@ def _apply_cadence_proposal(task_id, t):
     task_lib.update_task(receipt_id, changes={
         "receipt_kind": "cadence-apply", "source_recommendation": task_id,
         "program_id": program_id})
+
+    _maybe_emit_jira_sync(program_id, op, result, summary)
+
     return receipt_id
+
+
+def _maybe_emit_jira_sync(program_id, op, result, summary):
+    """After a cadence proposal is accepted, emit a Jira sync task if the program
+    has a project_management tracker binding.
+
+    Creates an agent-queue ticket-creator task that drafts a JIRA_UPDATE block
+    to push the phase/checkpoint change to the bound Jira feature(s). The agent
+    drafts; the human clicks "Update Jira" to publish -- same Tier-2 flow as
+    any other Jira update."""
+    try:
+        prog = program_lib.read_program(program_id)
+    except FileNotFoundError:
+        return
+    fm = prog.get("frontmatter") or {}
+    bindings = fm.get("bindings") or []
+    tracker_bindings = [
+        b for b in bindings
+        if b.get("kind") == "project_management" and b.get("anchor")
+    ]
+    if not tracker_bindings:
+        return
+
+    title = fm.get("title") or program_id
+    phase = fm.get("phase") or "unknown"
+    checkpoints = fm.get("checkpoints") or []
+    cp_summary = "; ".join(
+        f"{c.get('label', c.get('id', '?'))}: {c.get('status', '?')}"
+        + (f" (due {c['due']})" if c.get("due") else "")
+        for c in checkpoints
+    ) or "none"
+
+    anchors = ", ".join(b["anchor"] for b in tracker_bindings)
+    description = (
+        f"A Cadence proposal was accepted for **{title}** ({program_id}):\n\n"
+        f"**{summary}**\n\n"
+        f"Current phase: **{phase}**\n"
+        f"Checkpoints: {cp_summary}\n\n"
+        f"Jira feature(s): {anchors}\n\n"
+        f"Draft a `<!-- JIRA_UPDATE -->` block for each bound Jira feature. "
+        f"Update the feature's status and dates to reflect the current phase. "
+        f"Specifically, suggest changes to:\n"
+        f"- Go-to-market / target ship date (based on phase + checkpoint dates)\n"
+        f"- Early adopter (EA) date (if entering beta/execution phase)\n"
+        f"- GA date (if entering shipped/ga phase)\n"
+        f"- Status field to reflect current phase\n\n"
+        f"Read the full program file at datasets/programs/{program_id}.md for "
+        f"complete context before drafting."
+    )
+
+    for b in tracker_bindings:
+        anchor = b["anchor"]
+        tid, _ = task_lib.create_task(
+            f"Update Jira {anchor}: {summary}",
+            queue="agent", domain="ops", creator="cadence",
+            description=description,
+            tags=[program_id, "cadence"],
+            card_type="task",
+        )
+        task_lib.update_task(tid, changes={"task_type": "ticket-creator"})
+        _dispatch_bootstrap_task(tid)
 
 
 def _dispatch_bootstrap_task(task_id):
