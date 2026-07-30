@@ -207,8 +207,16 @@ const bodyRenderers = {
         <div class="receipt-revert">${svgIcon('jira')}<span><a href="${escapeHtml(task.issue_url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">Open in Jira</a></span></div>
       </div>`;
     }
+    if (task.receipt_kind === 'cron-run') {
+      // Purely informational — a record of a deterministic run, nothing to undo.
+      return `<div class="card-body card-kind-body receipt-body" data-card-body="preview">
+        <div class="receipt-did">${did}</div>
+      </div>`;
+    }
     const revert = task.receipt_kind === 'autoship'
       ? `Already sent — <b>Undo</b> stops auto-shipping this type.`
+      : task.receipt_kind === 'ladder-demotion'
+      ? `Auto-demoted — <b>Undo</b> restores the prior tier.`
       : `Applied — <b>Undo</b> reverts this change.`;
     return `<div class="card-body card-kind-body receipt-body" data-card-body="preview">
       <div class="receipt-did">${did}</div>
