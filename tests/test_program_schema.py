@@ -22,24 +22,20 @@ def _weekly_priorities_type():
     return next(t for t in reg["types"] if t["id"] == "weekly-priorities")
 
 
-def test_weekly_priorities_has_produce_artifact_and_draft_message_emitters():
-    """weekly-priorities keeps escalate and gains the two cycle-fresh emitters
-    that drive the Monday digest (worker dispatch + rate-capped nudge)."""
+def test_weekly_priorities_has_produce_artifact_emitter():
+    """weekly-priorities keeps escalate + the cycle-fresh produce-artifact
+    emitter that dispatches the priority-digest worker on Mondays. The worker
+    owns the full flow (generate digest + create send card), so there is no
+    separate draft-message emitter."""
     wp = _weekly_priorities_type()
     actions = {(em.get("on"), em.get("action")) for em in wp["emitters"]}
-    # escalate stays
     assert ("drift:broken", "escalate") in actions
-    # produce-artifact dispatches the priority-digest worker
     produce = next(em for em in wp["emitters"]
                    if em.get("action") == "produce-artifact")
     assert produce["on"] == "cycle-fresh"
     assert produce["worker"] == "priority-digest"
-    # draft-message carries the weekly-digest template + a nudge cap
-    draft = next(em for em in wp["emitters"]
-                 if em.get("action") == "draft-message")
-    assert draft["on"] == "cycle-fresh"
-    assert draft["template"] == "weekly-digest"
-    assert draft["max_nudges_per_person_per_week"] == 1
+    assert produce.get("fire_weekday") == 1
+    assert "draft-message" not in {em.get("action") for em in wp["emitters"]}
 
 
 # ─── inc5 slice 10: EOS family + L10-prep nudge + sheet-watch wiring ─────────

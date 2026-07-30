@@ -40,8 +40,7 @@
       "sources": [ { "kind": "transcripts", "mode": "read" } ],
       "emitters": [
         { "on": "drift:broken", "action": "escalate" },
-        { "on": "cycle-fresh", "action": "produce-artifact", "worker": "priority-digest", "fire_weekday": 1 },
-        { "on": "cycle-fresh", "action": "draft-message", "template": "weekly-digest", "max_nudges_per_person_per_week": 1, "fire_weekday": 1 }
+        { "on": "cycle-fresh", "action": "produce-artifact", "worker": "priority-digest", "fire_weekday": 1 }
       ],
       "intake": { "route": "capture" },
       "presentation": { "chip_tokens": {} } },
