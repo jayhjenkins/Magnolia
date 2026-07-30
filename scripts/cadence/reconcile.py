@@ -1321,6 +1321,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 # human-facing card body; duplicating the text is fine).
                 message_body=_build_nudge_description(facts, program_id, recipient),
             )
+            task_lib.update_task(task_id, changes={"agent_status": "complete"})
             emitted.append(task_id)
             _record_nudge_count(fm, period, recipient)
 

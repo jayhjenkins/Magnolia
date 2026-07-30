@@ -52,6 +52,7 @@ from adapters.project_management._contract import NotConfigured
 from adapters import NeedsConfirmation
 from cron_scheduler import CronScheduler
 from cadence.scheduler import CadenceScheduler
+from dispatch_scheduler import DispatchScheduler
 import shipper
 from shipper import (
     _message_draft_from_task, _attempt_send_message, _record_manual_send,
@@ -3576,6 +3577,9 @@ def main():
     cadence_scheduler = CadenceScheduler()
     cadence_scheduler.start()
 
+    dispatch_scheduler = DispatchScheduler(dispatch_fn=_spawn_task_dispatch)
+    dispatch_scheduler.start()
+
     server = ReusableHTTPServer(("127.0.0.1", PORT), TaskServerHandler)
     print(f"PM-OS Task Server running at http://127.0.0.1:{PORT}")
     print(f"  API:    http://127.0.0.1:{PORT}/api/tasks")
@@ -3590,6 +3594,7 @@ def main():
         print("\nShutting down.")
         scheduler.stop()
         cadence_scheduler.stop()
+        dispatch_scheduler.stop()
         server.server_close()
 
 
