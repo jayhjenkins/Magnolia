@@ -4,7 +4,7 @@ task_cli.py — CLI core for PM-OS task management.
 
 Called by task.sh wrapper. Provides five core commands (add, list, show,
 update, done) and agent convenience aliases (agent:start, agent:complete,
-agent:fail, agent:ask).
+agent:receipt, agent:fail, agent:ask).
 """
 
 import argparse
@@ -294,6 +294,42 @@ def _spawn_judge(task_id):
         print(f"  (judge not dispatched: {e})")
 
 
+def cmd_agent_receipt(args):
+    """Agent finished a deterministic, no-decision run (e.g. a cron-dispatched
+    script that already did everything itself). Unlike agent:complete, this
+    does NOT leave the task in the 'awaiting human review' bucket — there is
+    nothing to review. It archives the source task immediately and emits a
+    small informational receipt card in its place, mirroring
+    shipper.py's _emit_jira_receipt."""
+    now = task_lib._now_iso()
+    task_lib.update_task(args.task_id, changes={
+        "agent_status": "complete",
+        "agent_completed": now,
+    }, comment=f"Agent work complete. {args.summary}", actor="agent")
+    task_lib.complete_task(args.task_id, actor="system")
+    receipt_id = _emit_run_receipt(args.task_id, args.summary)
+    print(f"Agent completed {args.task_id} — receipt emitted ({receipt_id})")
+    _spawn_judge(args.task_id)
+
+
+def _emit_run_receipt(source_task_id, summary):
+    """Emit an informational receipt for a deterministic, no-decision agent
+    run. Auto-completed like the Jira receipt — nothing to Keep/Undo, it's
+    just a record of what happened."""
+    src = task_lib.read_task(source_task_id)
+    src_title = (src.get("frontmatter") or {}).get("title", "")
+    cid, _ = task_lib.create_task(
+        src_title, queue="collab", domain="ops", creator="agent",
+        description=summary, card_type="receipt")
+    task_lib.update_task(cid, changes={
+        "receipt_kind": "cron-run",
+        "receipt_summary": summary,
+        "source_task": source_task_id,
+    })
+    task_lib.complete_task(cid, actor="system")
+    return cid
+
+
 def cmd_agent_fail(args):
     """Mark task as failed by agent."""
     changes = {
@@ -499,6 +535,14 @@ def main():
     p_acomplete.add_argument("task_id", help="Task ID")
     p_acomplete.add_argument("--output", default=None, help="Path to output artifact")
     p_acomplete.set_defaults(func=cmd_agent_complete)
+
+    # ─── agent:receipt ───────────────────────────────────────────────────
+    p_areceipt = subparsers.add_parser(
+        "agent:receipt",
+        help="Agent finished a no-decision run: archive it and emit a receipt")
+    p_areceipt.add_argument("task_id", help="Task ID")
+    p_areceipt.add_argument("summary", help="One-line summary of what happened")
+    p_areceipt.set_defaults(func=cmd_agent_receipt)
 
     # ─── agent:fail ──────────────────────────────────────────────────────
     p_afail = subparsers.add_parser("agent:fail", help="Agent reports failure")

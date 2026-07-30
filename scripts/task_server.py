@@ -1618,6 +1618,20 @@ def undo_receipt(task_id):
                    "remains as applied.")
         task_lib.update_task(task_id, changes={"status": "done"}, comment=comment, actor="human")
         return
+    # Auto-demotion receipt: unlike autoship, this one CAN be reverted — the
+    # "action" was just a local ladder.json tier flip, not an external send.
+    # Undo restores the tier the type was demoted from.
+    if t.get("receipt_kind") == "ladder-demotion":
+        task_type = t.get("demote_task_type")
+        from_tier = t.get("demote_from_tier")
+        if task_type and from_tier:
+            ladder_lib.set_tier(task_type, from_tier)
+            comment = f"Undo: restored '{task_type}' to {from_tier}."
+        else:
+            comment = ("Undo: missing demotion fields on this receipt, so nothing "
+                       "was restored.")
+        task_lib.update_task(task_id, changes={"status": "done"}, comment=comment, actor="human")
+        return
     rev = t.get("revert_commit")
     if not rev:
         raise ValueError("no revert_commit on this receipt")

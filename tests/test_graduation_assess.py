@@ -141,6 +141,25 @@ def test_auto_demote_after_consecutive_bad_windows(tasks_root, tmp_path):
     assert ladder_lib.tier_of("prd-draft", path=p) == "shadow"  # 2nd consecutive: demoted
 
 
+def test_demotion_emits_receipt(tasks_root, tmp_path):
+    import task_lib, graduation_assess, ladder_lib
+    p = str(tmp_path / "ladder.json")
+    ladder_lib.set_tier("prd-draft", "supervised", path=p)
+    _judged(task_lib, "prd-draft", 3, react="down", n=8)
+    graduation_assess.assess(ladder_path=p, now_iso="2026-06-10T00:00:00Z")
+    graduation_assess.assess(ladder_path=p, now_iso="2026-06-17T00:00:00Z")  # triggers demotion
+    receipts = [t for t in task_lib.list_tasks()
+                if t.get("card_type") == "receipt" and t.get("receipt_kind") == "ladder-demotion"]
+    assert len(receipts) == 1
+    r = receipts[0]
+    assert r["status"] == "open"  # actionable — Keep/Undo, not auto-archived
+
+    fm = task_lib.read_task(r["id"])["frontmatter"]
+    assert fm["demote_task_type"] == "prd-draft"
+    assert fm["demote_from_tier"] == "supervised"
+    assert fm["demote_to_tier"] == "shadow"
+
+
 def test_no_demote_on_insufficient_data(tasks_root, tmp_path):
     import task_lib, graduation_assess, ladder_lib
     p = str(tmp_path / "ladder.json")

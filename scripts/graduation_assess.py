@@ -161,8 +161,9 @@ def assess(ladder_path=None, now_iso=None):
                 below = False  # not enough data this window to justify demotion
             streak = ladder_lib.note_demotion_signal(task_type, below, path=ladder_path)
             if below and streak >= th["demote_consecutive"]:
-                ladder_lib.demote(task_type, path=ladder_path)
+                new_tier = ladder_lib.demote(task_type, path=ladder_path)
                 ladder_lib.note_demotion_signal(task_type, False, path=ladder_path)  # reset
+                _emit_demotion_receipt(task_type, cur, new_tier, n, approval, agreement)
     return created
 
 
@@ -184,6 +185,34 @@ def _create_graduation_card(task_type, cur, nxt, n, approval, agreement, example
         "grad_agreement_pct": round(agreement * 100), "grad_examples": example_ids,
     })
     return tid
+
+
+def _emit_demotion_receipt(task_type, from_tier, to_tier, n, approval, agreement):
+    """A visible, actionable receipt for an auto-demotion. Unlike a graduation
+    card (which asks permission to climb), this documents something the system
+    already did on its own — but Undo has a real effect (restore the tier), so
+    it stays open with Keep/Undo rather than auto-archiving."""
+    what = f"Demoted '{task_type}': {from_tier} -> {to_tier}"
+    desc = (f"**{task_type}** dropped below its **{from_tier}** entry bar for "
+            f"consecutive assessments and was auto-demoted.\n\n"
+            f"- Previous tier: **{from_tier}** -> now: **{to_tier}**\n"
+            f"- Judged tasks (window): **{n}**\n"
+            f"- Your approval rate: **{round(approval*100)}%**\n"
+            f"- Judge<->you agreement: **{round(agreement*100)}%**\n\n"
+            f"**Keep** to acknowledge, or **Undo** to restore it to **{from_tier}**.")
+    cid, _ = task_lib.create_task(what, queue="collab", priority="medium", domain="ops",
+                                  creator="agent", description=desc, tags=["graduation"],
+                                  card_type="receipt")
+    task_lib.update_task(cid, changes={
+        "receipt_kind": "ladder-demotion",
+        "receipt_summary": what,
+        "demote_task_type": task_type,
+        "demote_from_tier": from_tier,
+        "demote_to_tier": to_tier,
+        "grad_n": n, "grad_approval_pct": round(approval * 100),
+        "grad_agreement_pct": round(agreement * 100),
+    })
+    return cid
 
 
 def main():
