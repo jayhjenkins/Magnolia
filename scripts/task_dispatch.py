@@ -173,12 +173,6 @@ def get_actionable_tasks():
             log(f"ERROR: Failed to parse {queue} queue JSON: {e}")
             continue
 
-    # Card types that represent a human decision (accept/reject, keep/undo,
-    # confirm/reject, graduate) rather than agent work — dispatching these to a
-    # worker produces a confused session with nothing to do. "receipt" was the
-    # confirmed cause of the 2026-07-30 VNT-100 duplicate-card incident: an
-    # auto-completed receipt that stalled mid-archive (status stayed "open")
-    # got swept and redispatched to the ticket-creator worker repeatedly.
     HUMAN_INTERACTIVE_CARDS = {"program-setup", "receipt", "confirm", "graduation", "recommendation"}
 
     # Filter to actionable tasks
