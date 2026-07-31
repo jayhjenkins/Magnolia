@@ -18,6 +18,12 @@ WIN_TASK_NAME = "MagnoliaTaskServer"
 
 def render_launchagent(label, program, working_dir, log_path):
     args = "\n".join(f"        <string>{escape(a)}</string>" for a in program)
+    # launchd hands processes a minimal PATH that omits ~/.local/bin, where
+    # per-user tools (mgc, claude) get installed — resolved here against the
+    # CURRENT user's home so the plist is correct for whoever installs it, not
+    # baked to one developer's machine.
+    local_bin = os.path.expanduser("~/.local/bin")
+    path_value = f"{local_bin}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -41,7 +47,7 @@ def render_launchagent(label, program, working_dir, log_path):
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>{escape(path_value)}</string>
     </dict>
 </dict>
 </plist>

@@ -1,7 +1,8 @@
 import persist_lib
 
 
-def test_render_plist_has_no_hardcoded_user_and_uses_repo_path():
+def test_render_plist_has_no_hardcoded_user_and_uses_repo_path(monkeypatch):
+    monkeypatch.setenv("HOME", "/Users/testuser")
     plist = persist_lib.render_launchagent(
         label="com.pm-os.task-server",
         program=["/usr/bin/python3", "/repo/scripts/task_server.py"],
@@ -13,6 +14,19 @@ def test_render_plist_has_no_hardcoded_user_and_uses_repo_path():
     assert "<key>KeepAlive</key>" in plist
     assert "/repo/scripts/task_server.py" in plist
     assert "com.pm-os.task-server" in plist
+
+
+def test_render_plist_path_includes_current_users_local_bin(monkeypatch):
+    # launchd's own PATH omits ~/.local/bin (where mgc, claude, etc. live);
+    # this must resolve against whoever is installing, not a baked-in developer path.
+    monkeypatch.setenv("HOME", "/Users/testuser")
+    plist = persist_lib.render_launchagent(
+        label="com.pm-os.task-server",
+        program=["/usr/bin/python3", "/repo/scripts/task_server.py"],
+        working_dir="/repo",
+        log_path="/repo/logs/task-server.log",
+    )
+    assert "/Users/testuser/.local/bin" in plist
 
 
 def test_render_scheduled_task_at_logon():
