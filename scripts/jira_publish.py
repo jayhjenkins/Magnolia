@@ -185,8 +185,9 @@ def build_claude_prompt(draft):
     summary_escaped = draft["summary"].replace('"', '\\"')
     description_escaped = draft["description"].replace('"', '\\"')
 
-    prompt = f"""Please create a Jira issue using the createJiraIssue tool with these details:
+    prompt = f"""You are an automated Jira publishing step in a CI-style pipeline. The user has already reviewed and approved this ticket. Your job is to call the createJiraIssue tool and report the result.
 
+Call mcp__claude_ai_Jira__createJiraIssue with these parameters:
 - cloudId: "{JIRA_CLOUD_ID}"
 - projectKey: "{JIRA_PROJECT_KEY}"
 - issueTypeName: "{issue_type}"
@@ -195,12 +196,12 @@ def build_claude_prompt(draft):
 - contentFormat: "markdown"
 - additional_fields: {additional_fields_json}
 
-Once the issue is created, report the result on a line matching this format so I can parse it programmatically:
+After the tool returns, report the result on a line matching this format so the pipeline can parse it:
 JIRA_RESULT:ISSUE_KEY|ISSUE_URL
 
 For example: JIRA_RESULT:{JIRA_PROJECT_KEY}-1234|{JIRA_BROWSE_BASE}/{JIRA_PROJECT_KEY}-1234
 
-If the tool call fails, report it as: JIRA_ERROR:description of what went wrong"""
+If the tool call fails, report: JIRA_ERROR:description of what went wrong"""
 
     return prompt
 
@@ -260,17 +261,18 @@ def build_comment_prompt(update):
     issue_key = update["issue_key"]
     comment_body = update["comment_body"].replace('"', '\\"')
 
-    prompt = f"""Please add a comment to Jira issue {issue_key} using the addCommentToJiraIssue tool with these details:
+    prompt = f"""You are an automated Jira commenting step in a CI-style pipeline. The user has already approved this comment. Your job is to call the addCommentToJiraIssue tool and report the result.
 
+Call mcp__claude_ai_Jira__addCommentToJiraIssue with these parameters:
 - cloudId: "{JIRA_CLOUD_ID}"
 - issueIdOrKey: "{issue_key}"
 - commentBody: "{comment_body}"
 - contentFormat: "markdown"
 
-Once the comment is added, report the result on a line matching this format so I can parse it programmatically:
+After the tool returns, report the result on a line matching this format so the pipeline can parse it:
 JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
 
-If the tool call fails, report it as: JIRA_ERROR:description of what went wrong"""
+If the tool call fails, report: JIRA_ERROR:description of what went wrong"""
 
     return prompt
 
@@ -291,17 +293,18 @@ def build_edit_prompt(update):
 
     fields_json = json.dumps(fields)
 
-    prompt = f"""Please update Jira issue {issue_key} using the editJiraIssue tool with these fields:
+    prompt = f"""You are an automated Jira update step in a CI-style pipeline. The user has already approved this edit. Your job is to call the editJiraIssue tool and report the result.
 
+Call mcp__claude_ai_Jira__editJiraIssue with these parameters:
 - cloudId: "{JIRA_CLOUD_ID}"
 - issueIdOrKey: "{issue_key}"
 - fields: {fields_json}
 - contentFormat: "markdown"
 
-Once the update is applied, report the result on a line matching this format so I can parse it programmatically:
+After the tool returns, report the result on a line matching this format so the pipeline can parse it:
 JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
 
-If the tool call fails, report it as: JIRA_ERROR:description of what went wrong"""
+If the tool call fails, report: JIRA_ERROR:description of what went wrong"""
 
     return prompt
 
