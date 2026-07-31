@@ -35,11 +35,11 @@ def launch(open_browser=True):
                                                # applies to the unconfigured path).
     else:
         # Fresh/unconfigured: claim our OWN port so we never piggyback on a board
-        # already on 8742 (e.g. the user's prod). Prefer the canonical default when
-        # it's actually free; otherwise take the first free port in a small range
-        # (skipping 8743, the documented dev-board port), then fall back to an
-        # OS-assigned free port. Persist it so the install is stable next run (and
-        # so task_server reads it).
+        # already on 8742 (e.g. another install, or a stale process still holding
+        # it). Prefer the canonical default when it's actually free; otherwise take
+        # the first free port in a small range (skipping 8743, the documented
+        # dev-board port), then fall back to an OS-assigned free port. Persist it
+        # so the install is stable next run (and so task_server reads it).
         if server_lib.port_available(8742):
             target = 8742
         else:

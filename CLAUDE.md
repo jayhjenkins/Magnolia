@@ -10,7 +10,7 @@ This is the team-portable **PM-OS engine**: a calm chief-of-staff system built f
 4. Capture team/person nuance to the PROFILE, never into a generated artifact.
 5. Anything that writes to the outside world is Tier-2: exactly one plain-language confirm before its first external action.
 6. Never delete generated artifacts — append a version suffix (`v1`, `v2`).
-7. Dev board is `localhost:8743`; production board is `localhost:8742`. Never operate the prod board or `~/pm-os` from engine work.
+7. `~/pm-os` (port `8742`) is retired and no longer in use — this repo, on `localhost:8744`, is the only install.
 
 Full laws + enforcing commands: [`docs/reference/invariants.md`](docs/reference/invariants.md) — read before acting on the engine.
 
@@ -117,7 +117,7 @@ Headless env vars: `CLAUDE_CODE_AUTO_APPROVE_FILE_READS=true`, `CLAUDE_CODE_AUTO
 
 ## Safety Rails
 
-- Operate within the engine repo unless explicitly instructed otherwise; never touch the prod board or `~/pm-os` from engine work (invariant #7).
+- Operate within the engine repo unless explicitly instructed otherwise (invariant #7 — `~/pm-os` is retired and no longer in use, so there's no separate install to avoid).
 - Never overwrite large files without confirmation.
 - When unsure of a path, list directories first.
 - For batch operations, show a plan and await approval.

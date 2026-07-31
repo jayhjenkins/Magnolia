@@ -5,6 +5,10 @@ venv/
 __pycache__/
 *.log
 
+# Logs folder: runtime output only (dispatch/judge logs, onboarding transcripts,
+# sync logs) - auto-created via os.makedirs(), never checked in.
+logs/*
+
 # Keep folder structure but ignore content files in datasets
 # This allows team members to clone the skeleton without your specific data
 
@@ -78,6 +82,9 @@ datasets/programs/*
 !datasets/programs/*/.gitkeep
 datasets/programs/*/*
 !datasets/programs/*/*/.gitkeep
+
+# Cadence sentinel telemetry: auto-created via os.makedirs(), never checked in.
+datasets/cadence/*
 
 # People folder: keep structure, ignore people data (e.g. email cache)
 datasets/people/*

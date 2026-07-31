@@ -45,6 +45,8 @@ core:
     - workflow-doc-sync
     - quality-meeting-schema-validation
     - quality-documentation-sync
+    - metric-quarterly-rocks
+    - metric-scorecard-fetch
 
 pm:
   label: "Product Management"
@@ -84,6 +86,9 @@ pm:
     - quality-citation-compliance
     - quality-source-integrity
     - quality-link-verification
+    - quality-pendo-tag-audit
+    - workflow-bug-severity-assessment
+    - workflow-launch-monitor
 
 exec:
   label: "Executive"

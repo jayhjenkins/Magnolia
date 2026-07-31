@@ -30,4 +30,4 @@ Never delete generated artifacts — append a version suffix (`v1`, `v2`); that'
 
 ## 7. Dev vs prod safety
 
-The dev board runs on `localhost:8743`. The separate production install (`~/pm-os`) runs on `localhost:8742`. From engine work, never operate the prod board and never touch `~/pm-os` — that's invariant #7 in [`invariants.md`](./invariants.md).
+The board runs on `localhost:8744`. The separate `~/pm-os` production install and its port `8742` are retired and no longer in use — this repo is the only install now. Invariant #7 in [`invariants.md`](./invariants.md) records this fact; its number is kept (not reused) for citation stability.

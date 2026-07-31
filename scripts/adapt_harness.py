@@ -177,8 +177,8 @@ Follow the superpowers workflow, in order:
   Windows terminals).
 - The engine stays de-personalized (invariant #1): capture team/person nuance to
   `profile/`, never into the artifact (invariant #4).
-- Dev board only (invariant #7); never operate the production install from
-  engine work.
+- `~/pm-os` is retired and no longer in use (invariant #7), so there is no
+  separate production install to avoid operating on.
 - Git stays invisible to the operator where the factory handles it: speak
   Keep/Undo, not commits/reverts.
 

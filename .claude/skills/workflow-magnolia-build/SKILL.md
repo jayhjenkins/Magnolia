@@ -55,7 +55,6 @@ Follow the superpowers workflow, in order:
 - **Gates green before every code commit** (invariant #2) and **never commit to `main`** — branch always. The four gates: `python3 -m pytest` (includes `tests/test_engine_no_jay.py`, the de-personalization gate), `python3 scripts/card_schema.py` (→ `registry.json OK`), and `python3 scripts/portability_gate.py` (→ `portability OK`).
 - **Bind to the seam before building.** Decompose onto a surface (via `meta-scope-extension`) and brief the subagent with that surface's contract; never let it improvise in a layer the architecture already owns — `platform_lib` for OS/shell, the card registry for display, `profile_lib` for identity. ASCII-safe runtime output (hyphen, not em-dash — it garbles on Windows terminals).
 - **The engine stays de-personalized** (invariant #1): capture team/person nuance to `profile/`, never into the artifact (invariant #4).
-- **Dev board only** (invariant #7); never operate the production install from engine work.
 - **Git stays invisible to the operator** where the factory handles it: speak Keep/Undo, not commits/reverts.
 
 ## Success criteria

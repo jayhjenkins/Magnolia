@@ -3,9 +3,9 @@
 This directory IS the task board front end: `index.html` + `js/*.js`. It's a
 vanilla HTML/CSS/JS board served by `scripts/task_server.py` (route `/` →
 `ui/task-board/index.html`, static `/js/*` and `/themes/*`) against the real
-backend API at `/api/*`. Default dev URL: `http://localhost:8743`. (The
-separate production install at `~/pm-os` runs on `:8742` — never operate it
-from engine work; see invariant #7 in
+backend API at `/api/*`. Default dev URL: `http://localhost:8744`. (The
+separate `~/pm-os` production install and its `:8742` port are retired and no
+longer in use — this repo is the only install now; see invariant #7 in
 [`docs/reference/invariants.md`](../../docs/reference/invariants.md).)
 
 Design-system rules (token-only, card schema, the composition boundary, Moods):
