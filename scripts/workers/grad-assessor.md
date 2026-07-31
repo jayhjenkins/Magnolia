@@ -28,6 +28,6 @@ You run the deterministic graduation assessor. Steps:
    cards and performs any auto-demotions itself. Do not assess readiness yourself.
 3. Read its stdout. `./scripts/task.sh agent:receipt {task_id} "<one-line note>"` with a one-line
    note of how many graduation cards it created (and any demotions). This archives the task and
-   emits a receipt — do NOT use agent:complete here, there is nothing for Jay to review.
+   emits a receipt — do NOT use agent:complete here, the graduation is deterministic.
 
 Do not edit the ladder, skills, or any file. Do not create cards yourself — the script does that.

@@ -16,7 +16,7 @@
 
 ## Purpose
 
-Pull this week's values for Jay's two Q2 Rocks (Home WAU and Board Member Weekly Login Rate) from Pendo and write them into the L10 Rocks tab in `~/Library/CloudStorage/OneDrive-Vantaca,LLC/EOS/L10-Resident Experience.xlsx`.
+Pull this week's values for the two Q2 Rocks (Home WAU and Board Member Weekly Login Rate) from Pendo and write them into the L10 Rocks tab in `~/Library/CloudStorage/OneDrive-Vantaca,LLC/EOS/L10-Resident Experience.xlsx`.
 
 ## Inputs (all optional)
 
@@ -52,9 +52,9 @@ If the user-supplied `--as-of` is not a Saturday, halt and ask the user to confi
 
 ### Step 2 — Confirm before mutating shared state
 
-Print the resolved dates and ask Jay: **"Computing as of Saturday {as_of_date}, writing to column {report_date} in L10-Resident Experience.xlsx (Rocks tab). Proceed?"**
+Print the resolved dates and ask the operator: **"Computing as of Saturday {as_of_date}, writing to column {report_date} in L10-Resident Experience.xlsx (Rocks tab). Proceed?"**
 
-This matches Jay's standing preference for confirmation before mutating shared/published artifacts.
+This matches the operator's standing preference for confirmation before mutating shared/published artifacts.
 
 ### Step 3 — Run Pendo queries per quarterly-rocks
 
@@ -104,7 +104,7 @@ Home WAU (4-wk avg)                 504k                   {wau_str}            
 Board Member Weekly Login Rate      32.42%                 {stickiness_pct}             {Δpp}
 ```
 
-If a metric moved by >10% week-over-week, flag it explicitly so Jay can decide whether to investigate before publishing.
+If a metric moved by >10% week-over-week, flag it explicitly so the operator can decide whether to investigate before publishing.
 
 ### Step 6 — Write to workbook
 
@@ -123,9 +123,9 @@ python3 scripts/update_rocks_xlsx.py \
 ```
 
 The script handles cell location by label, formula-driven future columns, and column insertion. If it fails:
-- `permission denied` → workbook is open in Excel; ask Jay to close it.
+- `permission denied` → workbook is open in Excel; ask the operator to close it.
 - `openpyxl is not installed` → run `pip3 install --break-system-packages -r requirements-rocks.txt` then retry.
-- `already has values` → ask Jay whether to overwrite, then re-run with `--overwrite`.
+- `already has values` → ask the operator whether to overwrite, then re-run with `--overwrite`.
 
 ### Step 7 — Final summary
 
@@ -148,10 +148,10 @@ pip3 install --break-system-packages -r requirements-rocks.txt
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Pendo MCP calls return error | MCP not authenticated or disconnected | Tell Jay to re-auth via `/mcp`. Do NOT attempt to compute from estimates. |
+| Pendo MCP calls return error | MCP not authenticated or disconnected | Tell the operator to re-auth via `/mcp`. Do NOT attempt to compute from estimates. |
 | WAU query returns 3 or 5 buckets | Date arithmetic for the 4-week window is off | Halt; recompute startDate as `as_of - 27 days`. |
 | `as_of_date` is not a Saturday | User passed `--as-of` for a non-Saturday | Halt; ask user to confirm or correct. |
-| Workbook locked | File open in Excel | Ask Jay to close it. |
+| Workbook locked | File open in Excel | Ask the operator to close it. |
 | No empty target column found and `--insert-if-missing` not yet used | Resolution rule needs to append | Re-invoke helper with `--insert-if-missing`. |
 | Stickiness > 1.0 | Wrote percent (e.g. 32.0) instead of decimal (0.320) | Always pass the raw decimal; the cell formats as %. |
 
