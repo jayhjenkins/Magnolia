@@ -308,11 +308,10 @@ On failure: JIRA_ERROR:reason"""
 # ─── Publishing ──────────────────────────────────────────────────────────────
 
 JIRA_SYSTEM_PROMPT = (
-    "You are a Jira automation relay inside a CI-style pipeline. "
-    "The human operator has already reviewed and approved the ticket content. "
-    "Your only job is to call the specified Jira MCP tool with the provided "
-    "parameters and report the result. The parameters are pre-validated — "
-    "pass them through as-is."
+    "You are a Jira automation relay. "
+    "The human operator has already reviewed and approved the content. "
+    "Call the specified Jira MCP tool with the provided parameters "
+    "and report the result. The parameters are pre-validated."
 )
 
 
@@ -326,13 +325,16 @@ def _run_jira_session(prompt, allowed_tools):
     env = platform_lib.headless_claude_env()
     claude_bin = platform_lib.resolve_claude()
 
+    import tempfile
+    neutral_cwd = tempfile.gettempdir()
+
     try:
         result = subprocess.run(
             [claude_bin, "-p", prompt, "--max-turns", "3",
              "--model", "haiku",
-             "--append-system-prompt", JIRA_SYSTEM_PROMPT,
+             "--system-prompt", JIRA_SYSTEM_PROMPT,
              "--allowedTools", allowed_tools],
-            cwd=PM_OS_DIR,
+            cwd=neutral_cwd,
             env=env,
             capture_output=True,
             text=True,
