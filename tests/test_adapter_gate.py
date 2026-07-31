@@ -25,14 +25,14 @@ def test_publish_raises_needs_confirmation_when_explicitly_unconfirmed(profile_r
 def test_publish_passes_when_confirmed(profile_root, monkeypatch):
     import profile_lib, jira_publish
     profile_lib.set_integration_confirmed("project_management", True, provider="jira", root=profile_root)
-    monkeypatch.setattr(jira_publish, "publish_to_jira", lambda d: ("ACM-2", "u"))
+    monkeypatch.setattr(jira_publish, "publish_to_jira", lambda d, session_id=None: ("ACM-2", "u"))
     assert adapters.publish("project_management", {"summary": "x"}, root=profile_root) == ("ACM-2", "u")
 
 
 def test_publish_grandfathers_configured_without_flag(profile_root, monkeypatch):
     # profile_root has jira creds but NO confirmed key -> grandfathered (creds = consent).
     import jira_publish
-    monkeypatch.setattr(jira_publish, "publish_to_jira", lambda d: ("ACM-3", "u"))
+    monkeypatch.setattr(jira_publish, "publish_to_jira", lambda d, session_id=None: ("ACM-3", "u"))
     assert adapters.publish("project_management", {"summary": "x"}, root=profile_root) == ("ACM-3", "u")
 
 

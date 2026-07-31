@@ -153,15 +153,17 @@ def _attempt_publish(task_id, draft):
     # retry, separate tab). A JIRA_DRAFT task is marked done only by a successful publish
     # below, so status == "done" means it was already published — never publish twice.
     # Tolerant of a missing/virtual task id (e.g. unit tests that pass a synthetic id).
+    session_id = None
     try:
         existing = task_lib.read_task(task_id)
         if (existing.get("frontmatter") or {}).get("status") == "done":
             _note(task_id, "Publish skipped — task already published (no duplicate created).")
             return ("already_published", None)
+        session_id = (existing.get("frontmatter") or {}).get("claude_session_id")
     except FileNotFoundError:
         pass
     try:
-        result = adapters.publish("project_management", draft)
+        result = adapters.publish("project_management", draft, session_id=session_id)
     except NeedsConfirmation:
         return ("needs_confirm", None)
     except NotConfigured as e:

@@ -13,10 +13,10 @@ def is_configured(root=None) -> bool:
     return bool(cfg.get("cloud_id") and cfg.get("project_key"))
 
 
-def publish(draft, root=None):
+def publish(draft, root=None, session_id=None):
     if not is_configured(root):
         raise NotConfigured("Jira is not configured in this profile")
-    return jira_publish.publish_to_jira(draft)
+    return jira_publish.publish_to_jira(draft, session_id=session_id)
 
 
 def update(update_dict, root=None):

@@ -21,7 +21,7 @@ def test_jira_is_configured_true_for_populated_profile(profile_root):
 
 def test_jira_publish_delegates_to_publish_to_jira(profile_root, monkeypatch):
     captured = {}
-    def fake_publish(draft):
+    def fake_publish(draft, session_id=None):
         captured["draft"] = draft
         return ("ACM-1", "https://acme.atlassian.net/browse/ACM-1")
     import jira_publish

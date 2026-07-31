@@ -314,21 +314,29 @@ JIRA_SYSTEM_PROMPT = (
 )
 
 
-def _run_jira_session(prompt, allowed_tools):
+def _run_jira_session(prompt, allowed_tools, session_id=None):
     """Spawn a mini Claude session to execute a Jira MCP call.
 
     Takes the full prompt and a comma-separated string of allowed tool names.
+    If session_id is provided, resumes that session so the model has full
+    context from the ticket-creation conversation (avoids prompt-injection
+    refusals on fresh sessions).
     Returns (issue_key, issue_url) on success.
     Raises RuntimeError on failure.
     """
     env = platform_lib.headless_claude_env()
     claude_bin = platform_lib.resolve_claude()
 
+    cmd = [claude_bin, "-p", prompt, "--max-turns", "3",
+           "--allowedTools", allowed_tools]
+    if session_id:
+        cmd.extend(["--resume", session_id])
+    else:
+        cmd.extend(["--append-system-prompt", JIRA_SYSTEM_PROMPT])
+
     try:
         result = subprocess.run(
-            [claude_bin, "-p", prompt, "--max-turns", "3",
-             "--append-system-prompt", JIRA_SYSTEM_PROMPT,
-             "--allowedTools", allowed_tools],
+            cmd,
             cwd=PM_OS_DIR,
             env=env,
             capture_output=True,
@@ -368,14 +376,17 @@ def _run_jira_session(prompt, allowed_tools):
     raise RuntimeError(f"Could not parse Jira result from Claude output. Exit code: {result.returncode}. Output: {output[:500]}")
 
 
-def publish_to_jira(draft):
+def publish_to_jira(draft, session_id=None):
     """Spawn a mini Claude session to publish the draft to Jira.
 
+    If session_id is provided, resumes the task's original Claude session
+    so the model has full context and doesn't treat the request as injection.
     Returns (issue_key, issue_url) on success.
     Raises RuntimeError on failure.
     """
     prompt = build_claude_prompt(draft)
-    return _run_jira_session(prompt, "mcp__claude_ai_Jira__createJiraIssue")
+    return _run_jira_session(prompt, "mcp__claude_ai_Jira__createJiraIssue",
+                             session_id=session_id)
 
 
 # ─── Updating ──────────────────────────────────────────────────────────────

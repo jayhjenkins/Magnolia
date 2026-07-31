@@ -59,7 +59,7 @@ def _is_confirmed(family, mod, root=None):
     return bool(mod.is_configured(root))
 
 
-def publish(family, draft, root=None):
+def publish(family, draft, root=None, session_id=None):
     """Tier-2 gated publish. Returns None when no provider is configured (caller
     degrades gracefully); raises NeedsConfirmation when configured-but-unconfirmed
     (no external call is made); otherwise delegates to the provider adapter."""
@@ -68,6 +68,9 @@ def publish(family, draft, root=None):
         return None
     if not _is_confirmed(family, mod, root):
         raise NeedsConfirmation(family)
+    import inspect
+    if "session_id" in inspect.signature(mod.publish).parameters:
+        return mod.publish(draft, root, session_id=session_id)
     return mod.publish(draft, root)
 
 
