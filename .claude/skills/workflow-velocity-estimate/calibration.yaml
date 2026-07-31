@@ -1,0 +1,264 @@
+# Velocity Estimate — Calibration
+#
+# THE LEVERS. Every number the /estimate-velocity workflow uses lives here.
+# Edit this file and re-run the estimate — never hardcode numbers in the skill.
+#
+# Two independent benchmark layers, matching the two ticket levels we trust
+# (never the Feature/Epic card's own created->released timeline — that spans
+# refinement + every child unit + release batching and is not a build-time signal):
+#   1. UNIT tickets   -> active-execution days (first "In Development" -> Published)
+#   2. BUG/DEFECT tickets -> ticket-level elapsed days (created -> resolved)
+# A feature's headline estimate = Sum(expected units) + Sum(expected defect tickets).
+#
+# See .claude/skills/workflow-velocity-estimate/benchmarks.md for the full evidence trail behind every number.
+
+version: "2026-07-17.v3"
+source_evidence:
+  - "datasets/product/agent-output/2026-06-01_home-team-velocity-analysis.md (Step 1: 5-feature backward-looking study)"
+  - "datasets/product/agent-output/2026-06-01_home-velocity-data.csv (56 per-unit rows, archetype base_days derived here)"
+  - "2026-07-15/17 Home release shipping-mix + rolling-throughput session (defect ticket cycle time, defect:unit ratio, team/dev throughput context)"
+  - "2026-07-17 Vantaca Identity Provider estimate correction: exposed a foundation-vs-increment misclassification (defaulted to foundation on a non-inspectable repo despite direct engineer testimony of pattern reuse already in hand) and prompted moving estimates + this calibration file out of a standalone datasets/velocity/ directory into each feature's own product package folder — see benchmarks.md's 2026-07-17.v3 entry"
+  - "2026-07-17 New-Resident Onboarding program-scale estimate (v1) + director-brief correction: exposed the defect-ticket summing bug above the evidence ceiling (fixed via volume_ceiling_before_flag) and the missing critical-path/vertical-slice layer (fixed via SKILL.md Phase 2b/5b/5c/6, staffing_assumptions above)"
+
+# ---------------------------------------------------------------------------
+# 1. UNIT ARCHETYPES — active-execution days (In Development -> Published)
+# ---------------------------------------------------------------------------
+# Derived from the Step-1 CSV (27 usable completed units, Mobile excluded to its
+# own regime below). "foundation" = no analogous Service/Contract/component/page
+# exists yet. "increment" = building on an existing pattern. Cross-repo = >=2
+# repos touched by the unit.
+unit_archetypes:
+  increment_single_system:
+    p50_days: 2.0
+    p75_days: 2.5
+    n: 5
+    evidence: "Dynamic Forms 'May polish' cohort (VNT-43622-43626), single-repo CMP polish on a settled spec"
+    confidence: high
+
+  increment_cross_repo:
+    p50_days: 1.5
+    p75_days: 12.0
+    n: 4
+    evidence: "WYSIWYG bolt-3 (VNT-43771-43773, ~1.1d, settled spec) vs Dynamic Forms templates-transition unit (VNT-42964, 12.4d, +migrations). Wide spread — see ef_migrations modifier."
+    confidence: medium
+
+  foundation_single_system:
+    p50_days: 8.5
+    p75_days: 17.0
+    n: 5
+    evidence: "Community Feed settled-spec units (8.4d x3) + WYSIWYG bolt-1 single-repo unit (17.0d) + PerkSpot SDK scaffold (3.2d). Excludes the Dynamic Forms flagged-ownership cohort — see foundation_tax."
+    confidence: medium
+
+  foundation_cross_repo:
+    p50_days: 17.0
+    p75_days: 29.4
+    n: 7
+    evidence: "WYSIWYG bolt-1 cross-repo units (17.0d x3), Dynamic Forms display-hooks (29.4d x2, +migrations), Community Feed's cross-repo CMP composer (7.6d, settled spec), Dynamic Forms Pendo instrumentation (49.2d)"
+    confidence: medium
+
+# ---------------------------------------------------------------------------
+# 2. REGIMES — work that doesn't fit the ai_leveraged archetype math
+# ---------------------------------------------------------------------------
+regimes:
+  ai_leveraged:
+    description: "Default regime. Everything above applies."
+  human_native:
+    description: "Any unit touching Mobile (React Native). Single-developer-concentration ceiling observed in Step 1 — do not pretend precision."
+    base_days:
+      p50: 27.0
+      p75: 28.0
+    n: 2
+    confidence: low
+    note: "Only 2 completed Mobile units in the Step-1 sample; 4 more were stuck 47-55d in late-stage gates (PR Review/Needs Push/Validation) behind one developer. Treat base_days as a floor, not a ceiling — flag Mobile work as out-of-model in every estimate."
+
+# ---------------------------------------------------------------------------
+# 3. MODIFIERS — apply at most 2 per unit
+# ---------------------------------------------------------------------------
+modifiers:
+  cross_repo_handshake:
+    multiplier: 1.3
+    applies_to: "increment units touching CMP + Core specifically (not just any 2 repos)"
+    confidence: low
+    note: "Carried forward as a directional placeholder — no isolated CMP+Core-only increment sample this round. Re-derive when one ships."
+
+  ef_migrations:
+    multiplier: 1.6
+    applies_to: "unit description/labels mention EF Core migrations, schema changes, or data backfill"
+    n: 3
+    evidence: "Dynamic Forms display-hooks (29.4d) vs WYSIWYG cross-repo peer (17.0d) ~1.7x; templates-transition (12.4d) vs bolt-3 cross-repo peer (1.1d) ~11x but n=1 baseline"
+    confidence: low
+    note: "New lever this round, small n — directional, don't over-trust a single unit's estimate on this alone."
+
+  scope_size:
+    small: 0.7
+    medium: 1.0
+    large: 1.5
+    confidence: low
+    note: "Structural placeholder, not freshly re-derived this round — judgment call per PRD scope."
+
+foundation_tax:
+  apply: false  # default off — only flip on for a specific unit when the trigger below is met
+  multiplier: 2.75
+  trigger: "Red-team-flagged unresolved cross-team ownership or undefined architecture/data-flow (e.g. undefined CMP<->Home ownership) — NOT just 'first of its kind'"
+  evidence: "Dynamic Forms foundation cohort (VNT-40598-40602, 48.3d) vs the settled-spec foundation baseline (~17d p75) = 2.8x. This is the single clearest velocity lever from Step 1: spec/ownership maturity, not coding, drives the 30-56 day slow cohorts."
+  confidence: medium
+
+# ---------------------------------------------------------------------------
+# 4. DEFECT / BUG TICKET LEVEL (NEW) — ticket-level elapsed days, created->resolved
+# ---------------------------------------------------------------------------
+# Deliberately NOT active-execution-only like units: a defect ticket's cost to
+# the team is its full elapsed lifecycle (triage + fix + verify + release), and
+# unlike units it has no long pre-work architecture-limbo phase to separate out.
+# Source: Home HXP component, shipped (Done) Bug/Work Item Defect/Regression
+# Defect/Security Defect tickets, May-Jul 2026 (n=66). Median/p75 used
+# deliberately over mean — one stale reopened bug ran 575 days and would wreck
+# a mean.
+defect_ticket:
+  p50_days: 15.0
+  p75_days: 22.0
+  n: 66
+  window: "2026-05-01 to 2026-07-16"
+  by_type:
+    bug: { p50: 15.2, p75: 23.0, n: 57 }
+    regression_defect: { p50: 10.1, p75: 17.9, n: 6 }
+    work_item_defect: { p50: 0.8, p75: 1.1, n: 3, note: "n too small to trust — folded into combined figure above" }
+  confidence: medium
+
+# Expected defect tickets generated PER UNIT SHIPPED. Blend of Step-1 per-feature
+# ratios (Dynamic Forms 5 defects / 13 units = 0.38; WYSIWYG 11 defects / 8 units
+# = 1.4, public pre-login surface; Mobile/Community Feed/PerkSpot = 0) and this
+# session's recent 3-month aggregate ticket mix (May 0.81, Jun 2.38, Jul 1.41
+# defects-per-unit-shipped, team-wide — Jun's ratio was inflated by a Q2
+# bug-burndown epic, not representative of steady-state feature work).
+defect_ratio_per_unit:
+  low:
+    ratio: 0.3
+    applies_to: "internal/gated surface, no new external dependency (Community Feed / Mobile pattern)"
+  typical:
+    ratio: 0.9
+    applies_to: "default when surface type is unclear or mixed"
+  high:
+    ratio: 1.4
+    applies_to: "public-facing, pre-login, or security/PII-sensitive surface (WYSIWYG pattern)"
+  confidence: medium
+  note: "Ask/infer which tier before estimating — this is a first-class input, not a footnote (Step 1 driver #6: QA/defect churn scales with surface area + public exposure)."
+  # --- Added 2026-07-17, post-New-Resident-Onboarding correction ---
+  # A first pass at a 40-unit program-scale PRD multiplied expected_count x
+  # defect_ticket.p50/p75 and summed the result straight into the headline
+  # (56 tickets x 15-22d = 840-1232 days), producing an implausible ~4-7yr
+  # total. Root cause: defect_ticket days are CREATED->RESOLVED ELAPSED time
+  # (concurrent queue/triage wait baked in), not per-ticket labor effort, and
+  # this ratio was never validated above n=11 defects on one feature
+  # (WYSIWYG, 8 units) -- see the per-feature table in benchmarks.md §3.
+  volume_ceiling_before_flag: 15
+  volume_ceiling_note: >
+    Evidence base's largest observed single-feature defect count is 11
+    (WYSIWYG). Above ~15 projected tickets (expected_count = ratio x
+    unit_count), DO NOT sum per-ticket p50/p75 into the headline as
+    additive days. Report expected_count as a workload/volume signal only
+    (for QA/support capacity planning) and state explicitly that it is not
+    summed into the feature total. Below the ceiling, summing remains the
+    documented behavior, but ALWAYS run the team_throughput_context sanity
+    check first (see that section's note) -- if the summed figure implies
+    an implausible multiple of recent team output, that is disqualifying
+    for presentation and must be reframed before it is shown, not
+    footnoted afterward.
+
+# ---------------------------------------------------------------------------
+# 5. MINI-INCEPTION (re-spec / scope-creep risk — separate from headline)
+# ---------------------------------------------------------------------------
+# NOT the same thing as defect_ratio above. Defect tickets are expected,
+# known-cost QA/bugfix work already IN the headline. Mini-inception is the risk
+# that unresolved unknowns at inception time force new/changed UNITS after work
+# starts — a schedule-risk contingency, reported as its own line, never folded
+# silently into the headline.
+mini_inception:
+  signals:
+    - "open-question count in inception transcript"
+    - "unresolved cross-team CMP ownership"
+    - "public/security surface"
+    - "new external dependency (e.g. PerkSpot-style third-party integration)"
+  risk_low:
+    expected_count: 0
+  risk_medium:
+    expected_count: 1
+  risk_high:
+    expected_count: 3
+    evidence: "WYSIWYG's post-'done' validation wave (11 work-item defects, ~1.4/unit) is now captured by defect_ratio.high, not here — mini_inception risk_high should be reserved for cases with a genuinely unresolved architecture/ownership question at inception time (Dynamic Forms C-5, WYSIWYG C-4), which is a units/re-spec risk, not a bug-ticket-volume risk."
+  respec_latency_days: 5.0
+  confidence: low
+
+# ---------------------------------------------------------------------------
+# 6. LATENCY OVERHEADS (controllable wall-clock, reported separately)
+# ---------------------------------------------------------------------------
+overheads:
+  pre_dev_latency_days:
+    p50: 3.0
+    p75: 10.0
+    note: "Queueing/kickoff latency before a unit enters In Development on a settled spec. Distinct from foundation_tax, which is architecture-limbo on an UNSETTLED spec."
+    confidence: low
+  integration_release_latency_days:
+    p50: 0.5
+    p75: 2.0
+    evidence: "Step 1 finding: Merged->Staging->Published is a near-instant batch cutover in every one of the 5 studied features. Do not model release as risk."
+    confidence: high
+
+working_days_per_week: 5
+
+# ---------------------------------------------------------------------------
+# 7. TEAM THROUGHPUT CONTEXT (informational cross-check ONLY — never a divisor)
+# ---------------------------------------------------------------------------
+# This is NOT how the headline is computed (no capacity/parallelism modeling —
+# see workflow-velocity-estimate SKILL.md "Out of scope"). It exists so an
+# estimate can be sanity-checked against what the team has actually been
+# producing lately: "does a 40-active-day estimate look plausible against
+# ~15 tickets/week of recent throughput, or does it imply an unrealistic
+# multi-month monopoly on the team?"
+team_throughput_context:
+  trailing_4wk_ticket_completions:
+    window_end: "2026-07-16"
+    total: { defects: 45, features_units: 27 }
+    range_2026_ytd: "16-72 tickets per trailing 4-week window; recent peak (Jul) is ~2x the Mar-May steady-state baseline of ~25-30"
+  named_developer_trailing_4wk_totals:
+    window_end: "2026-07-16"
+    michael_degennaro: 30
+    anika_viswanathan: 15
+    joshua_noel: 13
+    sagar_thakore: 9
+    note: "These 4 accounted for ~93% of recent team throughput. Useful for a bandwidth gut-check, not for computing estimates."
+  source: "datasets/product/home-release-shipping-mix.html + 2026-07-15/17 conversation analysis"
+  presentation_rule: >
+    If a summed headline figure (units, or defects below the volume
+    ceiling above) implies more than roughly 2-3x the team's recent
+    4-week output, that is a disqualifying signal, not a footnote --
+    do not present the number at face value. Reframe it (e.g. re-cut by
+    vertical slice, separate the defect count into a volume flag, or both)
+    BEFORE showing a headline to the user. This section stays informational
+    for computing the estimate itself (never a divisor there) but is
+    mandatory as a pre-publication gate on how the estimate gets presented.
+
+# ---------------------------------------------------------------------------
+# 8. STAFFING ASSUMPTIONS (planning inputs for the realistic-timeline
+#    translation ONLY — see workflow-velocity-estimate SKILL.md Phase 5c)
+# ---------------------------------------------------------------------------
+# These are NOT throughput divisors and NOT used to compute unit/defect
+# estimates (that remains Guiding Principle 6 territory, unchanged). They
+# are explicit, stated planning assumptions used ONLY to translate
+# (labor effort-sum + dependency critical-path floor) into a realistic
+# wall-clock range for a slice, so a director-facing brief has an honest
+# "how long, with how many people" answer instead of a bare effort-sum.
+# Every use of this section must state the assumed headcount plainly next
+# to the resulting range so it can be second-guessed or replaced.
+staffing_assumptions:
+  small_slice_engineers: 1-2      # slice unit_sum p50 roughly <15 days
+  medium_slice_engineers: 2-3     # slice unit_sum p50 roughly 15-40 days
+  large_slice_engineers: 3-4      # slice unit_sum p50 roughly >40 days
+  note: >
+    Ceilings are a starting judgment call, not a calibrated benchmark
+    (no evidence trail yet — unlike every other number in this file).
+    The 4-named-developer concentration in team_throughput_context above
+    is the only real anchor for "how many people plausibly work Home
+    features at once" today; do not assume more parallelism than that
+    without checking with the team. CMP-dependent units may need a
+    separate, non-Home-team staffing line — flag this explicitly rather
+    than assuming Home's own headcount covers it.
