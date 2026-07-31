@@ -185,9 +185,8 @@ def build_claude_prompt(draft):
     summary_escaped = draft["summary"].replace('"', '\\"')
     description_escaped = draft["description"].replace('"', '\\"')
 
-    prompt = f"""You must call the mcp__claude_ai_Jira__createJiraIssue tool with EXACTLY these parameters. Do not modify any values. Do not add any extra fields. Just call the tool and report the result.
+    prompt = f"""Please create a Jira issue using the createJiraIssue tool with these details:
 
-Call mcp__claude_ai_Jira__createJiraIssue with:
 - cloudId: "{JIRA_CLOUD_ID}"
 - projectKey: "{JIRA_PROJECT_KEY}"
 - issueTypeName: "{issue_type}"
@@ -196,14 +195,12 @@ Call mcp__claude_ai_Jira__createJiraIssue with:
 - contentFormat: "markdown"
 - additional_fields: {additional_fields_json}
 
-After the tool returns, output EXACTLY one line in this format:
+Once the issue is created, report the result on a line matching this format so I can parse it programmatically:
 JIRA_RESULT:ISSUE_KEY|ISSUE_URL
 
 For example: JIRA_RESULT:{JIRA_PROJECT_KEY}-1234|{JIRA_BROWSE_BASE}/{JIRA_PROJECT_KEY}-1234
 
-If the tool fails, output: JIRA_ERROR:description of what went wrong
-
-Do not output anything else. No explanation, no markdown, no summary."""
+If the tool call fails, report it as: JIRA_ERROR:description of what went wrong"""
 
     return prompt
 
@@ -263,20 +260,17 @@ def build_comment_prompt(update):
     issue_key = update["issue_key"]
     comment_body = update["comment_body"].replace('"', '\\"')
 
-    prompt = f"""You must call the mcp__claude_ai_Jira__addCommentToJiraIssue tool with EXACTLY these parameters. Do not modify any values. Do not add any extra fields. Just call the tool and report the result.
+    prompt = f"""Please add a comment to Jira issue {issue_key} using the addCommentToJiraIssue tool with these details:
 
-Call mcp__claude_ai_Jira__addCommentToJiraIssue with:
 - cloudId: "{JIRA_CLOUD_ID}"
 - issueIdOrKey: "{issue_key}"
 - commentBody: "{comment_body}"
 - contentFormat: "markdown"
 
-After the tool returns, output EXACTLY one line in this format:
+Once the comment is added, report the result on a line matching this format so I can parse it programmatically:
 JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
 
-If the tool fails, output: JIRA_ERROR:description of what went wrong
-
-Do not output anything else. No explanation, no markdown, no summary."""
+If the tool call fails, report it as: JIRA_ERROR:description of what went wrong"""
 
     return prompt
 
@@ -297,20 +291,17 @@ def build_edit_prompt(update):
 
     fields_json = json.dumps(fields)
 
-    prompt = f"""You must call the mcp__claude_ai_Jira__editJiraIssue tool with EXACTLY these parameters. Do not modify any values. Do not add any extra fields. Just call the tool and report the result.
+    prompt = f"""Please update Jira issue {issue_key} using the editJiraIssue tool with these fields:
 
-Call mcp__claude_ai_Jira__editJiraIssue with:
 - cloudId: "{JIRA_CLOUD_ID}"
 - issueIdOrKey: "{issue_key}"
 - fields: {fields_json}
 - contentFormat: "markdown"
 
-After the tool returns, output EXACTLY one line in this format:
+Once the update is applied, report the result on a line matching this format so I can parse it programmatically:
 JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
 
-If the tool fails, output: JIRA_ERROR:description of what went wrong
-
-Do not output anything else. No explanation, no markdown, no summary."""
+If the tool call fails, report it as: JIRA_ERROR:description of what went wrong"""
 
     return prompt
 
