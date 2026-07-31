@@ -185,23 +185,21 @@ def build_claude_prompt(draft):
     summary_escaped = draft["summary"].replace('"', '\\"')
     description_escaped = draft["description"].replace('"', '\\"')
 
-    prompt = f"""You are an automated Jira publishing step in a CI-style pipeline. The user has already reviewed and approved this ticket. Your job is to call the createJiraIssue tool and report the result.
+    prompt = f"""Create this Jira issue:
 
-Call mcp__claude_ai_Jira__createJiraIssue with these parameters:
-- cloudId: "{JIRA_CLOUD_ID}"
-- projectKey: "{JIRA_PROJECT_KEY}"
-- issueTypeName: "{issue_type}"
-- summary: "{summary_escaped}"
-- description: "{description_escaped}"
-- contentFormat: "markdown"
-- additional_fields: {additional_fields_json}
+Tool: mcp__claude_ai_Jira__createJiraIssue
+Parameters:
+  cloudId: "{JIRA_CLOUD_ID}"
+  projectKey: "{JIRA_PROJECT_KEY}"
+  issueTypeName: "{issue_type}"
+  summary: "{summary_escaped}"
+  description: "{description_escaped}"
+  contentFormat: "markdown"
+  additional_fields: {additional_fields_json}
 
-After the tool returns, report the result on a line matching this format so the pipeline can parse it:
-JIRA_RESULT:ISSUE_KEY|ISSUE_URL
-
-For example: JIRA_RESULT:{JIRA_PROJECT_KEY}-1234|{JIRA_BROWSE_BASE}/{JIRA_PROJECT_KEY}-1234
-
-If the tool call fails, report: JIRA_ERROR:description of what went wrong"""
+Report the result as: JIRA_RESULT:ISSUE_KEY|ISSUE_URL
+Example: JIRA_RESULT:{JIRA_PROJECT_KEY}-1234|{JIRA_BROWSE_BASE}/{JIRA_PROJECT_KEY}-1234
+On failure: JIRA_ERROR:reason"""
 
     return prompt
 
@@ -261,18 +259,17 @@ def build_comment_prompt(update):
     issue_key = update["issue_key"]
     comment_body = update["comment_body"].replace('"', '\\"')
 
-    prompt = f"""You are an automated Jira commenting step in a CI-style pipeline. The user has already approved this comment. Your job is to call the addCommentToJiraIssue tool and report the result.
+    prompt = f"""Add a comment to Jira issue {issue_key}:
 
-Call mcp__claude_ai_Jira__addCommentToJiraIssue with these parameters:
-- cloudId: "{JIRA_CLOUD_ID}"
-- issueIdOrKey: "{issue_key}"
-- commentBody: "{comment_body}"
-- contentFormat: "markdown"
+Tool: mcp__claude_ai_Jira__addCommentToJiraIssue
+Parameters:
+  cloudId: "{JIRA_CLOUD_ID}"
+  issueIdOrKey: "{issue_key}"
+  commentBody: "{comment_body}"
+  contentFormat: "markdown"
 
-After the tool returns, report the result on a line matching this format so the pipeline can parse it:
-JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
-
-If the tool call fails, report: JIRA_ERROR:description of what went wrong"""
+Report the result as: JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
+On failure: JIRA_ERROR:reason"""
 
     return prompt
 
@@ -293,23 +290,31 @@ def build_edit_prompt(update):
 
     fields_json = json.dumps(fields)
 
-    prompt = f"""You are an automated Jira update step in a CI-style pipeline. The user has already approved this edit. Your job is to call the editJiraIssue tool and report the result.
+    prompt = f"""Update Jira issue {issue_key}:
 
-Call mcp__claude_ai_Jira__editJiraIssue with these parameters:
-- cloudId: "{JIRA_CLOUD_ID}"
-- issueIdOrKey: "{issue_key}"
-- fields: {fields_json}
-- contentFormat: "markdown"
+Tool: mcp__claude_ai_Jira__editJiraIssue
+Parameters:
+  cloudId: "{JIRA_CLOUD_ID}"
+  issueIdOrKey: "{issue_key}"
+  fields: {fields_json}
+  contentFormat: "markdown"
 
-After the tool returns, report the result on a line matching this format so the pipeline can parse it:
-JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
-
-If the tool call fails, report: JIRA_ERROR:description of what went wrong"""
+Report the result as: JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
+On failure: JIRA_ERROR:reason"""
 
     return prompt
 
 
 # ─── Publishing ──────────────────────────────────────────────────────────────
+
+JIRA_SYSTEM_PROMPT = (
+    "You are a Jira automation relay inside a CI-style pipeline. "
+    "The human operator has already reviewed and approved the ticket content. "
+    "Your only job is to call the specified Jira MCP tool with the provided "
+    "parameters and report the result. The parameters are pre-validated — "
+    "pass them through as-is."
+)
+
 
 def _run_jira_session(prompt, allowed_tools):
     """Spawn a mini Claude session to execute a Jira MCP call.
@@ -324,6 +329,8 @@ def _run_jira_session(prompt, allowed_tools):
     try:
         result = subprocess.run(
             [claude_bin, "-p", prompt, "--max-turns", "3",
+             "--model", "haiku",
+             "--append-system-prompt", JIRA_SYSTEM_PROMPT,
              "--allowedTools", allowed_tools],
             cwd=PM_OS_DIR,
             env=env,
