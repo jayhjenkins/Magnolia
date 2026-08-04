@@ -14,11 +14,13 @@ This module must NOT import task_server (that would create an import cycle).
 
 import json
 import os
+import re
 import sys
 
 # Add script directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import task_lib
+import program_lib
 import profile_lib
 import adapters
 import jira_publish
@@ -192,7 +194,31 @@ def _attempt_publish(task_id, draft):
     except Exception:
         pass
     jira_publish._trace_publish(task_id, draft, issue_key=issue_key, issue_url=issue_url)
+    _maybe_bind_tracker(task_id, issue_key)
     return ("ok", (issue_key, issue_url))
+
+
+_PROG_RE = re.compile(r"^PROG-\d{4,}$")
+
+
+def _maybe_bind_tracker(task_id, issue_key):
+    """After a Jira publish, bind the issue to the source program if applicable.
+
+    Checks if the source task is tagged with a PROG-XXXX id (bootstrap
+    draft-ticket tasks carry [program_id, "cadence"]). If so, writes the
+    Jira key as a truth binding on the program. Best-effort: never breaks
+    the publish.
+    """
+    try:
+        existing = task_lib.read_task(task_id)
+        tags = (existing.get("frontmatter") or {}).get("tags") or []
+        program_id = next((t for t in tags if _PROG_RE.match(str(t))), None)
+        if not program_id:
+            return
+        program_lib.set_binding(
+            program_id, role="truth", kind="project_management", anchor=issue_key)
+    except Exception:
+        pass
 
 
 def _attempt_update(task_id, update):

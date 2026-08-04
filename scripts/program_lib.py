@@ -352,6 +352,33 @@ def tracker_anchor(fm):
     return None
 
 
+def set_binding(program_id, role, kind, anchor, root=None):
+    """Add or update a binding on a program. Idempotent.
+
+    If a binding with the same (role, kind) already exists, its anchor is
+    updated. Otherwise a new entry is appended. Returns True if the file
+    changed, False if the binding was already present (no-op).
+    """
+    prog = read_program(program_id, root=root)
+    fm = prog["frontmatter"]
+    bindings = fm.get("bindings")
+    if not isinstance(bindings, list):
+        bindings = []
+        fm["bindings"] = bindings
+
+    for b in bindings:
+        if isinstance(b, dict) and b.get("role") == role and b.get("kind") == kind:
+            if b.get("anchor") == anchor:
+                return False
+            b["anchor"] = anchor
+            _write_program_file(prog["filepath"], fm, prog["body"])
+            return True
+
+    bindings.append({"role": role, "kind": kind, "anchor": anchor})
+    _write_program_file(prog["filepath"], fm, prog["body"])
+    return True
+
+
 def load_registry(root=None):
     """Read and parse cadence/programtypes/registry.json from the engine repo.
 
@@ -1086,10 +1113,15 @@ def birth_program(spec, root=None):
     frontmatter_extra = {"checkpoints": checkpoints, "drift": "holding"}
     if phase is not None:
         frontmatter_extra["phase"] = phase
-        # Stamp the entry date for the newborn's first phase (scalar form = the
-        # date the current phase was entered) so the reconciler can age it and the
-        # UI timeline shows an entry date. A newborn enters its first phase now.
         frontmatter_extra["phase_entered"] = _now_iso()[:10]
+
+    tracker = (spec or {}).get("anchor")
+    if tracker:
+        frontmatter_extra["bindings"] = [{
+            "role": "truth",
+            "kind": "project_management",
+            "anchor": str(tracker),
+        }]
 
     # Reuse create_program for the base file (status defaults to "active"). It
     # writes the canonical ## Intent / ## Observations / ## Cycles body.
