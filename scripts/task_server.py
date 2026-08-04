@@ -1480,6 +1480,7 @@ def _apply_cadence_birth(task_id, t, proposal, intake_program_id):
         "title": proposal.get("title"),
         "checkpoints": proposal.get("checkpoints") or [],
         "citations": proposal.get("citations") or [],
+        "anchor": proposal.get("anchor"),
     }
     try:
         new_id = program_lib.birth_program(spec)
@@ -1795,6 +1796,17 @@ def _extract_intent(body_text):
     return match.group(1).strip() if match else ""
 
 
+_JIRA_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
+
+
+def _extract_tracker_key(text):
+    """Extract the first Jira-style issue key from text, or None."""
+    if not text:
+        return None
+    m = _JIRA_KEY_RE.search(text)
+    return m.group(1) if m else None
+
+
 def handle_create_program(handler, task_id):
     """POST /api/tasks/{id}/actions/create-program -- create a Cadence program
     from a program-setup card.
@@ -1832,12 +1844,38 @@ def handle_create_program(handler, task_id):
     intent_text = _extract_intent(body_text)
     owner_role = profile_lib.persona()
 
+    frontmatter_extra = {"drift": "holding", "checkpoints": []}
+    try:
+        registry = program_lib.load_registry()
+        type_entry = next(
+            (t for t in registry.get("types", []) if t.get("id") == program_type),
+            None)
+        if type_entry and type_entry.get("state_model") == "pipeline":
+            phases = type_entry.get("phases") or []
+            first = next(
+                (p.get("id") for p in phases if isinstance(p, dict) and p.get("id")),
+                None)
+            if first:
+                frontmatter_extra["phase"] = first
+                frontmatter_extra["phase_entered"] = program_lib._now_iso()[:10]
+    except Exception:
+        pass
+
+    tracker_key = fm.get("tracker_key") or _extract_tracker_key(body_text)
+    if tracker_key:
+        frontmatter_extra["bindings"] = [{
+            "role": "truth",
+            "kind": "project_management",
+            "anchor": tracker_key,
+        }]
+
     try:
         program_id, filepath = program_lib.create_program(
             type=program_type,
             title=title,
             owner_role=owner_role,
             intent=intent_text,
+            frontmatter_extra=frontmatter_extra,
         )
     except (ValueError, OSError) as e:
         _error_response(handler, f"Could not create program: {e}", status=409)

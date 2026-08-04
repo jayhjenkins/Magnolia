@@ -7,7 +7,11 @@ provider (the same outer liveness gate as get()), checks is_configured, and read
 The point of these tests: the read path never raises NeedsConfirmation, and an
 unconfigured backend yields a clean None (never fabricated data).
 """
+import json
+import textwrap
 import types
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -38,8 +42,6 @@ def test_fetch_status_returns_none_when_unconfigured(tmp_path, monkeypatch):
 
 
 def test_fetch_status_returns_fact_for_configured_provider(monkeypatch):
-    # Stub a fully-configured provider module; the helper returns the fact and
-    # the Tier-2 NeedsConfirmation path is NEVER hit (a read is free).
     fact = {"status": "Done", "title": "Reconcile epic", "due": "2026-09-15"}
     fake = types.SimpleNamespace(
         is_configured=lambda root=None: True,
@@ -56,8 +58,6 @@ def test_fetch_status_returns_fact_for_configured_provider(monkeypatch):
 
 
 def test_fetch_status_collapses_provider_not_configured_to_none(monkeypatch):
-    # A configured provider whose read path is unwired raises NotConfigured (a
-    # RuntimeError). The free read helper must degrade to None, never propagate it.
     from adapters.project_management._contract import NotConfigured
 
     def _raise(issue_key, root=None):
@@ -80,7 +80,73 @@ def test_fetch_status_none_provider_does_not_check_confirmation(tmp_path, monkey
         "project_management", "EPIC-1", root=str(tmp_path)) is None
 
 
-# --- The providers -----------------------------------------------------------
+def test_fetch_status_collapses_http_error_to_none(monkeypatch):
+    def _raise(issue_key, root=None):
+        raise RuntimeError("Jira REST API error 500: Server Error")
+    fake = types.SimpleNamespace(
+        is_configured=lambda root=None: True, fetch_status=_raise)
+    monkeypatch.setattr(adapters, "get", lambda family, root=None: fake)
+    assert adapters.fetch_status("project_management", "EPIC-1") is None
+
+
+# --- Jira adapter: fetch_status wired via REST API ---------------------------
+
+def _fake_jira_response(fields):
+    """Return a context-manager that yields a fake HTTP response."""
+    body = json.dumps({"fields": fields}).encode()
+    class FakeResp:
+        def read(self):
+            return body
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+    return FakeResp()
+
+
+def test_jira_fetch_status_returns_data_when_configured(profile_root, monkeypatch):
+    monkeypatch.setattr(
+        urllib.request, "urlopen",
+        lambda req, timeout=None: _fake_jira_response({
+            "summary": "Alpha epic",
+            "status": {"name": "In Progress"},
+            "duedate": "2026-09-15",
+        }))
+    result = jira_adapter.fetch_status("EPIC-1", root=profile_root)
+    assert result == {
+        "status": "In Progress",
+        "title": "Alpha epic",
+        "due": "2026-09-15",
+    }
+
+
+def test_jira_fetch_status_handles_null_due(profile_root, monkeypatch):
+    monkeypatch.setattr(
+        urllib.request, "urlopen",
+        lambda req, timeout=None: _fake_jira_response({
+            "summary": "No deadline",
+            "status": {"name": "Open"},
+            "duedate": None,
+        }))
+    result = jira_adapter.fetch_status("EPIC-2", root=profile_root)
+    assert result["due"] is None
+    assert result["status"] == "Open"
+
+
+def test_jira_fetch_status_returns_none_on_404(profile_root, monkeypatch):
+    def _raise_404(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_404)
+    assert jira_adapter.fetch_status("EPIC-GONE", root=profile_root) is None
+
+
+def test_jira_fetch_status_raises_runtime_on_500(profile_root, monkeypatch):
+    def _raise_500(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 500, "Server Error", {}, None)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_500)
+    with pytest.raises(RuntimeError, match="Jira REST API error 500"):
+        jira_adapter.fetch_status("EPIC-1", root=profile_root)
+
 
 def test_jira_fetch_status_raises_not_configured_when_unconfigured(tmp_path):
     (tmp_path / "profile").mkdir()
@@ -90,12 +156,32 @@ def test_jira_fetch_status_raises_not_configured_when_unconfigured(tmp_path):
         jira_adapter.fetch_status("EPIC-1", root=str(tmp_path))
 
 
-def test_jira_fetch_status_is_honest_stub_when_configured(profile_root):
-    # Configured but the read path is not wired -> NotConfigured with a clear
-    # message rather than fabricated data. (Honest seam, graceful degrade.)
-    with pytest.raises(NotConfigured):
-        jira_adapter.fetch_status("EPIC-1", root=profile_root)
+def test_jira_fetch_status_raises_not_configured_without_api_creds(tmp_path):
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "integrations.yaml").write_text(textwrap.dedent("""\
+        project_management:
+          provider: "jira"
+          jira:
+            cloud_id: "acme.atlassian.net"
+            project_key: "ACM"
+    """))
+    with pytest.raises(NotConfigured, match="api_email"):
+        jira_adapter.fetch_status("EPIC-1", root=str(tmp_path))
 
+
+def test_jira_fetch_status_never_stub_when_configured(profile_root, monkeypatch):
+    """Regression: fetch_status must attempt an HTTP call, not raise NotConfigured."""
+    called = []
+    def _track(req, timeout=None):
+        called.append(req.full_url)
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+    monkeypatch.setattr(urllib.request, "urlopen", _track)
+    result = jira_adapter.fetch_status("EPIC-1", root=profile_root)
+    assert result is None
+    assert called
+
+
+# --- Asana adapter (still a stub) -------------------------------------------
 
 def test_asana_fetch_status_raises_not_configured(tmp_path):
     with pytest.raises(NotConfigured):
