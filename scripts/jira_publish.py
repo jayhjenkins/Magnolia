@@ -395,6 +395,77 @@ def publish_to_jira(draft, session_id=None):
                              session_id=session_id)
 
 
+def _run_jira_read_session(issue_key):
+    """Spawn a mini Claude session to read a Jira issue via MCP.
+
+    Returns the raw output string for parsing by fetch_issue.
+    Raises RuntimeError on failure.
+    """
+    prompt = f"""Read Jira issue {issue_key}:
+
+Tool: mcp__claude_ai_Jira__getJiraIssue
+Parameters:
+  cloudId: "{JIRA_CLOUD_ID}"
+  issueIdOrKey: "{issue_key}"
+  fields: ["summary", "status", "duedate"]
+
+Report the result as a single line:
+JIRA_READ:status_name|summary_text|due_date_or_none
+
+For example: JIRA_READ:In Progress|Build the feed widget|2026-09-15
+Or if no due date: JIRA_READ:Done|Ship the feature|none
+If the issue is not found: JIRA_READ:NOT_FOUND"""
+
+    env = platform_lib.headless_claude_env()
+    claude_bin = platform_lib.resolve_claude()
+
+    try:
+        result = subprocess.run(
+            [claude_bin, "-p", prompt, "--max-turns", "3",
+             "--allowedTools", "mcp__claude_ai_Jira__getJiraIssue"],
+            cwd=PM_OS_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Claude session timed out after 120 seconds")
+
+    return result.stdout + "\n" + result.stderr
+
+
+def fetch_issue(issue_key):
+    """Read a Jira issue via MCP and return {"status", "title", "due"} or None.
+
+    Uses the same MCP pattern as the write path. This is a READ op
+    (no Tier-2 gate). Returns None if the issue is not found.
+    Raises RuntimeError on failure.
+    """
+    output = _run_jira_read_session(issue_key)
+
+    match = re.search(r"JIRA_READ:(.+)", output)
+    if not match:
+        raise RuntimeError(
+            f"Could not parse Jira read from Claude output. Output: {output[:500]}")
+
+    payload = match.group(1).strip()
+    if payload == "NOT_FOUND":
+        return None
+
+    parts = payload.split("|", 2)
+    if len(parts) < 2:
+        raise RuntimeError(f"Malformed JIRA_READ payload: {payload}")
+
+    status = parts[0].strip()
+    title = parts[1].strip()
+    due = parts[2].strip() if len(parts) > 2 else None
+    if due and due.lower() == "none":
+        due = None
+
+    return {"status": status, "title": title, "due": due}
+
+
 # ─── Updating ──────────────────────────────────────────────────────────────
 
 def execute_jira_update(update):

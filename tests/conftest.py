@@ -28,8 +28,6 @@ def profile_root(tmp_path):
             component_id: "999"
             auto_label: "team_lane"
             default_assignee: "acct-123"
-            api_email: "test@example.com"
-            api_token: "test-token-xxx"
         transcript:
           provider: "granola"
         calendar:
