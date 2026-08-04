@@ -7,15 +7,12 @@ provider (the same outer liveness gate as get()), checks is_configured, and read
 The point of these tests: the read path never raises NeedsConfirmation, and an
 unconfigured backend yields a clean None (never fabricated data).
 """
-import json
-import textwrap
 import types
-import urllib.error
-import urllib.request
 
 import pytest
 
 import adapters
+import jira_publish
 from adapters.project_management import asana
 from adapters.project_management import jira as jira_adapter
 from adapters.project_management._contract import NotConfigured
@@ -80,72 +77,27 @@ def test_fetch_status_none_provider_does_not_check_confirmation(tmp_path, monkey
         "project_management", "EPIC-1", root=str(tmp_path)) is None
 
 
-def test_fetch_status_collapses_http_error_to_none(monkeypatch):
+def test_fetch_status_collapses_runtime_error_to_none(monkeypatch):
     def _raise(issue_key, root=None):
-        raise RuntimeError("Jira REST API error 500: Server Error")
+        raise RuntimeError("Claude session timed out")
     fake = types.SimpleNamespace(
         is_configured=lambda root=None: True, fetch_status=_raise)
     monkeypatch.setattr(adapters, "get", lambda family, root=None: fake)
     assert adapters.fetch_status("project_management", "EPIC-1") is None
 
 
-# --- Jira adapter: fetch_status wired via REST API ---------------------------
+# --- Jira adapter: fetch_status delegates to jira_publish.fetch_issue --------
 
-def _fake_jira_response(fields):
-    """Return a context-manager that yields a fake HTTP response."""
-    body = json.dumps({"fields": fields}).encode()
-    class FakeResp:
-        def read(self):
-            return body
-        def __enter__(self):
-            return self
-        def __exit__(self, *a):
-            pass
-    return FakeResp()
-
-
-def test_jira_fetch_status_returns_data_when_configured(profile_root, monkeypatch):
-    monkeypatch.setattr(
-        urllib.request, "urlopen",
-        lambda req, timeout=None: _fake_jira_response({
-            "summary": "Alpha epic",
-            "status": {"name": "In Progress"},
-            "duedate": "2026-09-15",
-        }))
+def test_jira_fetch_status_delegates_to_fetch_issue(profile_root, monkeypatch):
+    fact = {"status": "In Progress", "title": "Alpha epic", "due": "2026-09-15"}
+    monkeypatch.setattr(jira_publish, "fetch_issue", lambda key: fact)
     result = jira_adapter.fetch_status("EPIC-1", root=profile_root)
-    assert result == {
-        "status": "In Progress",
-        "title": "Alpha epic",
-        "due": "2026-09-15",
-    }
+    assert result == fact
 
 
-def test_jira_fetch_status_handles_null_due(profile_root, monkeypatch):
-    monkeypatch.setattr(
-        urllib.request, "urlopen",
-        lambda req, timeout=None: _fake_jira_response({
-            "summary": "No deadline",
-            "status": {"name": "Open"},
-            "duedate": None,
-        }))
-    result = jira_adapter.fetch_status("EPIC-2", root=profile_root)
-    assert result["due"] is None
-    assert result["status"] == "Open"
-
-
-def test_jira_fetch_status_returns_none_on_404(profile_root, monkeypatch):
-    def _raise_404(req, timeout=None):
-        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
-    monkeypatch.setattr(urllib.request, "urlopen", _raise_404)
+def test_jira_fetch_status_returns_none_from_fetch_issue(profile_root, monkeypatch):
+    monkeypatch.setattr(jira_publish, "fetch_issue", lambda key: None)
     assert jira_adapter.fetch_status("EPIC-GONE", root=profile_root) is None
-
-
-def test_jira_fetch_status_raises_runtime_on_500(profile_root, monkeypatch):
-    def _raise_500(req, timeout=None):
-        raise urllib.error.HTTPError(req.full_url, 500, "Server Error", {}, None)
-    monkeypatch.setattr(urllib.request, "urlopen", _raise_500)
-    with pytest.raises(RuntimeError, match="Jira REST API error 500"):
-        jira_adapter.fetch_status("EPIC-1", root=profile_root)
 
 
 def test_jira_fetch_status_raises_not_configured_when_unconfigured(tmp_path):
@@ -156,29 +108,33 @@ def test_jira_fetch_status_raises_not_configured_when_unconfigured(tmp_path):
         jira_adapter.fetch_status("EPIC-1", root=str(tmp_path))
 
 
-def test_jira_fetch_status_raises_not_configured_without_api_creds(tmp_path):
-    (tmp_path / "profile").mkdir()
-    (tmp_path / "profile" / "integrations.yaml").write_text(textwrap.dedent("""\
-        project_management:
-          provider: "jira"
-          jira:
-            cloud_id: "acme.atlassian.net"
-            project_key: "ACM"
-    """))
-    with pytest.raises(NotConfigured, match="api_email"):
-        jira_adapter.fetch_status("EPIC-1", root=str(tmp_path))
+# --- jira_publish.fetch_issue output parsing ---------------------------------
+
+def test_fetch_issue_parses_full_result(monkeypatch):
+    monkeypatch.setattr(jira_publish, "_run_jira_read_session",
+                        lambda key: "JIRA_READ:In Progress|Build the feed|2026-09-15")
+    result = jira_publish.fetch_issue("VNT-123")
+    assert result == {"status": "In Progress", "title": "Build the feed", "due": "2026-09-15"}
 
 
-def test_jira_fetch_status_never_stub_when_configured(profile_root, monkeypatch):
-    """Regression: fetch_status must attempt an HTTP call, not raise NotConfigured."""
-    called = []
-    def _track(req, timeout=None):
-        called.append(req.full_url)
-        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
-    monkeypatch.setattr(urllib.request, "urlopen", _track)
-    result = jira_adapter.fetch_status("EPIC-1", root=profile_root)
-    assert result is None
-    assert called
+def test_fetch_issue_parses_none_due(monkeypatch):
+    monkeypatch.setattr(jira_publish, "_run_jira_read_session",
+                        lambda key: "JIRA_READ:Done|Ship it|none")
+    result = jira_publish.fetch_issue("VNT-123")
+    assert result == {"status": "Done", "title": "Ship it", "due": None}
+
+
+def test_fetch_issue_returns_none_for_not_found(monkeypatch):
+    monkeypatch.setattr(jira_publish, "_run_jira_read_session",
+                        lambda key: "JIRA_READ:NOT_FOUND")
+    assert jira_publish.fetch_issue("VNT-999") is None
+
+
+def test_fetch_issue_raises_on_unparseable(monkeypatch):
+    monkeypatch.setattr(jira_publish, "_run_jira_read_session",
+                        lambda key: "some random output with no marker")
+    with pytest.raises(RuntimeError, match="Could not parse"):
+        jira_publish.fetch_issue("VNT-123")
 
 
 # --- Asana adapter (still a stub) -------------------------------------------
