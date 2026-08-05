@@ -1038,7 +1038,7 @@ def _active_family_count(root=None, exclude_family=None):
 
 
 def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None,
-                       period=None, registry=None, now=None):
+                       period=None, registry=None, now=None, weekday_only=False):
     """Evaluate the type's declarative emitters. Returns created task ids.
 
     Three emitter families fire here, all Tier-1 (LOCAL cards, no external writes,
@@ -1062,6 +1062,9 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
         tagged [program_id, "cadence"], then dispatches it via
         `_dispatch_agent_task`. Deduped against any OPEN agent task tagged with
         this program_id already carrying that task_type (once per period).
+
+    When `weekday_only` is True, only weekday-gated emitters are evaluated (used
+    for mid-cycle weekday fire-ups).
 
     Any other recognized action no-ops this increment (logged to stderr).
     """
@@ -1088,6 +1091,8 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
         on = em.get("on")
 
         fire_weekday = em.get("fire_weekday")
+        if weekday_only and fire_weekday is None:
+            continue
         if fire_weekday is not None:
             try:
                 target = int(fire_weekday)
@@ -1631,7 +1636,33 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
 
     is_new_cycle = force or fm.get("last_cycle") != period
 
+    # Resolve the type entry once (used by both fresh-cycle and mid-cycle paths).
+    type_id = fm.get("type")
+    type_entry = next(
+        (t for t in registry.get("types", []) if t.get("id") == type_id), {}
+    )
+
+    # Check for pending weekday-gated emitters that haven't fired this period.
+    # A weekday emitter whose target day is today and hasn't been recorded in
+    # weekday_fired for this period is eligible for a mid-cycle fire.
+    pending_weekday = False
     if not is_new_cycle:
+        today_wd = now.isoweekday() if hasattr(now, "isoweekday") else None
+        if today_wd is not None:
+            fired_days = (fm.get("weekday_fired") or {}).get(period, [])
+            for em in (type_entry.get("emitters") or []):
+                fw = em.get("fire_weekday")
+                if fw is None:
+                    continue
+                try:
+                    target = int(fw)
+                except (TypeError, ValueError):
+                    continue
+                if target == today_wd and target not in fired_days:
+                    pending_weekday = True
+                    break
+
+    if not is_new_cycle and not pending_weekday:
         drift_changed = fm.get("drift") != verdict
         if drift_changed or fm.get("last_run", "") < program_lib._now_iso()[:13]:
             fm["drift"] = verdict
@@ -1649,16 +1680,52 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
             "emitted": [],
         }
 
+    if not is_new_cycle and pending_weekday:
+        # Mid-cycle weekday fire: evaluate only weekday-gated emitters.
+        emitted = _evaluate_emitters(
+            program, type_entry, verdict, facts, body=body, root=root,
+            period=period, registry=registry, now=now, weekday_only=True
+        )
+        wf = dict(fm.get("weekday_fired") or {})
+        wf[period] = list(set(wf.get(period, []) + [today_wd]))
+        fm["weekday_fired"] = wf
+        fm["drift"] = verdict
+        fm["last_run"] = program_lib._now_iso()
+        filepath = program.get("filepath")
+        if not filepath:
+            filepath = os.path.join(
+                program_lib._program_dir(root), f"{fm['program_id']}.md"
+            )
+        program_lib._write_program_file(filepath, fm, body)
+        return {
+            "program_id": fm.get("program_id"),
+            "verdict": verdict,
+            "new_cycle": False,
+            "emitted": emitted,
+        }
+
     # Fresh cycle: evaluate emitters FIRST (so the cycle log can record them),
     # THEN write verdict back + append the cycle log, in ONE program-file write.
-    type_id = fm.get("type")
-    type_entry = next(
-        (t for t in registry.get("types", []) if t.get("id") == type_id), {}
-    )
     emitted = _evaluate_emitters(
         program, type_entry, verdict, facts, body=body, root=root, period=period,
         registry=registry, now=now
     )
+
+    # Record weekday firings for the fresh cycle so mid-cycle ticks don't re-fire.
+    fresh_wf = {}
+    today_wd = now.isoweekday() if hasattr(now, "isoweekday") else None
+    if today_wd is not None:
+        for em in (type_entry.get("emitters") or []):
+            fw = em.get("fire_weekday")
+            if fw is None:
+                continue
+            try:
+                target = int(fw)
+            except (TypeError, ValueError):
+                continue
+            if target == today_wd:
+                fresh_wf.setdefault(period, []).append(target)
+    fm["weekday_fired"] = fresh_wf
 
     # The FACT door: mutate `fm` in place (phase + checkpoint) when the current
     # phase's mechanical exit checkpoint is confirmed done. The mutation and its

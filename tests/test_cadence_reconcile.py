@@ -2440,3 +2440,159 @@ def test_fire_weekday_invalid_value_treated_as_none(tmp_path):
 
     # Invalid fire_weekday is treated as "not set" -> emitter fires.
     assert len(result["emitted"]) == 1
+
+
+# ─── fire_weekday mid-cycle deferred fire ─────────────────────────────────────
+#
+# When a cycle starts on the wrong day (e.g., Monday) and a weekday-gated emitter
+# targets a later day (e.g., Tuesday), the emitter should fire on a subsequent
+# reconcile tick when the target day arrives — even though `is_new_cycle` is False.
+
+
+def test_fire_weekday_mid_cycle_fires_on_target_day(tmp_path):
+    # Cycle starts Monday (is_new_cycle=True, fire_weekday=2 skipped).
+    # Re-reconcile on Tuesday (is_new_cycle=False) -> emitter fires mid-cycle.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    monday = date(2026, 6, 15)
+    tuesday = date(2026, 6, 16)
+
+    # Monday: fresh cycle, fire_weekday=2 (Tuesday) does NOT match.
+    program = pl.read_program(program_id, root=root)
+    r1 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=monday
+    )
+    assert r1["new_cycle"] is True
+    assert r1["emitted"] == []
+
+    # Tuesday: mid-cycle tick, fire_weekday=2 matches -> emitter fires.
+    program = pl.read_program(program_id, root=root)
+    r2 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=tuesday
+    )
+    assert r2["new_cycle"] is False
+    assert len(r2["emitted"]) == 1
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 1
+
+
+def test_fire_weekday_mid_cycle_no_double_fire(tmp_path):
+    # After the mid-cycle weekday emitter fires, a second tick on the same day
+    # must NOT fire again (weekday_fired tracking prevents re-evaluation).
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    monday = date(2026, 6, 15)
+    tuesday = date(2026, 6, 16)
+
+    # Monday: fresh cycle, fire_weekday=2 skipped.
+    program = pl.read_program(program_id, root=root)
+    reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=monday
+    )
+
+    # Tuesday tick 1: mid-cycle fire.
+    program = pl.read_program(program_id, root=root)
+    r2 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=tuesday
+    )
+    assert len(r2["emitted"]) == 1
+
+    # Tuesday tick 2: weekday already fired this period -> no re-fire.
+    program = pl.read_program(program_id, root=root)
+    r3 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=tuesday
+    )
+    assert r3["emitted"] == []
+    cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(cards) == 1  # still just the one from tick 1
+
+
+def test_fire_weekday_fresh_cycle_on_target_day_prevents_mid_cycle_refire(tmp_path):
+    # When the fresh cycle lands ON the target day, the emitter fires normally.
+    # A subsequent tick on the same day must NOT re-fire.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    tuesday = date(2026, 6, 16)
+
+    # Tuesday: fresh cycle, fire_weekday=2 matches -> fires.
+    program = pl.read_program(program_id, root=root)
+    r1 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=tuesday
+    )
+    assert r1["new_cycle"] is True
+    assert len(r1["emitted"]) == 1
+
+    # Tuesday again: mid-cycle tick, weekday already recorded -> no re-fire.
+    program = pl.read_program(program_id, root=root)
+    r2 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=tuesday
+    )
+    assert r2["emitted"] == []
+
+
+def test_fire_weekday_mid_cycle_wrong_day_no_fire(tmp_path):
+    # Cycle starts Monday, re-reconcile on Wednesday (not the target Tuesday).
+    # The emitter should NOT fire on Wednesday.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    monday = date(2026, 6, 15)
+    wednesday = date(2026, 6, 17)
+
+    # Monday: fresh cycle, fire_weekday=2 skipped.
+    program = pl.read_program(program_id, root=root)
+    reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=monday
+    )
+
+    # Wednesday: mid-cycle tick, fire_weekday=2 doesn't match Wednesday (3).
+    program = pl.read_program(program_id, root=root)
+    r2 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=wednesday
+    )
+    assert r2["new_cycle"] is False
+    assert r2["emitted"] == []
+
+
+def test_fire_weekday_mid_cycle_does_not_fire_non_weekday_emitters(tmp_path):
+    # A type with both a non-weekday emitter (escalate) and a weekday emitter.
+    # On a mid-cycle weekday tick, only the weekday emitter fires; the non-weekday
+    # emitter does not re-fire (it already had its chance on the fresh cycle).
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    monday = date(2026, 6, 15)
+    tuesday = date(2026, 6, 16)
+
+    registry = {
+        "types": [{
+            "id": "weekly-priorities",
+            "label": "Weekly priorities",
+            "state_model": "cycle",
+            "cadence": "weekly",
+            "emitters": [
+                {"on": "drift:holding", "action": "escalate"},
+                {"on": "cycle-fresh", "action": "draft-message",
+                 "template": "nudge", "fire_weekday": 2},
+            ],
+        }]
+    }
+
+    # Monday: fresh cycle. Escalate fires (drift=holding matches).
+    # Draft-message with fire_weekday=2 skipped (Monday != Tuesday).
+    program = pl.read_program(program_id, root=root)
+    r1 = reconcile.reconcile_program(program, registry, now=monday)
+    assert r1["new_cycle"] is True
+    escalate_cards = task_lib.list_tasks(queue="human", status="open")
+    collab_cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(escalate_cards) == 1
+    assert len(collab_cards) == 0
+
+    # Tuesday: mid-cycle. Only the weekday draft-message fires.
+    # Escalate must NOT re-fire (weekday_only=True filters it out).
+    program = pl.read_program(program_id, root=root)
+    r2 = reconcile.reconcile_program(program, registry, now=tuesday)
+    assert r2["new_cycle"] is False
+    assert len(r2["emitted"]) == 1
+    escalate_cards = task_lib.list_tasks(queue="human", status="open")
+    collab_cards = task_lib.list_tasks(queue="collab", status="open")
+    assert len(escalate_cards) == 1  # still just the one from Monday
+    assert len(collab_cards) == 1    # the Tuesday nudge
