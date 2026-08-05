@@ -297,6 +297,56 @@ def test_tracker_truth_unconfigured_via_fetch_status_none(tmp_path, monkeypatch)
     assert "sentinel:tracker-truth" not in body1
 
 
+def test_tracker_truth_emits_date_change_for_ea_ga(tmp_path, monkeypatch):
+    pid1, _ = _seed_two_programs_with_epics(tmp_path, monkeypatch, "EPIC-1", "EPIC-2")
+    monkeypatch.setattr(sentinel_runner, "_adapter_configured", lambda name, root=None: True)
+    facts = {
+        "EPIC-1": {
+            "status": "In Development", "title": "Alpha",
+            "due": None, "ea_date": "2026-08-01", "ga_date": "2026-09-15",
+        },
+        "EPIC-2": {
+            "status": "Open", "title": "Beta",
+            "due": None, "ea_date": None, "ga_date": None,
+        },
+    }
+    monkeypatch.setattr(
+        sentinel_runner.adapters, "fetch_status",
+        lambda family, issue_key, root=None: facts.get(issue_key))
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no dispatch")))
+
+    summary = sentinel_runner.run_sentinel("tracker-truth", root=str(tmp_path))
+
+    # EPIC-1: status-signal + ea date-change + ga date-change = 3
+    # EPIC-2: status-signal only (no dates) = 1
+    assert summary["appended"] == 4
+    body1 = program_lib.read_program(pid1, root=str(tmp_path))["body"]
+    assert "[date-change]" in body1
+    assert "EA date is 2026-08-01" in body1
+    assert "GA date is 2026-09-15" in body1
+
+
+def test_tracker_truth_no_date_change_without_dates(tmp_path, monkeypatch):
+    pid1, _ = _seed_two_programs_with_epics(tmp_path, monkeypatch, "EPIC-1", "EPIC-2")
+    monkeypatch.setattr(sentinel_runner, "_adapter_configured", lambda name, root=None: True)
+    facts = {
+        "EPIC-1": {"status": "Done", "title": "Alpha", "due": None},
+        "EPIC-2": {"status": "Open", "title": "Beta", "due": None},
+    }
+    monkeypatch.setattr(
+        sentinel_runner.adapters, "fetch_status",
+        lambda family, issue_key, root=None: facts.get(issue_key))
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no dispatch")))
+
+    summary = sentinel_runner.run_sentinel("tracker-truth", root=str(tmp_path))
+
+    assert summary["appended"] == 2
+    body1 = program_lib.read_program(pid1, root=str(tmp_path))["body"]
+    assert "[date-change]" not in body1
+
+
 # ── The program-intake sentinel (the birth-path routing branch) ───────────────
 #
 # program-intake is the intake sentinel: it returns ROUTING records the runner

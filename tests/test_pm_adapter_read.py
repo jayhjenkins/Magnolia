@@ -112,16 +112,40 @@ def test_jira_fetch_status_raises_not_configured_when_unconfigured(tmp_path):
 
 def test_fetch_issue_parses_full_result(monkeypatch):
     monkeypatch.setattr(jira_publish, "_run_jira_read_session",
-                        lambda key: "JIRA_READ:In Progress|Build the feed|2026-09-15")
+                        lambda key: "JIRA_READ:In Progress|Build the feed|2026-09-15|2026-08-01|2026-09-15")
     result = jira_publish.fetch_issue("VNT-123")
-    assert result == {"status": "In Progress", "title": "Build the feed", "due": "2026-09-15"}
+    assert result == {
+        "status": "In Progress", "title": "Build the feed",
+        "due": "2026-09-15", "ea_date": "2026-08-01", "ga_date": "2026-09-15",
+    }
 
 
 def test_fetch_issue_parses_none_due(monkeypatch):
     monkeypatch.setattr(jira_publish, "_run_jira_read_session",
-                        lambda key: "JIRA_READ:Done|Ship it|none")
+                        lambda key: "JIRA_READ:Done|Ship it|none|none|none")
     result = jira_publish.fetch_issue("VNT-123")
-    assert result == {"status": "Done", "title": "Ship it", "due": None}
+    assert result == {
+        "status": "Done", "title": "Ship it",
+        "due": None, "ea_date": None, "ga_date": None,
+    }
+
+
+def test_fetch_issue_parses_with_ea_ga_dates(monkeypatch):
+    monkeypatch.setattr(jira_publish, "_run_jira_read_session",
+                        lambda key: "JIRA_READ:In Development|Community Feed|none|2026-07-25|2026-08-30")
+    result = jira_publish.fetch_issue("VNT-42411")
+    assert result["ea_date"] == "2026-07-25"
+    assert result["ga_date"] == "2026-08-30"
+    assert result["due"] is None
+
+
+def test_fetch_issue_handles_missing_date_fields(monkeypatch):
+    monkeypatch.setattr(jira_publish, "_run_jira_read_session",
+                        lambda key: "JIRA_READ:Open|Old issue|2026-12-01")
+    result = jira_publish.fetch_issue("VNT-100")
+    assert result["status"] == "Open"
+    assert result["ea_date"] is None
+    assert result["ga_date"] is None
 
 
 def test_fetch_issue_returns_none_for_not_found(monkeypatch):

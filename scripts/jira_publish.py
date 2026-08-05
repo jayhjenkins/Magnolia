@@ -407,13 +407,15 @@ Tool: mcp__claude_ai_Jira__getJiraIssue
 Parameters:
   cloudId: "{JIRA_CLOUD_ID}"
   issueIdOrKey: "{issue_key}"
-  fields: ["summary", "status", "duedate"]
+  fields: ["summary", "status", "duedate", "customfield_10683", "customfield_10300"]
 
-Report the result as a single line:
-JIRA_READ:status_name|summary_text|due_date_or_none
+Report the result as a single line with pipe-separated fields:
+JIRA_READ:status_name|summary_text|due_date_or_none|ea_date_or_none|ga_date_or_none
 
-For example: JIRA_READ:In Progress|Build the feed widget|2026-09-15
-Or if no due date: JIRA_READ:Done|Ship the feature|none
+customfield_10683 is the EA date. customfield_10300 is the GA date.
+
+For example: JIRA_READ:In Progress|Build the feed widget|2026-09-15|2026-08-01|2026-09-15
+Or with missing dates: JIRA_READ:Done|Ship the feature|none|none|none
 If the issue is not found: JIRA_READ:NOT_FOUND"""
 
     env = platform_lib.headless_claude_env()
@@ -435,11 +437,22 @@ If the issue is not found: JIRA_READ:NOT_FOUND"""
     return result.stdout + "\n" + result.stderr
 
 
-def fetch_issue(issue_key):
-    """Read a Jira issue via MCP and return {"status", "title", "due"} or None.
+def _clean_date(raw):
+    """Normalize a date field from the JIRA_READ payload. Returns str or None."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if raw.lower() == "none" or raw.lower() == "null" or not raw:
+        return None
+    return raw
 
-    Uses the same MCP pattern as the write path. This is a READ op
-    (no Tier-2 gate). Returns None if the issue is not found.
+
+def fetch_issue(issue_key):
+    """Read a Jira issue via MCP and return issue facts or None.
+
+    Returns {"status", "title", "due", "ea_date", "ga_date"} or None
+    if the issue is not found. Uses the same MCP pattern as the write path.
+    This is a READ op (no Tier-2 gate).
     Raises RuntimeError on failure.
     """
     output = _run_jira_read_session(issue_key)
@@ -453,17 +466,17 @@ def fetch_issue(issue_key):
     if payload == "NOT_FOUND":
         return None
 
-    parts = payload.split("|", 2)
+    parts = payload.split("|")
     if len(parts) < 2:
         raise RuntimeError(f"Malformed JIRA_READ payload: {payload}")
 
-    status = parts[0].strip()
-    title = parts[1].strip()
-    due = parts[2].strip() if len(parts) > 2 else None
-    if due and due.lower() == "none":
-        due = None
-
-    return {"status": status, "title": title, "due": due}
+    return {
+        "status": parts[0].strip(),
+        "title": parts[1].strip(),
+        "due": _clean_date(parts[2] if len(parts) > 2 else None),
+        "ea_date": _clean_date(parts[3] if len(parts) > 3 else None),
+        "ga_date": _clean_date(parts[4] if len(parts) > 4 else None),
+    }
 
 
 # ─── Updating ──────────────────────────────────────────────────────────────

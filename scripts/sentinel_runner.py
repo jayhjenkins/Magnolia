@@ -284,13 +284,13 @@ def _program_tracker_epic(program):
 
 
 def _map_tracker_fact(fact):
-    """Map a tracker fact dict mechanically to (kind, claim). No interpretation.
+    """Map a tracker fact dict mechanically to a list of (kind, claim) pairs.
 
-    A done/closed status -> completion; anything else -> status-signal. The claim
-    is a short ASCII restatement of the reported status. (date-change is left to a
-    later pass - comparing the fetched due to a checkpoint due cleanly needs the
-    checkpoint match, and emitting it speculatively would not be mechanical.)
+    A done/closed status -> completion; anything else -> status-signal. EA/GA
+    dates, when present, each produce an additional date-change observation so
+    Cadence can track release milestones.
     """
+    records = []
     status = str(fact.get("status") or "").strip()
     if status.lower() in _DONE_STATUSES:
         kind = "completion"
@@ -301,7 +301,16 @@ def _map_tracker_fact(fact):
     if title:
         claim += f" for '{title}'"
     claim += "."
-    return kind, claim
+    records.append((kind, claim))
+
+    ea = fact.get("ea_date")
+    if ea:
+        records.append(("date-change", f"EA date is {ea}."))
+    ga = fact.get("ga_date")
+    if ga:
+        records.append(("date-change", f"GA date is {ga}."))
+
+    return records
 
 
 def _run_tracker_truth(name, programs, root=None, now=None):
@@ -329,21 +338,22 @@ def _run_tracker_truth(name, programs, root=None, now=None):
         if not fact:
             continue
         any_fact = True
-        kind, claim = _map_tracker_fact(fact)
-        try:
-            appended = program_lib.append_observation(
-                pid, kind=kind, sentinel=name,
-                source=f"adapter:{_ADAPTER_FAMILY}:{epic}",
-                claim=claim, date=obs_date, root=root,
-            )
-        except (ValueError, TypeError, FileNotFoundError) as exc:
-            log(f"sentinel '{name}': adapter record for {pid} rejected: {exc}")
-            summary["dropped"] += 1
-            continue
-        if appended:
-            summary["appended"] += 1
-        else:
-            summary["dropped"] += 1
+        records = _map_tracker_fact(fact)
+        for kind, claim in records:
+            try:
+                appended = program_lib.append_observation(
+                    pid, kind=kind, sentinel=name,
+                    source=f"adapter:{_ADAPTER_FAMILY}:{epic}",
+                    claim=claim, date=obs_date, root=root,
+                )
+            except (ValueError, TypeError, FileNotFoundError) as exc:
+                log(f"sentinel '{name}': adapter record for {pid} rejected: {exc}")
+                summary["dropped"] += 1
+                continue
+            if appended:
+                summary["appended"] += 1
+            else:
+                summary["dropped"] += 1
     if not any_fact:
         log(f"sentinel '{name}': project_management adapter returned no facts - "
             "clean no-op (0 observations)")
