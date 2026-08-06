@@ -1214,6 +1214,99 @@ def test_propose_update_ignores_adapter_completion(tmp_path):
     assert pl.read_program(pid, root=root)["frontmatter"]["phase"] == "discovery"
 
 
+def _seed_rock_program(root, phase="define", last_cycle=OTHER_PERIOD, extra_obs=None):
+    """An eos-rock program with no exit_checkpoint objects in frontmatter."""
+    program_id, _ = pl.create_program(
+        type="eos-rock",
+        title="Q3 Rock",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": phase,
+            "phase_entered": {phase: "2026-05-01"},
+            "last_cycle": last_cycle,
+        },
+        root=root,
+    )
+    if extra_obs:
+        pl.append_observation(program_id, root=root, **extra_obs)
+    return program_id
+
+
+def test_propose_update_works_without_exit_checkpoint(tmp_path):
+    # eos-rock programs have no matching checkpoint objects for their exit
+    # checkpoints. The interpretation door should still propose advancement
+    # from interpretive completion evidence alone.
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="UX tickets pulled in, engineer actively building."),
+    )
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    # Phase is NOT mutated (proposal only), but a propose-update card was emitted.
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "define"  # not auto-advanced
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["proposal"]["op"] == "advance-phase"
+    assert card["proposal"]["from"] == "define"
+    assert card["proposal"]["to"] == "build"
+    assert card["id"] in result["emitted"]
+
+
+def test_propose_update_no_evidence_no_card_even_without_checkpoint(tmp_path):
+    # Without interpretive completion evidence, no proposal even when the type
+    # has the emitter wired and no matching checkpoint.
+    root = str(tmp_path)
+    pid = _seed_rock_program(root, phase="define")
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert cards == []
+
+
+def test_propose_update_planning_exit_without_checkpoint_object(tmp_path):
+    # roadmap-initiative planning phase has exit_checkpoint but the program
+    # may not have a matching checkpoint object. The interpretation door should
+    # still propose from interpretive evidence.
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Test initiative",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "planning",
+            "phase_entered": {"planning": "2026-05-01"},
+            "last_cycle": OTHER_PERIOD,
+        },
+        root=root,
+    )
+    pl.append_observation(
+        pid, root=root,
+        kind="completion", sentinel="movement-watch",
+        source="datasets/meetings/2026-06-15_standup.md",
+        claim="Planning complete, tickets created and assigned.",
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["phase"] == "planning"  # not auto-advanced
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"]
+    assert len(cards) == 1
+    assert cards[0]["proposal"]["from"] == "planning"
+    assert cards[0]["proposal"]["to"] == "execution"
+
+
 # ─── produce-artifact emitter (Task 3, the worker-dispatch door) ─────────────
 #
 # On a FRESH cycle, a `produce-artifact` emitter dispatches a worker as an
@@ -2596,3 +2689,62 @@ def test_fire_weekday_mid_cycle_does_not_fire_non_weekday_emitters(tmp_path):
     collab_cards = task_lib.list_tasks(queue="collab", status="open")
     assert len(escalate_cards) == 1  # still just the one from Monday
     assert len(collab_cards) == 1    # the Tuesday nudge
+
+
+# ─── Registry configuration validation ────────────────────────────────────────
+#
+# These tests validate that the REAL registry has the right emitters and phase
+# structure wired. Component tests pass against mock registries, but if the real
+# registry is misconfigured, the system silently fails. These catch that gap.
+
+
+def test_registry_pipeline_types_have_phase_advance_emitter():
+    # Every pipeline type must have a phase-advance-proposable emitter so the
+    # interpretation door can propose phase changes from sentinel evidence.
+    reg = _registry()
+    for t in reg.get("types", []):
+        if t.get("state_model") != "pipeline":
+            continue
+        emitter_triggers = [e.get("on") for e in t.get("emitters", [])]
+        assert "phase-advance-proposable" in emitter_triggers, (
+            f"pipeline type '{t['id']}' has no phase-advance-proposable emitter "
+            f"- the interpretation door cannot propose phase changes"
+        )
+
+
+def test_registry_pipeline_types_have_at_least_one_exit_checkpoint():
+    # Every pipeline type should have at least one non-terminal phase with an
+    # exit_checkpoint so phase advancement has a defined gate.
+    reg = _registry()
+    for t in reg.get("types", []):
+        if t.get("state_model") != "pipeline":
+            continue
+        phases = t.get("phases", [])
+        has_exit = any(
+            p.get("exit_checkpoint") for p in phases
+            if not p.get("terminal")
+        )
+        assert has_exit, (
+            f"pipeline type '{t['id']}' has no exit_checkpoint on any "
+            f"non-terminal phase"
+        )
+
+
+def test_registry_eos_rock_has_phase_advance_proposable():
+    # Regression: eos-rock was missing this emitter, leaving rocks unable to
+    # advance phases from sentinel evidence.
+    reg = _registry()
+    rock = next(t for t in reg["types"] if t["id"] == "eos-rock")
+    emitter_triggers = [e.get("on") for e in rock.get("emitters", [])]
+    assert "phase-advance-proposable" in emitter_triggers
+
+
+def test_registry_roadmap_initiative_planning_has_exit_checkpoint():
+    # Regression: planning phase had no exit_checkpoint, blocking the
+    # interpretation door from proposing planning -> execution.
+    reg = _registry()
+    ri = next(t for t in reg["types"] if t["id"] == "roadmap-initiative")
+    planning = next(p for p in ri["phases"] if p["id"] == "planning")
+    assert planning.get("exit_checkpoint"), (
+        "roadmap-initiative planning phase must have an exit_checkpoint"
+    )

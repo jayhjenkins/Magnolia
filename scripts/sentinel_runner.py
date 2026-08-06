@@ -221,7 +221,7 @@ def _build_prompt(definition, programs, source_digest):
     body = str(definition.get("prompt") or "").strip()
     parts = [
         body,
-        "\n=== ACTIVE PROGRAMS (attribute each signal to ONE of these ids, or drop it) ===",
+        "\n=== ACTIVE PROGRAMS (attribute each signal to one or more of these ids; drop unattributable signals) ===",
         _program_context(programs),
         "\n=== SOURCES ===",
         source_digest,

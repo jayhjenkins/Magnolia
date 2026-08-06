@@ -710,19 +710,21 @@ def _dispatch_agent_task(task_id):
 def _propose_phase_advance(fm, type_entry, body):
     """The INTERPRETATION door's gate. Returns an advance-phase mutation or None.
 
-    Returns {"op": "advance-phase", "to": <next>, "checkpoint": <cp_id>,
-    "from": <current>} only when ALL hold:
-      - the current phase has an `exit_checkpoint`, is not terminal, and that
-        checkpoint exists in fm["checkpoints"];
-      - that checkpoint's instrument is NOT mechanical (human-attested / unclear -
-        the mechanical case is Task 5's fact door);
-      - a fresh INTERPRETIVE `completion` observation is present: a kind=completion
-        observation whose `source` does NOT start with `adapter:` (interpretive =
-        movement-watch, not the tracker) and dated on/after the current phase's
-        `phase_entered` (you cannot complete a phase's exit before entering it);
-      - there is a real next phase.
-    Else None. Proposal only - never mutates the program (Task 7's accept applies
-    it). ASCII-safe; tolerant of missing shapes (never raises).
+    Returns {"op": "advance-phase", "to": <next>, "checkpoint": <cp_id|None>,
+    "from": <current>} when:
+      - the current phase is not terminal, and there is a next phase;
+      - a fresh INTERPRETIVE `completion` observation is present (kind=completion,
+        source NOT from `adapter:`, dated on/after phase_entered);
+      - AND one of:
+        (a) the phase has an exit_checkpoint whose matching program checkpoint is
+            non-mechanical (the original gate), OR
+        (b) the phase has no exit_checkpoint or the program has no matching
+            checkpoint object -- the evidence-only path for types like eos-rock
+            whose checkpoints are program-specific milestones, not phase gates.
+
+    The fact door (mechanical adapter completion) is unaffected: it still requires
+    both a checkpoint and a mechanical instrument. This door only PROPOSES (creates
+    a card for human approval), never auto-advances.
     """
     phase = fm.get("phase")
     phases = type_entry.get("phases") or []
@@ -731,25 +733,20 @@ def _propose_phase_advance(fm, type_entry, body):
     )
     if phase_def.get("terminal"):
         return None
-    cp_id = phase_def.get("exit_checkpoint")
-    if not cp_id:
-        return None
-
-    cp = next(
-        (c for c in (fm.get("checkpoints") or [])
-         if isinstance(c, dict) and c.get("id") == cp_id),
-        None,
-    )
-    if cp is None:
-        return None
-
-    # Mechanical instruments belong to the fact door, not the proposal door.
-    if _instrument_is_mechanical(cp.get("instrument")):
-        return None
 
     next_phase = _next_phase_id(type_entry, phase)
     if not next_phase:
         return None
+
+    cp_id = phase_def.get("exit_checkpoint")
+    if cp_id:
+        cp = next(
+            (c for c in (fm.get("checkpoints") or [])
+             if isinstance(c, dict) and c.get("id") == cp_id),
+            None,
+        )
+        if cp is not None and _instrument_is_mechanical(cp.get("instrument")):
+            return None
 
     since = _phase_entered_date(fm, phase)
     since_iso = since.isoformat() if since else None
