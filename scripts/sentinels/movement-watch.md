@@ -28,15 +28,33 @@ record.
 
 1. Read each in-window transcript.
 2. For every concrete signal you find (a status update, a stated completion, a
-   moved or named date, a commitment, a risk, a blocker), decide which ONE active
-   program it belongs to by matching the signal against each program's `## Intent`.
-   Attribute the signal to that program's `program_id`.
-3. If a signal does not clearly belong to exactly one of the provided programs,
-   DROP it. Never force-fit a signal onto a program just to have something to say.
-   An unattributable signal is silently dropped, not guessed.
-4. Cite a source for every signal you keep: the transcript file plus the location
+   moved or named date, a commitment, a risk, a blocker), decide which active
+   program(s) it belongs to by matching the signal against each program's
+   `## Intent`.
+3. A signal may impact multiple programs. When the transcript explicitly names
+   the impact on each (e.g., "we are delaying X to work on Y"), return one
+   record per affected program. Do NOT duplicate signals speculatively -- only
+   multi-attribute when the transcript itself states the cross-program impact.
+4. If a signal does not clearly belong to any of the provided programs, DROP it.
+   Never force-fit a signal onto a program just to have something to say.
+5. Cite a source for every signal you keep: the transcript file plus the location
    inside it (for example the section or speaker turn). An observation with no
    source citation is not valid and will be rejected downstream.
+
+## Observation kinds -- when to use each
+
+- `status-signal` — work is happening; general progress updates, activity reports,
+  or status mentions that do not indicate a phase or milestone is complete.
+- `completion` — a phase, milestone, or checkpoint is DONE. Use this when the
+  transcript contains clear evidence that a body of work has concluded: "we
+  shipped it," "the beta is live," "tickets are pulled in and being worked"
+  (= define phase done, build phase starting), "prototype is done" (= planning
+  done, execution starting). This kind drives phase advancement proposals, so
+  use it when you see phase-transition evidence, not just activity.
+- `date-change` — a target date has moved, been set, or been removed.
+- `commitment` — someone committed to a specific action or deliverable.
+- `risk` — a stated concern about timeline, quality, scope, or resources.
+- `blocker` — something is actively preventing progress.
 
 ## What to return
 
