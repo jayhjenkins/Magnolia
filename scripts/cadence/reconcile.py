@@ -80,10 +80,15 @@ def current_period(cadence, now):
     """Return the period key for a cadence at `now`.
 
     weekly / None / unknown -> ISO-week key `YYYY-Www` (from now.isocalendar()).
-    daily -> ISO date `YYYY-MM-DD`. `now` may be a date or datetime.
+    daily -> ISO date `YYYY-MM-DD`.
+    monthly -> `YYYY-MM`.
+    `now` may be a date or datetime.
     """
     if cadence == "daily":
         return _to_date(now).isoformat()
+    if cadence == "monthly":
+        d = _to_date(now)
+        return f"{d.year}-{d.month:02d}"
     # weekly (and any unknown cadence) falls back to the ISO-week key.
     iso = now.isocalendar()
     year, week = iso[0], iso[1]
@@ -1098,6 +1103,18 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             if target is not None and now.isoweekday() != target:
                 continue
 
+        fire_occurrence = em.get("fire_month_occurrence")
+        if fire_occurrence is not None:
+            try:
+                target_occ = int(fire_occurrence)
+            except (TypeError, ValueError):
+                target_occ = None
+            if target_occ is not None:
+                d = _to_date(now)
+                occurrence = (d.day - 1) // 7 + 1
+                if occurrence != target_occ:
+                    continue
+
         if action == "escalate":
             if on != f"drift:{verdict}":
                 continue
@@ -1640,13 +1657,16 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     )
 
     # Check for pending weekday-gated emitters that haven't fired this period.
-    # A weekday emitter whose target day is today and hasn't been recorded in
-    # weekday_fired for this period is eligible for a mid-cycle fire.
+    # A weekday emitter whose target day is today (and correct month occurrence
+    # if specified) and hasn't been recorded in weekday_fired for this period is
+    # eligible for a mid-cycle fire.
     pending_weekday = False
     if not is_new_cycle:
         today_wd = now.isoweekday() if hasattr(now, "isoweekday") else None
         if today_wd is not None:
             fired_days = (fm.get("weekday_fired") or {}).get(period, [])
+            today_d = _to_date(now)
+            today_occ = (today_d.day - 1) // 7 + 1
             for em in (type_entry.get("emitters") or []):
                 fw = em.get("fire_weekday")
                 if fw is None:
@@ -1655,7 +1675,18 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
                     target = int(fw)
                 except (TypeError, ValueError):
                     continue
-                if target == today_wd and target not in fired_days:
+                if target != today_wd:
+                    continue
+                fo = em.get("fire_month_occurrence")
+                if fo is not None:
+                    try:
+                        target_occ = int(fo)
+                    except (TypeError, ValueError):
+                        target_occ = None
+                    if target_occ is not None and target_occ != today_occ:
+                        continue
+                fired_key = target if fo is None else f"{target}:{fo}"
+                if fired_key not in fired_days:
                     pending_weekday = True
                     break
 
@@ -1684,7 +1715,19 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
             period=period, registry=registry, now=now, weekday_only=True
         )
         wf = dict(fm.get("weekday_fired") or {})
-        wf[period] = list(set(wf.get(period, []) + [today_wd]))
+        fired_keys = list(wf.get(period, []))
+        for em in (type_entry.get("emitters") or []):
+            fw = em.get("fire_weekday")
+            if fw is None:
+                continue
+            try:
+                target = int(fw)
+            except (TypeError, ValueError):
+                continue
+            if target == today_wd:
+                fo = em.get("fire_month_occurrence")
+                fired_keys.append(target if fo is None else f"{target}:{fo}")
+        wf[period] = list(set(fired_keys))
         fm["weekday_fired"] = wf
         fm["drift"] = verdict
         fm["last_run"] = program_lib._now_iso()
@@ -1712,6 +1755,8 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     fresh_wf = {}
     today_wd = now.isoweekday() if hasattr(now, "isoweekday") else None
     if today_wd is not None:
+        today_d = _to_date(now)
+        today_occ = (today_d.day - 1) // 7 + 1
         for em in (type_entry.get("emitters") or []):
             fw = em.get("fire_weekday")
             if fw is None:
@@ -1721,7 +1766,16 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
             except (TypeError, ValueError):
                 continue
             if target == today_wd:
-                fresh_wf.setdefault(period, []).append(target)
+                fo = em.get("fire_month_occurrence")
+                if fo is not None:
+                    try:
+                        target_occ = int(fo)
+                    except (TypeError, ValueError):
+                        target_occ = None
+                    if target_occ is not None and target_occ != today_occ:
+                        continue
+                fired_key = target if fo is None else f"{target}:{fo}"
+                fresh_wf.setdefault(period, []).append(fired_key)
     fm["weekday_fired"] = fresh_wf
 
     # The FACT door: mutate `fm` in place (phase + checkpoint) when the current

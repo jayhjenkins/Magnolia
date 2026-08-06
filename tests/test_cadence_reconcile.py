@@ -60,17 +60,24 @@ def test_current_period_weekly_format():
 
 def test_current_period_none_and_unknown_default_to_weekly():
     assert reconcile.current_period(None, NOW) == "2026-W25"
-    assert reconcile.current_period("monthly", NOW) == "2026-W25"
+    assert reconcile.current_period("biweekly", NOW) == "2026-W25"
 
 
 def test_current_period_daily_is_iso_date():
     assert reconcile.current_period("daily", NOW) == "2026-06-16"
 
 
+def test_current_period_monthly_is_year_month():
+    assert reconcile.current_period("monthly", NOW) == "2026-06"
+    assert reconcile.current_period("monthly", date(2026, 8, 10)) == "2026-08"
+    assert reconcile.current_period("monthly", date(2026, 12, 31)) == "2026-12"
+
+
 def test_current_period_accepts_datetime():
     dt = datetime(2026, 6, 16, 9, 30, 0)
     assert reconcile.current_period("weekly", dt) == "2026-W25"
     assert reconcile.current_period("daily", dt) == "2026-06-16"
+    assert reconcile.current_period("monthly", dt) == "2026-06"
 
 
 # ─── _parse_iso_date ─────────────────────────────────────────────────────────
@@ -2748,3 +2755,120 @@ def test_registry_roadmap_initiative_planning_has_exit_checkpoint():
     assert planning.get("exit_checkpoint"), (
         "roadmap-initiative planning phase must have an exit_checkpoint"
     )
+
+
+# ─── fire_month_occurrence (Nth weekday-of-month gating) ──────────────────────
+#
+# The `fire_month_occurrence` field (1-5) gates weekday emitters to fire only on
+# the Nth occurrence of that weekday in the month. Combined with fire_weekday,
+# this enables patterns like "2nd Monday of each month."
+
+
+def _monthly_registry(fire_weekday=1, fire_month_occurrence=2):
+    """A monthly-cadence registry with a weekday+occurrence-gated emitter."""
+    emitter = {
+        "on": "cycle-fresh", "action": "produce-artifact",
+        "worker": "product-review-prep",
+        "fire_weekday": fire_weekday,
+        "fire_month_occurrence": fire_month_occurrence,
+    }
+    return {
+        "types": [{
+            "id": "product-review-prep",
+            "label": "Product review prep",
+            "state_model": "cycle",
+            "cadence": "monthly",
+            "emitters": [emitter],
+        }]
+    }
+
+
+def _seed_monthly_program(root, last_cycle="2026-07"):
+    program_id, _ = pl.create_program(
+        type="product-review-prep",
+        title="Product review prep",
+        owner_role="product",
+        frontmatter_extra={"last_cycle": last_cycle},
+        root=root,
+    )
+    return program_id
+
+
+def test_fire_month_occurrence_fires_on_2nd_monday(tmp_path, monkeypatch):
+    # August 10, 2026 = 2nd Monday (day 10, (10-1)//7+1 = 2).
+    root = str(tmp_path / "data")
+    pid = _seed_monthly_program(root)
+    aug_10 = date(2026, 8, 10)
+
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    program = pl.read_program(pid, root=root)
+    result = reconcile.reconcile_program(
+        program, _monthly_registry(fire_weekday=1, fire_month_occurrence=2),
+        now=aug_10
+    )
+    assert result["new_cycle"] is True
+    assert len(result["emitted"]) == 1
+
+
+def test_fire_month_occurrence_skips_1st_monday(tmp_path, monkeypatch):
+    # August 3, 2026 = 1st Monday (day 3, (3-1)//7+1 = 1). Target is 2nd.
+    root = str(tmp_path / "data")
+    pid = _seed_monthly_program(root)
+    aug_3 = date(2026, 8, 3)
+
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    program = pl.read_program(pid, root=root)
+    result = reconcile.reconcile_program(
+        program, _monthly_registry(fire_weekday=1, fire_month_occurrence=2),
+        now=aug_3
+    )
+    assert result["new_cycle"] is True
+    assert result["emitted"] == []
+
+
+def test_fire_month_occurrence_skips_3rd_monday(tmp_path, monkeypatch):
+    # August 17, 2026 = 3rd Monday. Target is 2nd. Cycle already started this month.
+    root = str(tmp_path / "data")
+    pid = _seed_monthly_program(root, last_cycle="2026-08")
+    aug_17 = date(2026, 8, 17)
+
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    program = pl.read_program(pid, root=root)
+    result = reconcile.reconcile_program(
+        program, _monthly_registry(fire_weekday=1, fire_month_occurrence=2),
+        now=aug_17
+    )
+    # Same month (2026-08) -> not a new cycle. 3rd Monday != 2nd Monday -> no fire.
+    assert result["new_cycle"] is False
+    assert result["emitted"] == []
+
+
+def test_fire_month_occurrence_mid_cycle_fires_on_target_day(tmp_path, monkeypatch):
+    # Cycle starts August 1 (Friday). 2nd Monday (Aug 10) fires mid-cycle.
+    root = str(tmp_path / "data")
+    pid = _seed_monthly_program(root)
+    aug_1 = date(2026, 8, 1)
+    aug_10 = date(2026, 8, 10)
+
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    # August 1: fresh cycle (new month). Emitter skipped (Friday, not Monday).
+    program = pl.read_program(pid, root=root)
+    r1 = reconcile.reconcile_program(
+        program, _monthly_registry(fire_weekday=1, fire_month_occurrence=2),
+        now=aug_1
+    )
+    assert r1["new_cycle"] is True
+    assert r1["emitted"] == []
+
+    # August 10: mid-cycle, 2nd Monday -> fires.
+    program = pl.read_program(pid, root=root)
+    r2 = reconcile.reconcile_program(
+        program, _monthly_registry(fire_weekday=1, fire_month_occurrence=2),
+        now=aug_10
+    )
+    assert r2["new_cycle"] is False
+    assert len(r2["emitted"]) == 1

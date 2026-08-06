@@ -120,6 +120,16 @@
       ],
       "presentation": { "chip_tokens": {} } },
 
+    { "id": "product-review-prep", "label": "Product review prep", "family": "weekly",
+      "state_model": "cycle", "cadence": "monthly",
+      "sources": [ { "kind": "transcripts", "mode": "read" }, { "kind": "product_analytics", "mode": "read" } ],
+      "emitters": [
+        { "on": "drift:broken", "action": "escalate" },
+        { "on": "cycle-fresh", "action": "produce-artifact", "worker": "product-review-prep", "fire_weekday": 1, "fire_month_occurrence": 2 }
+      ],
+      "intake": { "route": "capture" },
+      "presentation": { "chip_tokens": {} } },
+
     { "id": "portfolio-rollup", "label": "Portfolio rollup", "family": "system",
       "state_model": "cycle", "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" } ],
