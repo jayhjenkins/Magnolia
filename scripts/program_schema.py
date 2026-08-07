@@ -37,7 +37,8 @@ CLOSED_ACTIONS = {"escalate", "draft-message", "produce-artifact",
 INTAKE_ROUTES = {"observe", "capture", "candidate", "ignore"}
 # Brief §3 closed emitter trigger set — the only triggers an emitter may declare.
 EMITTER_TRIGGERS = {"drift:broken", "candidate-ripe", "phase-advance-proposable",
-                    "cycle-fresh", "completion-verified", "silent-too-long"}
+                    "cycle-fresh", "completion-verified", "silent-too-long",
+                    "tracker-status-mismatch"}
 
 
 def _theme_tokens():

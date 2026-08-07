@@ -2872,3 +2872,315 @@ def test_fire_month_occurrence_mid_cycle_fires_on_target_day(tmp_path, monkeypat
     )
     assert r2["new_cycle"] is False
     assert len(r2["emitted"]) == 1
+
+
+# ─── Inc 2: evidence-based interpretation door ────────────────────────────────
+
+
+def test_status_signal_triggers_phase_advance_proposal(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define",
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Tickets being worked on, engineer actively building."),
+    )
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+    assert cards[0]["proposal"]["from"] == "define"
+    assert cards[0]["proposal"]["to"] == "build"
+    assert cards[0]["id"] in result["emitted"]
+
+
+def test_commitment_triggers_phase_advance_proposal(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define",
+        extra_obs=dict(kind="commitment", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Team committed to shipping slice 1 this sprint."),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+
+
+def test_risk_does_not_trigger_proposal(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define",
+        extra_obs=dict(kind="risk", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Dependency on API team could delay."),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert cards == []
+
+
+def test_blocker_does_not_trigger_proposal(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define",
+        extra_obs=dict(kind="blocker", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Blocked on design review."),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert cards == []
+
+
+def test_adapter_sourced_evidence_does_not_trigger_proposal(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define",
+        extra_obs=dict(kind="status-signal", sentinel="tracker-truth",
+                       source="adapter:project_management:VNT-123",
+                       claim="Tracker reports status 'In Progress' for 'My Rock'."),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert cards == []
+
+
+# ─── Inc 1: per-tick proposal evaluation ──────────────────────────────────────
+
+
+def test_proposals_fire_on_non_fresh_cycle_tick(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development underway."),
+    )
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    assert result["new_cycle"] is False
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+    assert cards[0]["id"] in result["emitted"]
+
+
+def test_non_proposal_emitters_skip_on_non_fresh_tick(tmp_path):
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="eos-rock", title="Broken Rock", owner_role="pm",
+        frontmatter_extra={
+            "phase": "define",
+            "phase_entered": {"define": "2026-04-01"},
+            "last_cycle": PERIOD,
+            "checkpoints": [{
+                "id": "overdue-cp", "label": "Overdue",
+                "due": "2026-05-01", "instrument": "human attestation",
+                "status": "pending",
+            }],
+        },
+        root=root,
+    )
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    assert result["new_cycle"] is False
+    escalate_cards = [c for c in _open_human_cards()
+                      if c.get("task_type") != "cadence-propose-update"
+                      and "needs attention" in c.get("title", "")]
+    assert escalate_cards == []
+
+
+def test_proposals_dedup_across_ticks(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development."),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+
+
+def test_proposals_only_skips_cycle_programs(tmp_path):
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="weekly-priorities", title="Weekly", owner_role="pm",
+        frontmatter_extra={"last_cycle": PERIOD},
+        root=root,
+    )
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    assert result["new_cycle"] is False
+    assert result["emitted"] == []
+
+
+# ─── Inc 3: tracker-status-mismatch proposals ────────────────────────────────
+
+
+def _seed_rock_with_tracker(root, phase="define", tracker_key="VNT-123",
+                            last_cycle=OTHER_PERIOD, extra_obs=None):
+    pid, _ = pl.create_program(
+        type="eos-rock", title="Q3 Rock", owner_role="pm",
+        frontmatter_extra={
+            "phase": phase,
+            "phase_entered": {phase: "2026-05-01"},
+            "bindings": [{"id": "tracker", "role": "truth",
+                          "kind": "project_management", "anchor": tracker_key,
+                          "mode": "read"}],
+            "last_cycle": last_cycle,
+        },
+        root=root,
+    )
+    if extra_obs:
+        if isinstance(extra_obs, list):
+            for obs in extra_obs:
+                pl.append_observation(pid, root=root, **obs)
+        else:
+            pl.append_observation(pid, root=root, **extra_obs)
+    return pid
+
+
+def test_tracker_inactive_with_activity_emits_mismatch_proposal(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-46117", extra_obs=[
+        dict(kind="status-signal", sentinel="tracker-truth",
+             source="adapter:project_management:VNT-46117",
+             claim="Tracker reports status 'Next' for 'Board Frustration UX'."),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_standup.md",
+             claim="Active engineering work on board frustration."),
+    ])
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "update-tracker"]
+    assert len(cards) == 1
+    assert cards[0]["proposal"]["tracker_key"] == "VNT-46117"
+    assert cards[0]["proposal"]["current_status"] == "Next"
+    assert len(cards[0]["proposal"]["evidence_claims"]) >= 1
+    assert cards[0]["id"] in result["emitted"]
+
+
+def test_tracker_active_no_mismatch(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
+        dict(kind="status-signal", sentinel="tracker-truth",
+             source="adapter:project_management:VNT-123",
+             claim="Tracker reports status 'In Progress' for 'My Rock'."),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_standup.md",
+             claim="Active work."),
+    ])
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert cards == []
+
+
+def test_no_tracker_binding_no_mismatch(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define",
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active work."),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert cards == []
+
+
+def test_no_tracker_truth_observations_no_mismatch(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_standup.md",
+             claim="Active work."),
+    ])
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert cards == []
+
+
+def test_tracker_mismatch_dedup(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
+        dict(kind="status-signal", sentinel="tracker-truth",
+             source="adapter:project_management:VNT-123",
+             claim="Tracker reports status 'Next' for 'My Rock'."),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_standup.md",
+             claim="Active work."),
+    ])
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW, force=True)
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW, force=True)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert len(cards) == 1
+
+
+def test_tracker_mismatch_proposal_description(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-999", extra_obs=[
+        dict(kind="status-signal", sentinel="tracker-truth",
+             source="adapter:project_management:VNT-999",
+             claim="Tracker reports status 'Backlog' for 'Test'."),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_standup.md",
+             claim="Engineering actively building this feature."),
+    ])
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert len(cards) == 1
+    full_task = task_lib.read_task(cards[0]["id"])
+    body = full_task.get("body", "")
+    assert "VNT-999" in body
+    assert "Backlog" in body

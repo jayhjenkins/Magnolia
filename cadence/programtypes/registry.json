@@ -19,7 +19,7 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" }, { "kind": "project_management", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" }, { "on": "tracker-status-mismatch", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
         "signals": [
@@ -69,7 +69,7 @@
       "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
       "sentinels": ["sheet-watch"],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" }, { "on": "tracker-status-mismatch", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
         "signals": [ "quarterly rock commitment declared in a leadership session" ],

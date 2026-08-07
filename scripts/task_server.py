@@ -1192,6 +1192,9 @@ def _apply_cadence_proposal(task_id, t):
     if proposal.get("op") == "birth":
         return _apply_cadence_birth(task_id, t, proposal, program_id)
 
+    if proposal.get("op") == "update-tracker":
+        return _apply_cadence_tracker_update(task_id, t, proposal, program_id)
+
     try:
         result = program_lib.apply_mutation(program_id, proposal)
     except ValueError as e:
@@ -1296,6 +1299,60 @@ def _maybe_emit_jira_sync(program_id, op, result, summary):
         )
         task_lib.update_task(tid, changes={"task_type": "ticket-creator"})
         _dispatch_bootstrap_task(tid)
+
+
+def _apply_cadence_tracker_update(task_id, t, proposal, program_id):
+    """Accept a tracker-status-mismatch proposal: emit a Jira sync agent task.
+
+    Unlike advance-phase/archive, this does NOT mutate the program file. It only
+    emits an agent task (ticket-creator) that drafts a Jira status transition.
+    The tracker-truth sentinel will capture the new Jira status on its next run.
+    """
+    tracker_key = proposal.get("tracker_key", "?")
+    current_status = proposal.get("current_status", "?")
+    evidence = proposal.get("evidence_claims", [])
+    evidence_str = "; ".join(e[:120] for e in evidence[:3]) if evidence else "activity observed"
+
+    summary = f"Proposed Jira update for {tracker_key} on {program_id}."
+
+    task_lib.update_task(task_id, comment=f"Accepted: {summary}", actor="human")
+    task_lib.complete_task(task_id, actor="human")
+
+    receipt_id, _ = task_lib.create_task(
+        f"Applied: {t.get('title', '')}", queue="human", domain="ops",
+        creator="agent", card_type="receipt",
+        description=(f"{summary} This emits a Jira sync task, not a local mutation."))
+    task_lib.update_task(receipt_id, changes={
+        "receipt_kind": "cadence-apply", "source_recommendation": task_id,
+        "program_id": program_id})
+
+    try:
+        prog = program_lib.read_program(program_id)
+    except FileNotFoundError:
+        return receipt_id
+    fm = prog.get("frontmatter") or {}
+    title = fm.get("title") or program_id
+
+    description = (
+        f"Jira {tracker_key} currently shows status '{current_status}' but Cadence "
+        f"detected active work on **{title}** ({program_id}).\n\n"
+        f"Evidence: {evidence_str}\n\n"
+        f"Draft a `<!-- JIRA_UPDATE -->` block to transition {tracker_key} to an "
+        f"active status (e.g. 'In Progress' or 'In Development'). Read the full "
+        f"program at datasets/programs/{program_id}.md for context before drafting."
+    )
+
+    tid, _ = task_lib.create_task(
+        f"Update Jira {tracker_key}: status '{current_status}' -> active",
+        queue="agent", domain="ops", creator="cadence",
+        description=description,
+        tags=[program_id, "cadence"],
+        card_type="task",
+    )
+    task_lib.update_task(tid, changes={"task_type": "ticket-creator"})
+    _dispatch_bootstrap_task(tid)
+
+    return receipt_id
 
 
 def _maybe_birth_did_it_work(program_id, op, result):

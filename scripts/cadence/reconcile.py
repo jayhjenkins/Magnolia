@@ -57,6 +57,10 @@ _MECHANICAL_INSTRUMENT_HINTS = (
     "tracker", "adapter", "pendo", "metric", "deterministic", "automated", "check",
 )
 
+_INACTIVE_STATUSES = frozenset({
+    "backlog", "next", "not started", "to do", "open", "new",
+})
+
 
 def _instrument_is_mechanical(instrument):
     """Classify a prose `instrument` as mechanical (True) or human (False).
@@ -718,8 +722,9 @@ def _propose_phase_advance(fm, type_entry, body):
     Returns {"op": "advance-phase", "to": <next>, "checkpoint": <cp_id|None>,
     "from": <current>} when:
       - the current phase is not terminal, and there is a next phase;
-      - a fresh INTERPRETIVE `completion` observation is present (kind=completion,
-        source NOT from `adapter:`, dated on/after phase_entered);
+      - a fresh INTERPRETIVE phase-evidence observation is present
+        (kind in _PHASE_EVIDENCE_KINDS, source NOT from `adapter:`,
+        dated on/after phase_entered);
       - AND one of:
         (a) the phase has an exit_checkpoint whose matching program checkpoint is
             non-mechanical (the original gate), OR
@@ -755,7 +760,7 @@ def _propose_phase_advance(fm, type_entry, body):
 
     since = _phase_entered_date(fm, phase)
     since_iso = since.isoformat() if since else None
-    if not _has_interpretive_completion(body, since=since_iso):
+    if not _has_phase_evidence(body, since=since_iso):
         return None
 
     return {
@@ -766,23 +771,95 @@ def _propose_phase_advance(fm, type_entry, body):
     }
 
 
-def _has_interpretive_completion(body, since=None):
-    """True when the body carries a FRESH, INTERPRETIVE `completion` observation.
+_PHASE_EVIDENCE_KINDS = frozenset({"status-signal", "completion", "commitment"})
 
-    Interpretive = a kind=completion observation whose `source` does NOT start
-    with `adapter:` (the tracker grounding shape). Such an observation is a
-    movement-watch read of a meeting/thread, not a deterministic tracker fact -
-    enough to PROPOSE (not auto-apply) a human-attested phase advance. When
-    `since` (an ISO date) is given, the observation must be dated on/after it -
-    the current phase's entry date. Tolerant: an unparseable body yields no match.
+
+def _has_phase_evidence(body, since=None):
+    """True when the body carries a FRESH, INTERPRETIVE observation strong enough
+    to earn a phase-advance proposal.
+
+    Interpretive = an observation whose `source` does NOT start with `adapter:`
+    (adapter observations are the fact door's domain). The kind must be in
+    _PHASE_EVIDENCE_KINDS (status-signal, completion, or commitment). Excluded
+    kinds (risk, blocker, date-change, metric, capture) are context, not evidence
+    of forward motion. When `since` (an ISO date) is given, the observation must
+    be dated on/after it. Tolerant: an unparseable body yields no match.
     """
     for date_str, kind, source, _claim in _iter_observations(body):
-        if kind != "completion" or source.startswith("adapter:"):
+        if kind not in _PHASE_EVIDENCE_KINDS or source.startswith("adapter:"):
             continue
         if since and (not date_str or date_str < since):
             continue
         return True
     return False
+
+
+def _propose_tracker_update(fm, type_entry, body):
+    """Detect tracker-status-mismatch: Jira reports inactive but evidence says active.
+
+    Returns {"op": "update-tracker", "tracker_key": key, "current_status": status,
+    "evidence_claims": [claims]} or None.
+    """
+    anchor = program_lib.tracker_anchor(fm)
+    if not anchor:
+        return None
+
+    tracker_status = None
+    tracker_date = None
+    for date_str, kind, source, claim in _iter_observations(body):
+        if not source.startswith("adapter:project_management:"):
+            continue
+        if kind != "status-signal":
+            continue
+        m = re.search(r"Tracker reports status '([^']+)'", claim)
+        if m:
+            tracker_status = m.group(1)
+            tracker_date = date_str
+
+    if not tracker_status:
+        return None
+    if tracker_status.lower() not in _INACTIVE_STATUSES:
+        return None
+
+    cutoff = None
+    if tracker_date:
+        try:
+            cutoff = (date.fromisoformat(tracker_date) - timedelta(days=14)).isoformat()
+        except (ValueError, TypeError):
+            cutoff = None
+
+    evidence_claims = []
+    for date_str, kind, source, claim in _iter_observations(body):
+        if source.startswith("adapter:"):
+            continue
+        if kind not in _PHASE_EVIDENCE_KINDS:
+            continue
+        if cutoff and (not date_str or date_str < cutoff):
+            continue
+        evidence_claims.append(claim)
+
+    if not evidence_claims:
+        return None
+
+    return {
+        "op": "update-tracker",
+        "tracker_key": anchor,
+        "current_status": tracker_status,
+        "evidence_claims": evidence_claims[:3],
+    }
+
+
+def _build_tracker_update_description(mutation, program_id):
+    """Build an ASCII description for a tracker-update proposal card."""
+    key = mutation.get("tracker_key", "?")
+    status = mutation.get("current_status", "?")
+    claims = mutation.get("evidence_claims", [])
+    cite = claims[0][:120] if claims else "activity evidence"
+    return (
+        f"Jira {key} reports status '{status}' but meetings show active work. "
+        f"Signal: {cite}. "
+        f"Cadence proposes updating {key} to reflect reality ({program_id})."
+    )
 
 
 def _build_birth_description(proposal, program_id):
@@ -825,14 +902,15 @@ def _build_proposal_description(mutation, body, program_id):
 
 
 def _latest_interpretive_claim(body):
-    """Return the last interpretive completion observation's claim, or None.
+    """Return the last interpretive phase-evidence observation's claim, or None.
 
-    Interpretive = kind=completion with a non-adapter source (movement-watch's
-    read of a meeting/thread). Used only to cite the proposal in the card body.
+    Interpretive = kind in _PHASE_EVIDENCE_KINDS with a non-adapter source
+    (movement-watch's read of a meeting/thread). Used to cite the triggering
+    observation in the proposal card body.
     """
     claim = None
     for _date, kind, source, c in _iter_observations(body):
-        if kind == "completion" and not source.startswith("adapter:"):
+        if kind in _PHASE_EVIDENCE_KINDS and not source.startswith("adapter:"):
             claim = c
     return claim
 
@@ -1040,7 +1118,8 @@ def _active_family_count(root=None, exclude_family=None):
 
 
 def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None,
-                       period=None, registry=None, now=None, weekday_only=False):
+                       period=None, registry=None, now=None, weekday_only=False,
+                       proposals_only=False):
     """Evaluate the type's declarative emitters. Returns created task ids.
 
     Three emitter families fire here, all Tier-1 (LOCAL cards, no external writes,
@@ -1052,8 +1131,8 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
       - `propose-update` (on `phase-advance-proposable`): the interpretation door.
         The `on` string is just the trigger NAME; the real gate is
         `_propose_phase_advance`, which returns an advance-phase mutation only when
-        a human-attested exit checkpoint has a fresh interpretive completion
-        observation. When it fires, create a `recommendation` card
+        fresh phase evidence is present (status-signal, completion, or commitment
+        from a non-adapter source). When it fires, create a `recommendation` card
         (task_type=cadence-propose-update) carrying the mutation as `proposal`,
         tagged [program_id, "cadence"]. Deduped against any OPEN propose-update
         card already carrying this program_id AND the same op.
@@ -1067,6 +1146,11 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
 
     When `weekday_only` is True, only weekday-gated emitters are evaluated (used
     for mid-cycle weekday fire-ups).
+
+    When `proposals_only` is True, only `propose-update` emitters are evaluated
+    (escalate, produce-artifact, draft-message etc. are skipped). Used by the
+    mid-cycle tick to evaluate proposal gates on every run without re-firing
+    other emitters.
 
     Any other recognized action no-ops this increment (logged to stderr).
     """
@@ -1114,6 +1198,9 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 occurrence = (d.day - 1) // 7 + 1
                 if occurrence != target_occ:
                     continue
+
+        if proposals_only and action != "propose-update":
+            continue
 
         if action == "escalate":
             if on != f"drift:{verdict}":
@@ -1225,9 +1312,30 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             emitted.append(task_id)
             open_prop_ops.add(mutation["op"])
 
+        elif action == "propose-update" and on == "tracker-status-mismatch":
+            mutation = _propose_tracker_update(fm, type_entry, body or "")
+            if not mutation:
+                continue
+            import task_lib
+            if open_prop_ops is None:
+                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+            if mutation["op"] in open_prop_ops:
+                continue
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: update Jira {mutation['tracker_key']}?",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                card_type="recommendation",
+                task_type="cadence-propose-update",
+                tags=[program_id, "cadence"],
+                proposal=mutation,
+                description=_build_tracker_update_description(mutation, program_id),
+            )
+            emitted.append(task_id)
+            open_prop_ops.add(mutation["op"])
+
         elif action == "propose-update":
-            # The mutation function is the real gate (the `on` string is only a
-            # trigger name). Only advance-phase proposals are produced in 3a.
             mutation = _propose_phase_advance(fm, type_entry, body or "")
             if not mutation:
                 continue
@@ -1691,8 +1799,14 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
                     break
 
     if not is_new_cycle and not pending_weekday:
+        emitted = []
+        if type_entry.get("state_model") == "pipeline":
+            emitted = _evaluate_emitters(
+                program, type_entry, verdict, facts, body=body, root=root,
+                period=period, registry=registry, now=now, proposals_only=True,
+            )
         drift_changed = fm.get("drift") != verdict
-        if drift_changed or fm.get("last_run", "") < program_lib._now_iso()[:13]:
+        if drift_changed or fm.get("last_run", "") < program_lib._now_iso()[:13] or emitted:
             fm["drift"] = verdict
             fm["last_run"] = program_lib._now_iso()
             filepath = program.get("filepath")
@@ -1705,7 +1819,7 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
             "program_id": fm.get("program_id"),
             "verdict": verdict,
             "new_cycle": False,
-            "emitted": [],
+            "emitted": emitted,
         }
 
     if not is_new_cycle and pending_weekday:
