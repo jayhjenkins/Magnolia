@@ -192,6 +192,7 @@ Task {task_id}. Follow these steps:
    - Follow the selected skill's workflow step by step.
    - Apply relevant quality gates (prd-validation, product-strategy-validation).
    - Every claim should cite a source when possible.
+   - **Data-dependency framing.** When the task requests concrete analysis (segmentation, quantification, categorization) but key input data is unavailable, honestly frame the deliverable: title and executive summary must say "framework" or "preliminary analysis pending [specific data]", not present a framework as a completed analysis. Figures that are estimates (no cited basis) must be labeled as estimates, not presented as derived findings.
    - Write output to datasets/product/agent-output/ unless the skill specifies otherwise.
 
 6. If you get stuck or need human input:
