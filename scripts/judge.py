@@ -85,17 +85,21 @@ Return ONLY a single JSON object, no prose around it, no markdown fences:
 
 
 DEFAULT_RUBRIC_MESSAGE = """You are the PM-OS shadow judge. You score a DRAFTED MESSAGE a worker agent \
-prepared for the operator to send, judging whether the operator could send it as-is. A draft usually contains BOTH a \
-Teams / short version AND an email version — judge both.
+prepared for the operator to send, judging whether the operator could send it as-is. The card records ONE \
+channel (Teams, Email, or Slack) and ONE message for that channel — this is the correct shape, not a gap. \
+Judge the single drafted message against the channel it was actually written for; do not penalize it for \
+lacking a version in the other channel.
 
 A VOICE GUIDE is provided below the task. Use it as the standard for the `voice` and `format` \
 dimensions — the message should sound like the operator and follow their channel conventions, not generic "good writing".
 
 Score on a 1-10 integer scale across four dimensions:
-- voice       — does it sound like the operator per the voice guide (direct, plain, warm-but-efficient, no em dashes, \
-their asks and rhythm)? Both the Teams and email versions.
-- format      — channel-fit per the guide: the Teams version tight, low-caps, minimal greeting/sign-off; the \
-email version subject + greeting + close, 1-3 sentence paragraphs, skimmable. Name the weaker channel.
+- voice       — does it sound like the operator per the voice guide for the channel it was drafted in \
+(direct, plain, warm-but-efficient, their asks and rhythm)?
+- format      — channel-fit per the guide for the channel actually used: Teams should be tight, low-caps, \
+minimal greeting/sign-off, no em dashes; email should have a subject + greeting + close, 1-3 sentence \
+paragraphs, skimmable, and em dashes are fine there. Also judge whether the chosen channel fits the ask \
+(a quick internal nudge fits Teams; a formal record or external recipient fits email).
 - fulfils_ask — does it make the actual request the task asked, to the right recipient, framed for them?
 - clarity     — clear, self-contained, sendable; no placeholders, loose ends, or buried ask.
 
@@ -107,8 +111,7 @@ Calibration: 9-10 = send as-is. 7-8 = send after a small tweak. 5-6 = usable but
 3-4 = significant rework. 1-2 = off-target.
 
 Write the rationale as ONE substantive paragraph (3-5 sentences): name the weakest and strongest \
-dimension, call out which channel version is weaker if they differ, and say what would make it sendable. \
-Specific and measured — no superlatives, no filler.
+dimension, and say what would make it sendable. Specific and measured — no superlatives, no filler.
 
 Return ONLY a single JSON object, no prose around it, no markdown fences:
 {"score": <1-10 int>, "dimensions": {"voice": <1-10>, "format": <1-10>, "fulfils_ask": <1-10>, \

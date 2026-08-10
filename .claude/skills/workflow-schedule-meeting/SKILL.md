@@ -54,6 +54,29 @@ Examples of rewrites:
 | "During standup the operator said they'd set up time with Brandon to align on HOAi rollout" | "Align on HOAi rollout plan, timeline, and next steps" |
 | "Zach suggested standardizing a recurring touch base to stay aligned on Pay" | "Recurring sync to stay aligned on Pay priorities and surface blockers early" |
 
+### 1b. Detect Recurring Series
+
+Check the task title, description, and source meeting transcript for signals that this is a **recurring** meeting rather than a one-off:
+- Keywords: "recurring", "weekly", "biweekly", "bi-weekly", "monthly", "standing", "series"
+- A specified count: "5 weeks", "for the next 8 sessions", "through end of quarter"
+- Calendar cadence language: "every Monday", "each Tuesday afternoon"
+
+If the meeting is recurring:
+1. Note the **frequency** (weekly, biweekly, monthly) and **count** (number of occurrences, or an end date to compute it from). Honor the exact count the task specifies — if it says "5 weeks", propose a 5-occurrence series, not 4.
+2. Find slots for the **first occurrence only** — propose 3–4 options for when the series should start.
+3. In the `## Suggested Times` output (Step 5), add a recurrence marker above the slots:
+
+   ```markdown
+   <!-- RECURRENCE:weekly|5 -->
+   **Recurring:** Weekly for 5 weeks
+   ```
+
+   The `<!-- RECURRENCE:frequency|count -->` comment tells the UI to create a recurring calendar event, not N independent invites. Supported frequencies: `weekly`, `biweekly`, `monthly`.
+
+4. Each slot's display line should reflect the series start: e.g., "**Option 1:** Starting Tuesday, March 25 at 10:00 AM ET, recurring weekly for 5 weeks _(all attendees free for first session)_"
+
+If the meeting is one-time (no recurrence signal found), skip this step entirely.
+
 ### 2. Gather Time Preferences (Optional)
 
 If `source_meeting` exists, read the transcript and look for scheduling hints:
