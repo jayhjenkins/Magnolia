@@ -111,6 +111,8 @@ Task {task_id}. Follow these steps:
 7. Draft the issue (NEW issue):
    Compose all fields. The task body you read in step 1 is your *source material*, not your output — translate it into a Jira-native description that stands on its own for an external reader. **Strip every PM-OS reference (see the Description hygiene rule below) before writing into `### Description`.** Write the draft to the task body using this EXACT format:
 
+   **Acceptance criteria preservation.** Before composing the draft, extract any acceptance criteria, definition-of-done items, or enumerated requirements from the task body (look for headings like "Acceptance Criteria", "ACs", "Requirements", "Done when", or numbered/bulleted condition lists). These MUST appear verbatim in the `### Description` section of the draft — do not summarize, merge, or omit them. If the source specifies 3 ACs, the draft must contain those 3 ACs. Missing ACs force an engineer to ask "what does done look like?" before work can start.
+
    Run: ./scripts/task.sh update {task_id} --description "$(cat <<'DRAFT'
    <original description text>
 
