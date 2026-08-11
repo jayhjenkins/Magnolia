@@ -40,7 +40,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PM_OS_DIR = os.path.dirname(SCRIPT_DIR)
@@ -173,24 +173,45 @@ def _sheet_configured(name, root=None):
 
 # --- Source gathering (thin, mockable; heavy qmd wiring deferred) ------------
 
-def _gather_sources(definition, programs, now=None):
+_INCREMENTAL_FALLBACK_DAYS = 14
+
+
+def _gather_sources(definition, programs, now=None, sentinel_name=None, root=None):
     """Return a plain-text in-window source digest for the prompt.
 
-    Deliberately thin this task: it states the scan window and lists the source
-    kinds the sentinel is allowed to read, so the dispatched prompt is coherent
-    and the runner's contract is testable without real qmd/transcript ingestion.
-    The real in-window transcript pull (qmd) and the adapter fact pull arrive in
-    later tasks; this stays a small, mockable seam so they slot in without
-    changing run_sentinel's shape. ASCII-safe.
+    When the sentinel has a recorded last_success in telemetry, the scan window
+    starts 1 day before that date (overlap buffer; content-hash dedup prevents
+    duplicates). On first run or after a failed run with no last_success, falls
+    back to _INCREMENTAL_FALLBACK_DAYS.
     """
     kinds = []
     for src in definition.get("sources") or []:
         if isinstance(src, dict) and src.get("kind"):
             kinds.append(str(src["kind"]))
-    window = (now or program_lib._now_iso()[:10])
+    until = (now or program_lib._now_iso()[:10])
     kinds_line = ", ".join(kinds) if kinds else "(none declared)"
+
+    since = None
+    if sentinel_name:
+        runs = read_sentinel_runs(root)
+        last_ok = (runs.get(sentinel_name) or {}).get("last_success")
+        if last_ok:
+            try:
+                last_date = date.fromisoformat(last_ok[:10])
+                since = (last_date - timedelta(days=1)).isoformat()
+            except (ValueError, TypeError):
+                pass
+    if since is None:
+        try:
+            end = date.fromisoformat(until[:10]) if isinstance(until, str) else until
+            since = (end - timedelta(days=_INCREMENTAL_FALLBACK_DAYS)).isoformat()
+        except (ValueError, TypeError):
+            since = until
+
     return (
-        f"Scan window: sources updated on or before {window}.\n"
+        f"Scan window: sources dated between {since} and {until} (inclusive).\n"
+        f"IMPORTANT: Only read transcripts dated ON OR AFTER {since}. "
+        f"Skip anything older -- it was already processed.\n"
         f"Source kinds in scope: {kinds_line}.\n"
         "(In-window source contents are gathered by the dispatch tools; "
         "read only what is in scope.)"
@@ -635,12 +656,17 @@ def _run_sentinel_impl(name, root=None, now=None):
             return summary
         # configured -> fall through to the normal LLM dispatch path below.
 
-    source_digest = _gather_sources(definition, programs, now=now)
+    source_digest = _gather_sources(definition, programs, now=now,
+                                     sentinel_name=name, root=root)
     prompt = _build_prompt(definition, programs, source_digest)
 
     def_timeout = definition.get("timeout")
     text = _dispatch(prompt, tier=definition.get("model_tier"),
                      timeout=int(def_timeout) if def_timeout else None)
+
+    if text is None:
+        summary["error"] = "dispatch failed (timeout or process error)"
+        return summary
 
     # The intake sentinel returns ROUTING records (observe/capture/candidate/
     # ignore) instead of program-attributed observations. It dispatches the LLM
