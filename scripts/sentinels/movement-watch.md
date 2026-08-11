@@ -9,7 +9,7 @@ model_tier: deep
 allowed_tools:
   - "Read(*)"
   - "mcp__qmd__*"
-timeout: 300
+timeout: 600
 max_turns: 12
 ---
 

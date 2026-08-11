@@ -58,7 +58,7 @@ import sentinel_lib  # noqa: E402
 SENTINEL_MODEL_TIER = "standard"
 
 # How long a single sentinel dispatch may run before we give up (seconds).
-CLAUDE_TIMEOUT = 300
+CLAUDE_TIMEOUT = 600
 
 # The source kind that is grounded in the project-management adapter, and the
 # adapter family it resolves to. A sentinel whose sources are ALL this kind runs
@@ -99,7 +99,7 @@ def log(msg):
 
 # --- The dispatch seam -------------------------------------------------------
 
-def _dispatch(prompt, tier=None):
+def _dispatch(prompt, tier=None, timeout=None):
     """Call claude headless and return the assistant text, or None.
 
     Mirrors judge.run_claude: resolve the binary via platform_lib (cross-platform,
@@ -114,9 +114,9 @@ def _dispatch(prompt, tier=None):
     (movement-watch: attribute each signal to one program) warrant a deeper tier
     than mechanical ones (tracker-truth: read adapter facts).
 
-    Task 4 extends the tracker-truth path to feed adapter-grounded facts into the
-    prompt this dispatches; the seam shape (prompt in, text out) is unchanged.
+    `timeout` overrides CLAUDE_TIMEOUT when the sentinel definition declares one.
     """
+    effective_timeout = timeout or CLAUDE_TIMEOUT
     model = profile_lib.resolve_model(tier or SENTINEL_MODEL_TIER)
     env = platform_lib.headless_claude_env()
     cmd = [
@@ -126,13 +126,13 @@ def _dispatch(prompt, tier=None):
     try:
         proc = subprocess.run(
             cmd, cwd=PM_OS_DIR, env=env,
-            capture_output=True, text=True, timeout=CLAUDE_TIMEOUT,
+            capture_output=True, text=True, timeout=effective_timeout,
         )
     except FileNotFoundError:
         log("'claude' not found on PATH - skipping (no observations recorded)")
         return None
     except subprocess.TimeoutExpired:
-        log(f"claude timed out after {CLAUDE_TIMEOUT}s - no observations recorded")
+        log(f"claude timed out after {effective_timeout}s - no observations recorded")
         return None
     if proc.returncode != 0:
         log(f"claude exited {proc.returncode}: {proc.stderr.strip()[:300]}")
@@ -638,7 +638,9 @@ def _run_sentinel_impl(name, root=None, now=None):
     source_digest = _gather_sources(definition, programs, now=now)
     prompt = _build_prompt(definition, programs, source_digest)
 
-    text = _dispatch(prompt, tier=definition.get("model_tier"))
+    def_timeout = definition.get("timeout")
+    text = _dispatch(prompt, tier=definition.get("model_tier"),
+                     timeout=int(def_timeout) if def_timeout else None)
 
     # The intake sentinel returns ROUTING records (observe/capture/candidate/
     # ignore) instead of program-attributed observations. It dispatches the LLM
