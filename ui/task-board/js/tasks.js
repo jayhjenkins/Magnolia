@@ -194,7 +194,8 @@ async function openTask(taskId, keepChat) {
     // Schedule-meeting — two calm columns: the invite · pick a time
     if (isScheduleMeeting) {
       await loadEmailCache();
-      const attendees = task.meeting_attendees || [];
+      const attendees = Array.isArray(task.meeting_attendees) ? task.meeting_attendees
+        : (task.meeting_attendees ? [task.meeting_attendees] : []);
       const slots = task.body ? parseSlots(task.body) : [];
       const isRecurring = task.meeting_recurring || false;
       const recurrencePattern = task.meeting_recurrence_pattern || 'weekly';

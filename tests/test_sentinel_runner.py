@@ -50,7 +50,7 @@ def test_wellformed_json_appends_to_cited_programs(tmp_path, monkeypatch):
          "source": "datasets/meetings/b.md (#Action Items)",
          "claim": "Beta launch readiness sign-off recorded.", "confidence": 0.8},
     ]
-    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None: json.dumps(records))
+    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
 
@@ -70,14 +70,14 @@ def test_run_sentinel_dispatches_at_the_defs_model_tier(tmp_path, monkeypatch):
     _seed_two_programs(tmp_path, monkeypatch)
     seen = {}
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: seen.setdefault("tier", tier) or "[]")
+                        lambda prompt, tier=None, timeout=None: seen.setdefault("tier", tier) or "[]")
     sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
     assert seen["tier"] == "deep"
 
 
 def test_malformed_json_appends_zero_no_raise(tmp_path, monkeypatch):
     pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
-    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None: "not json at all {{{")
+    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None, timeout=None: "not json at all {{{")
 
     summary = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
 
@@ -94,7 +94,7 @@ def test_unknown_program_id_dropped(tmp_path, monkeypatch):
          "source": "datasets/meetings/a.md", "claim": "Belongs to nobody.",
          "confidence": 0.9},
     ]
-    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None: json.dumps(records))
+    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
 
@@ -112,7 +112,7 @@ def test_null_program_id_dropped(tmp_path, monkeypatch):
         {"program_id": "", "kind": "risk",
          "source": "datasets/meetings/a.md", "claim": "Also unattributed.", "confidence": 0.5},
     ]
-    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None: json.dumps(records))
+    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
 
@@ -130,7 +130,7 @@ def test_rejected_record_counted_as_dropped_no_crash(tmp_path, monkeypatch):
         {"program_id": pid1, "kind": "completion",
          "source": "datasets/meetings/a.md", "claim": "Good record.", "confidence": 0.9},
     ]
-    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None: json.dumps(records))
+    monkeypatch.setattr(sentinel_runner, "_dispatch", lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
 
@@ -167,7 +167,7 @@ def test_sheet_watch_configured_dispatches_and_records_live(tmp_path, monkeypatc
                 "confidence": 0.8}]
     called = []
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: called.append(1) or json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: called.append(1) or json.dumps(records))
     summary = sentinel_runner.run_sentinel("sheet-watch", root=str(tmp_path))
     assert called                       # configured -> live dispatch
     assert summary["appended"] == 1
@@ -379,7 +379,7 @@ def test_intake_observe_route_appends_observation(tmp_path, monkeypatch):
          "claim": "Alpha spike progressing.", "confidence": 0.9},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
 
@@ -398,7 +398,7 @@ def test_intake_capture_route_appends_capture_observation(tmp_path, monkeypatch)
          "claim": "New inbox item for the cycle.", "confidence": 0.7},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
 
@@ -417,7 +417,7 @@ def test_intake_candidate_route_upserts_into_nursery(tmp_path, monkeypatch):
          "claim": "Repeated ask for smart reconciliation.", "confidence": 0.6},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
 
@@ -442,7 +442,7 @@ def test_intake_candidate_declared_flows_to_nursery(tmp_path, monkeypatch):
          "claim": "Leadership declared this as a Q3 rock."},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
 
@@ -460,7 +460,7 @@ def test_intake_candidate_without_declared_is_false(tmp_path, monkeypatch):
          "claim": "Mentioned in passing."},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
 
@@ -478,7 +478,7 @@ def test_intake_candidate_non_bool_declared_does_not_raise(tmp_path, monkeypatch
          "claim": "Garbled declared field."},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     # Must not raise; the candidate lands with a coerced bool declared.
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
@@ -496,7 +496,7 @@ def test_intake_ignore_route_is_noop(tmp_path, monkeypatch):
          "claim": "Not cadence-level chatter."},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
 
@@ -519,7 +519,7 @@ def test_intake_candidate_dropped_when_no_intake_program(tmp_path, monkeypatch):
          "source": "datasets/meetings/e.md", "claim": "Program-worthy ask."},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
 
@@ -534,7 +534,7 @@ def test_intake_observe_unknown_program_dropped(tmp_path, monkeypatch):
          "source": "datasets/meetings/f.md", "claim": "Belongs to nobody."},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     summary = sentinel_runner.run_sentinel("program-intake", root=str(tmp_path))
 
@@ -625,7 +625,7 @@ def test_run_sentinel_stamps_telemetry(tmp_path, monkeypatch):
          "source": "test.md", "claim": "Test observation.", "confidence": 0.9},
     ]
     monkeypatch.setattr(sentinel_runner, "_dispatch",
-                        lambda prompt, tier=None: json.dumps(records))
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
 
     # Run the sentinel.
     summary = sentinel_runner.run_sentinel("movement-watch", root=root)
