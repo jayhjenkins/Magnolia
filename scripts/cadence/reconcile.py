@@ -478,6 +478,53 @@ def _open_propose_update_ops(task_lib, program_id):
     return ops
 
 
+def _rejected_propose_update_ops(task_lib, program_id):
+    """Return {op: rejection_date} for recently cancelled cadence-propose-update
+    cards tagged with program_id (the rejection-aware half of the dedupe fence).
+
+    Scans the archive for cancelled proposals. For each match, records the
+    rejection date (the ``updated`` field truncated to YYYY-MM-DD). If the same
+    op was rejected multiple times, keeps the latest date. The caller compares
+    this date against the latest observation date in the program body: if no new
+    observations arrived after the rejection, the proposal is suppressed.
+    """
+    rejected = {}
+    for t in task_lib.list_archived(limit=200):
+        if t.get("status") != "cancelled":
+            continue
+        if t.get("task_type") != "cadence-propose-update":
+            continue
+        try:
+            full = task_lib.read_task(t["id"])
+        except Exception:
+            continue
+        fm = full.get("frontmatter") or {}
+        if program_id not in (fm.get("tags") or []):
+            continue
+        proposal = fm.get("proposal") or {}
+        op = proposal.get("op") if isinstance(proposal, dict) else None
+        if not op:
+            continue
+        rej_date = (fm.get("updated") or fm.get("created") or "")[:10]
+        if op not in rejected or rej_date > rejected[op]:
+            rejected[op] = rej_date
+    return rejected
+
+
+def _suppressed_by_rejection(op, rejected_prop_ops, body):
+    """Return True if ``op`` was rejected and no new observations arrived since."""
+    rej_date_str = rejected_prop_ops.get(op)
+    if not rej_date_str:
+        return False
+    latest_obs = _latest_observation_date(body)
+    if not latest_obs:
+        return True  # no observations at all -> suppress
+    rej_date = _parse_iso_date(rej_date_str)
+    if rej_date is None:
+        return False  # unparseable rejection date -> don't suppress
+    return latest_obs <= rej_date
+
+
 def _open_birth_candidate_ids(task_lib, intake_program_id):
     """Return the set of candidate_ids already covered by an OPEN birth proposal.
 
@@ -1165,6 +1212,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
     emitted = []
     open_tags = None        # lazily computed on the first escalate fire
     open_prop_ops = None    # lazily computed on the first propose-update fire
+    rejected_prop_ops = None  # lazily computed: {op: rejection_date} from archive
     open_agent_types = None  # lazily computed on the first produce-artifact fire
     open_birth_ids = None   # lazily computed on the first candidate-ripe fire
     # Default now to today if not provided (for testing and background runs)
@@ -1268,6 +1316,10 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 open_prop_ops = _open_propose_update_ops(task_lib, program_id)
             if mutation["op"] in open_prop_ops:
                 continue  # an open proposal for the same op already exists -> dedupe
+            if rejected_prop_ops is None:
+                rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
+                continue
             task_id, _ = task_lib.create_task(
                 title=f"{title}: archive?",
                 queue="human",
@@ -1298,6 +1350,10 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 open_prop_ops = _open_propose_update_ops(task_lib, program_id)
             if mutation["op"] in open_prop_ops:
                 continue  # an open proposal for the same op already exists -> dedupe
+            if rejected_prop_ops is None:
+                rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
+                continue
             task_id, _ = task_lib.create_task(
                 title=f"{title}: archive?",
                 queue="human",
@@ -1320,6 +1376,10 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             if open_prop_ops is None:
                 open_prop_ops = _open_propose_update_ops(task_lib, program_id)
             if mutation["op"] in open_prop_ops:
+                continue
+            if rejected_prop_ops is None:
+                rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
                 continue
             task_id, _ = task_lib.create_task(
                 title=f"{title}: update Jira {mutation['tracker_key']}?",
@@ -1344,6 +1404,10 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 open_prop_ops = _open_propose_update_ops(task_lib, program_id)
             if mutation["op"] in open_prop_ops:
                 continue  # an open proposal for the same op already exists -> dedupe
+            if rejected_prop_ops is None:
+                rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
+                continue
             task_id, _ = task_lib.create_task(
                 title=f"{title}: advance to {mutation['to']}?",
                 queue="human",

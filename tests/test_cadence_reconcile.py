@@ -3184,3 +3184,166 @@ def test_tracker_mismatch_proposal_description(tmp_path):
     body = full_task.get("body", "")
     assert "VNT-999" in body
     assert "Backlog" in body
+
+
+# ─── Rejection-aware dedup ──────────────────────────────────────────────────
+
+
+def test_rejected_proposal_suppressed_same_day(tmp_path, monkeypatch):
+    """A cancelled proposal suppresses re-emission when no new evidence exists."""
+    monkeypatch.setattr(task_lib, "_now_iso", lambda: "2026-06-16T00:00:00+00:00")
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development.", date="2026-06-15"),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+
+    task_lib.cancel_task(cards[0]["id"], reason="Not ready yet")
+
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards2 = [c for c in _open_human_cards()
+              if c.get("task_type") == "cadence-propose-update"
+              and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert cards2 == []
+
+
+def test_rejected_proposal_resurfaces_with_new_evidence(tmp_path, monkeypatch):
+    """A rejected proposal re-fires when new observations arrive after rejection."""
+    monkeypatch.setattr(task_lib, "_now_iso", lambda: "2026-06-16T00:00:00+00:00")
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development.", date="2026-06-15"),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+
+    task_lib.cancel_task(cards[0]["id"], reason="Not ready yet")
+
+    pl.append_observation(
+        pid, root=root,
+        kind="status-signal", sentinel="movement-watch",
+        source="datasets/meetings/2026-06-17_standup.md",
+        claim="Feature shipped to production.",
+        date="2026-06-17",
+    )
+
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards2 = [c for c in _open_human_cards()
+              if c.get("task_type") == "cadence-propose-update"
+              and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards2) == 1
+
+
+def test_rejection_doesnt_block_different_ops(tmp_path, monkeypatch):
+    """Rejecting advance-phase doesn't suppress update-tracker."""
+    monkeypatch.setattr(task_lib, "_now_iso", lambda: "2026-06-16T00:00:00+00:00")
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
+        dict(kind="status-signal", sentinel="tracker-truth",
+             source="adapter:project_management:VNT-123",
+             claim="Tracker reports status 'Next' for 'My Rock'.",
+             date="2026-06-15"),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_standup.md",
+             claim="Active work.", date="2026-06-15"),
+    ])
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    phase_cards = [c for c in _open_human_cards()
+                   if c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(phase_cards) == 1
+
+    task_lib.cancel_task(phase_cards[0]["id"], reason="Not ready")
+
+    tracker_cards = [c for c in _open_human_cards()
+                     if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert len(tracker_cards) == 1
+
+
+def test_rejected_tracker_mismatch_suppressed(tmp_path, monkeypatch):
+    """A cancelled tracker-mismatch proposal is suppressed without new evidence."""
+    monkeypatch.setattr(task_lib, "_now_iso", lambda: "2026-06-16T00:00:00+00:00")
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-456", extra_obs=[
+        dict(kind="status-signal", sentinel="tracker-truth",
+             source="adapter:project_management:VNT-456",
+             claim="Tracker reports status 'Next' for 'Test'.",
+             date="2026-06-15"),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_standup.md",
+             claim="Active work.", date="2026-06-15"),
+    ])
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert len(cards) == 1
+
+    task_lib.cancel_task(cards[0]["id"], reason="Already updated manually")
+
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW, force=True)
+
+    cards2 = [c for c in _open_human_cards()
+              if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert cards2 == []
+
+
+def test_multiple_rejections_uses_latest_date(tmp_path, monkeypatch):
+    """When the same op is rejected multiple times, the latest date is used."""
+    monkeypatch.setattr(task_lib, "_now_iso", lambda: "2026-06-16T00:00:00+00:00")
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development.", date="2026-06-15"),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+    task_lib.cancel_task(cards[0]["id"], reason="Nope")
+
+    pl.append_observation(
+        pid, root=root,
+        kind="status-signal", sentinel="movement-watch",
+        source="datasets/meetings/2026-06-17_update.md",
+        claim="More progress.",
+        date="2026-06-17",
+    )
+
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards2 = [c for c in _open_human_cards()
+              if c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards2) == 1
+
+    monkeypatch.setattr(task_lib, "_now_iso", lambda: "2026-06-17T12:00:00+00:00")
+    task_lib.cancel_task(cards2[0]["id"], reason="Still no")
+
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards3 = [c for c in _open_human_cards()
+              if c.get("proposal", {}).get("op") == "advance-phase"]
+    assert cards3 == []
