@@ -251,6 +251,7 @@ def parse_jira_update(body):
         "labels": labels,
         "comment_body": comment_body,
         "description": description,
+        "target_status": _field("JIRA_TARGET_STATUS") or "",
     }
 
 
@@ -305,6 +306,39 @@ On failure: JIRA_ERROR:reason"""
     return prompt
 
 
+def build_transition_prompt(update):
+    """Build a prompt for Claude to transition a Jira issue's status.
+
+    Two-step: first call getTransitionsForJiraIssue to discover available
+    transitions, then call transitionJiraIssue with the matching transition ID.
+    """
+    issue_key = update["issue_key"]
+    target = update.get("target_status", "In Progress")
+
+    prompt = f"""Transition Jira issue {issue_key} to status '{target}'.
+
+Step 1: Call mcp__claude_ai_Jira__getTransitionsForJiraIssue to get available transitions.
+Parameters:
+  cloudId: "{JIRA_CLOUD_ID}"
+  issueIdOrKey: "{issue_key}"
+
+Step 2: From the response, find the transition whose name best matches '{target}'
+(case-insensitive). If no exact match, pick the closest active-work status
+(e.g. 'In Progress', 'In Development'). If no plausible match exists, report
+JIRA_ERROR:no matching transition found for '{target}'.
+
+Step 3: Call mcp__claude_ai_Jira__transitionJiraIssue with the matched transition.
+Parameters:
+  cloudId: "{JIRA_CLOUD_ID}"
+  issueIdOrKey: "{issue_key}"
+  transition: {{"id": "<the transition id from step 2>"}}
+
+Report the result as: JIRA_RESULT:{issue_key}|{JIRA_BROWSE_BASE}/{issue_key}
+On failure: JIRA_ERROR:reason"""
+
+    return prompt
+
+
 # ─── Publishing ──────────────────────────────────────────────────────────────
 
 JIRA_SYSTEM_PROMPT = (
@@ -318,21 +352,22 @@ JIRA_SYSTEM_PROMPT = (
 )
 
 
-def _run_jira_session(prompt, allowed_tools, session_id=None):
+def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
     """Spawn a fresh Claude session to execute a Jira MCP call.
 
     Takes the full prompt and a comma-separated string of allowed tool names.
     The session_id parameter is accepted for API compatibility but ignored —
     fresh sessions with a strong system prompt are more reliable than resuming
     sessions whose conversation history may contain conflicting instructions
-    or accumulated refusals.
+    or accumulated refusals. `max_turns` defaults to 3; the transition path
+    uses 5 (two tool calls: get-transitions then transition).
     Returns (issue_key, issue_url) on success.
     Raises RuntimeError on failure.
     """
     env = platform_lib.headless_claude_env()
     claude_bin = platform_lib.resolve_claude()
 
-    cmd = [claude_bin, "-p", prompt, "--max-turns", "3",
+    cmd = [claude_bin, "-p", prompt, "--max-turns", str(max_turns),
            "--allowedTools", allowed_tools,
            "--append-system-prompt", JIRA_SYSTEM_PROMPT]
 
@@ -494,6 +529,11 @@ def execute_jira_update(update):
     """
     action = update.get("action", "comment")
 
+    _TRANSITION_TOOLS = (
+        "mcp__claude_ai_Jira__getTransitionsForJiraIssue,"
+        "mcp__claude_ai_Jira__transitionJiraIssue"
+    )
+
     if action == "comment":
         return _run_jira_session(
             build_comment_prompt(update),
@@ -505,10 +545,25 @@ def execute_jira_update(update):
             "mcp__claude_ai_Jira__editJiraIssue",
         )
     elif action == "comment_and_edit":
-        # Edit first, then comment. Return the result from the last successful call.
         _run_jira_session(
             build_edit_prompt(update),
             "mcp__claude_ai_Jira__editJiraIssue",
+        )
+        return _run_jira_session(
+            build_comment_prompt(update),
+            "mcp__claude_ai_Jira__addCommentToJiraIssue",
+        )
+    elif action == "transition":
+        return _run_jira_session(
+            build_transition_prompt(update),
+            _TRANSITION_TOOLS,
+            max_turns=5,
+        )
+    elif action == "transition_and_comment":
+        _run_jira_session(
+            build_transition_prompt(update),
+            _TRANSITION_TOOLS,
+            max_turns=5,
         )
         return _run_jira_session(
             build_comment_prompt(update),
