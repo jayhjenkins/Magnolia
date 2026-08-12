@@ -295,9 +295,10 @@ async function openTask(taskId, keepChat) {
     if (hasJiraUpdate) {
       const jiraUpdate = parseJiraUpdate(task.body);
       if (jiraUpdate) {
-        const actionLabel = {comment: 'Add Comment', edit: 'Edit Fields', comment_and_edit: 'Comment & Edit'}[jiraUpdate.action] || 'Update';
+        const actionLabel = {comment: 'Add Comment', edit: 'Edit Fields', comment_and_edit: 'Comment & Edit', transition: 'Transition Status', transition_and_comment: 'Transition & Comment'}[jiraUpdate.action] || 'Update';
         html += `<div class="dt-section">`;
         html += `<div class="dt-sec-head"><div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;"><span class="dt-sec-title">Jira update</span><span class="dt-sec-hint">${escapeHtml(jiraUpdate.issue_key)} - ${escapeHtml(actionLabel)}</span></div></div>`;
+        if (jiraUpdate.target_status) html += `<div class="dt-prose" style="margin-bottom:8px;"><strong>Target status:</strong> ${escapeHtml(jiraUpdate.target_status)}</div>`;
         if (jiraUpdate.comment_body) html += `<div class="dt-prose" style="margin-bottom:8px;"><strong>Comment:</strong></div><div class="dt-prose dim" style="margin-bottom:13px;">${escapeHtml(jiraUpdate.comment_body)}</div>`;
         if (jiraUpdate.description) html += `<div class="dt-prose" style="margin-bottom:8px;"><strong>Description:</strong></div><div class="dt-prose dim" style="margin-bottom:13px;">${escapeHtml(jiraUpdate.description)}</div>`;
         const meta = [];
@@ -438,7 +439,7 @@ async function openTask(taskId, keepChat) {
     const hasJiraUpdate2 = task.body && task.body.includes('<!-- JIRA_UPDATE -->');
     if (hasJiraUpdate2 && (task.agent_status === 'complete' || task.agent_status === 'needs-human')) {
       const _upd = parseJiraUpdate(task.body);
-      const _updLabel = _upd ? {comment: 'Add Comment', edit: 'Update Issue', comment_and_edit: 'Update & Comment'}[_upd.action] || 'Update Jira' : 'Update Jira';
+      const _updLabel = _upd ? {comment: 'Add Comment', edit: 'Update Issue', comment_and_edit: 'Update & Comment', transition: 'Transition Status', transition_and_comment: 'Transition & Comment'}[_upd.action] || 'Update Jira' : 'Update Jira';
       rightHtml += `<button class="btn btn-schedule" id="btn-update-jira" onclick="updateJira('${task.id}')">${_updLabel}</button>`;
     }
     if (canSendMessage) rightHtml += `<button class="btn btn-schedule" id="btn-send-message" onclick="sendMessage('${task.id}')">${svgIcon('send')}Send message</button>`;
@@ -1301,6 +1302,7 @@ function parseJiraUpdate(body) {
     labels: field('JIRA_LABELS').split(',').map(s => s.trim()).filter(Boolean),
     comment_body: commentMatch ? commentMatch[1].trim() : '',
     description: descMatch ? descMatch[1].trim() : '',
+    target_status: field('JIRA_TARGET_STATUS') || '',
   };
 }
 
@@ -1328,10 +1330,11 @@ async function publishToJira(taskId) {
 async function updateJira(taskId) {
   const task = _taskCache && _taskCache.find(t => t.id === taskId);
   const update = task ? parseJiraUpdate(task.body) : null;
-  const actionLabel = update ? {comment: 'Add Comment', edit: 'Update Issue', comment_and_edit: 'Update & Comment'}[update.action] || 'Update' : 'Update';
+  const actionLabel = update ? {comment: 'Add Comment', edit: 'Update Issue', comment_and_edit: 'Update & Comment', transition: 'Transition Status', transition_and_comment: 'Transition & Comment'}[update.action] || 'Update' : 'Update';
+  const isTransition = update && (update.action === 'transition' || update.action === 'transition_and_comment');
   const ok = await confirmAction({
     title: actionLabel + '?',
-    message: update ? `This will ${update.action === 'comment' ? 'add a comment to' : 'update'} ${update.issue_key} in Jira.` : 'This updates an existing Jira issue.',
+    message: update ? (isTransition ? `This will transition ${update.issue_key} to '${update.target_status || 'active'}' in Jira.` : `This will ${update.action === 'comment' ? 'add a comment to' : 'update'} ${update.issue_key} in Jira.`) : 'This updates an existing Jira issue.',
     confirmLabel: actionLabel,
   });
   if (!ok) return;

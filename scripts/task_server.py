@@ -1278,12 +1278,14 @@ def _maybe_emit_jira_sync(program_id, op, result, summary):
         f"Checkpoints: {cp_summary}\n\n"
         f"Jira feature(s): {anchors}\n\n"
         f"Draft a `<!-- JIRA_UPDATE -->` block for each bound Jira feature. "
-        f"Update the feature's status and dates to reflect the current phase. "
-        f"Specifically, suggest changes to:\n"
+        f"Use `<!-- JIRA_ACTION:transition -->` with "
+        f"`<!-- JIRA_TARGET_STATUS:In Progress -->` (or a more specific status "
+        f"matching the phase) to transition the Jira status. If dates also need "
+        f"updating, draft a second block with `<!-- JIRA_ACTION:edit -->` for "
+        f"field changes:\n"
         f"- Go-to-market / target ship date (based on phase + checkpoint dates)\n"
         f"- Early adopter (EA) date (if entering beta/execution phase)\n"
-        f"- GA date (if entering shipped/ga phase)\n"
-        f"- Status field to reflect current phase\n\n"
+        f"- GA date (if entering shipped/ga phase)\n\n"
         f"Read the full program file at datasets/programs/{program_id}.md for "
         f"complete context before drafting."
     )
@@ -1337,9 +1339,11 @@ def _apply_cadence_tracker_update(task_id, t, proposal, program_id):
         f"Jira {tracker_key} currently shows status '{current_status}' but Cadence "
         f"detected active work on **{title}** ({program_id}).\n\n"
         f"Evidence: {evidence_str}\n\n"
-        f"Draft a `<!-- JIRA_UPDATE -->` block to transition {tracker_key} to an "
-        f"active status (e.g. 'In Progress' or 'In Development'). Read the full "
-        f"program at datasets/programs/{program_id}.md for context before drafting."
+        f"Draft a `<!-- JIRA_UPDATE -->` block with `<!-- JIRA_ACTION:transition -->` "
+        f"and `<!-- JIRA_TARGET_STATUS:In Progress -->` to transition {tracker_key} "
+        f"from '{current_status}' to an active status. If you find a more specific "
+        f"status name (e.g. 'In Development') from the evidence, use that instead. "
+        f"Read datasets/programs/{program_id}.md for context before drafting."
     )
 
     tid, _ = task_lib.create_task(
@@ -2607,7 +2611,7 @@ def handle_update_jira(handler, task_id):
     if status == "ok":
         issue_key, issue_url = payload
         action = update.get("action", "comment")
-        action_label = {"comment": "Commented on", "edit": "Updated", "comment_and_edit": "Updated"}.get(action, "Updated")
+        action_label = {"comment": "Commented on", "edit": "Updated", "comment_and_edit": "Updated", "transition": "Transitioned", "transition_and_comment": "Transitioned"}.get(action, "Updated")
         _json_response(handler, {
             "status": "ok",
             "message": f"{action_label} {issue_key}",
