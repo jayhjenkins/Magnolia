@@ -763,6 +763,76 @@ def _dispatch_agent_task(task_id):
         sys.stderr.write(f"[cadence] Failed to dispatch agent task {task_id}: {e}\n")
 
 
+_LLM_EVAL_TIMEOUT = 30
+_LLM_EVAL_TIER = "light"
+
+
+def _llm_evaluate_proposal(program_title, current_phase, target_phase,
+                            phase_description, observations):
+    """Ask Claude whether evidence supports advancing to the target phase.
+
+    Returns (approved, reason). Fail-open: returns (True, "evaluation
+    unavailable") on any dispatch failure so the proposal still reaches the
+    human for a decision.
+    """
+    obs_text = "\n".join(f"- {o}" for o in observations[-5:]) if observations else "(none)"
+    prompt = (
+        "You are evaluating whether a product initiative should advance to "
+        "the next phase based on the evidence collected from meeting "
+        "transcripts and project trackers.\n\n"
+        f"Program: {program_title}\n"
+        f"Current phase: {current_phase}\n"
+        f"Proposed phase: {target_phase}\n"
+        f"What '{target_phase}' means: {phase_description}\n\n"
+        f"Recent evidence:\n{obs_text}\n\n"
+        "Based on this evidence, does the program meet the criteria for "
+        f"'{target_phase}'? Reply with exactly YES or NO on the first line, "
+        "then a one-sentence reason on the second line."
+    )
+    import json as _json
+    import profile_lib
+    model = profile_lib.resolve_model(_LLM_EVAL_TIER)
+    env = platform_lib.headless_claude_env()
+    cmd = [
+        platform_lib.resolve_claude(), "-p", prompt,
+        "--model", model, "--output-format", "json",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, cwd=os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))),
+            env=env, capture_output=True, text=True,
+            timeout=_LLM_EVAL_TIMEOUT,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write(f"[cadence] LLM eval failed ({exc.__class__.__name__}), fail-open\n")
+        return True, "evaluation unavailable"
+    if proc.returncode != 0:
+        sys.stderr.write(f"[cadence] LLM eval exited {proc.returncode}, fail-open\n")
+        return True, "evaluation unavailable"
+    out = (proc.stdout or "").strip()
+    try:
+        envelope = _json.loads(out)
+        if isinstance(envelope, dict) and "result" in envelope:
+            out = envelope["result"]
+    except (ValueError, _json.JSONDecodeError):
+        pass
+    first_line = (out or "").strip().split("\n")[0].strip().upper()
+    reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
+    if first_line.startswith("NO"):
+        return False, reason
+    return True, reason
+
+
+def _gather_observation_claims(body):
+    """Extract observation claims from a program body for LLM evaluation."""
+    claims = []
+    for _date, kind, source, claim in _iter_observations(body or ""):
+        if kind in _PHASE_EVIDENCE_KINDS and not source.startswith("adapter:"):
+            claims.append(claim)
+    return claims
+
+
 def _propose_phase_advance(fm, type_entry, body):
     """The INTERPRETATION door's gate. Returns an advance-phase mutation or None.
 
@@ -897,15 +967,15 @@ def _propose_tracker_update(fm, type_entry, body):
 
 
 def _build_tracker_update_description(mutation, program_id):
-    """Build an ASCII description for a tracker-update proposal card."""
+    """Build a clear tracker-update proposal card body."""
     key = mutation.get("tracker_key", "?")
     status = mutation.get("current_status", "?")
     claims = mutation.get("evidence_claims", [])
     cite = claims[0][:120] if claims else "activity evidence"
     return (
-        f"Jira {key} reports status '{status}' but meetings show active work. "
-        f"Signal: {cite}. "
-        f"Cadence proposes updating {key} to reflect reality ({program_id})."
+        f"Change Jira {key} status: currently '{status}', "
+        f"evidence shows active work.\n"
+        f"Signal: {cite}"
     )
 
 
@@ -927,25 +997,29 @@ def _build_birth_description(proposal, program_id):
     )
 
 
-def _build_proposal_description(mutation, body, program_id):
-    """Build a <=2-sentence ASCII proposal card body (invariant #8).
+def _build_proposal_description(mutation, body, program_id, type_entry=None):
+    """Build a clear proposal card body showing what changes and why.
 
-    States the proposed change (advance from -> to on which checkpoint) and the
-    interpretive observation's claim that earned it, so the human accepting the
-    card sees both the diff and its citation. ASCII arrows, no em-dash. A birth
-    proposal (op "birth") has no from/to/checkpoint shape -- it is delegated to
-    _build_birth_description, which renders the prefilled-program preview.
+    Format: Change line, evidence, phase definition. ASCII only (invariant #8).
     """
     if isinstance(mutation, dict) and mutation.get("op") == "birth":
         return _build_birth_description(mutation, program_id)
     frm = mutation.get("from", "?")
     to = mutation.get("to", "?")
-    cp = mutation.get("checkpoint", "?")
     claim = _latest_interpretive_claim(body) or "a phase-complete signal"
-    return (
-        f"Cadence proposes advancing {program_id}: phase {frm} -> {to} "
-        f"on checkpoint {cp}. Signal: {claim}"
-    )
+    if len(claim) > 120:
+        claim = claim[:117] + "..."
+    phase_desc = ""
+    if type_entry:
+        for ph in (type_entry.get("phases") or []):
+            if ph.get("id") == to:
+                phase_desc = ph.get("description", "")
+                break
+    lines = [f"Change {program_id} phase: {frm} -> {to}"]
+    lines.append(f"Evidence: {claim}")
+    if phase_desc:
+        lines.append(f"What '{to}' means: {phase_desc}")
+    return "\n".join(lines)
 
 
 def _latest_interpretive_claim(body):
@@ -1382,7 +1456,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
                 continue
             task_id, _ = task_lib.create_task(
-                title=f"{title}: update Jira {mutation['tracker_key']}?",
+                title=f"{title}: update {mutation['tracker_key']} from '{mutation.get('current_status', '?')}'?",
                 queue="human",
                 priority="high",
                 creator="cadence",
@@ -1408,8 +1482,24 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
             if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
                 continue
+            target_phase_id = mutation.get("to", "")
+            phase_desc = ""
+            for ph in (type_entry.get("phases") or []):
+                if ph.get("id") == target_phase_id:
+                    phase_desc = ph.get("description", "")
+                    break
+            if phase_desc:
+                obs_claims = _gather_observation_claims(body)
+                approved, reason = _llm_evaluate_proposal(
+                    title, fm.get("phase", "?"), target_phase_id,
+                    phase_desc, obs_claims)
+                if not approved:
+                    sys.stderr.write(
+                        f"[cadence] LLM rejected {program_id} "
+                        f"{fm.get('phase')} -> {target_phase_id}: {reason}\n")
+                    continue
             task_id, _ = task_lib.create_task(
-                title=f"{title}: advance to {mutation['to']}?",
+                title=f"{title}: {mutation.get('from', '?')} -> {mutation['to']}?",
                 queue="human",
                 priority="high",
                 creator="cadence",
@@ -1417,7 +1507,8 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 task_type="cadence-propose-update",
                 tags=[program_id, "cadence"],
                 proposal=mutation,
-                description=_build_proposal_description(mutation, body or "", program_id),
+                description=_build_proposal_description(
+                    mutation, body or "", program_id, type_entry),
             )
             emitted.append(task_id)
             open_prop_ops.add(mutation["op"])

@@ -37,6 +37,9 @@ def _isolated_task_queues(tmp_path_factory, monkeypatch):
     # ARCHIVE_DIR is computed at import from the ORIGINAL TASKS_DIR, so patch it
     # too -- otherwise any completed card would leak into the real archive.
     monkeypatch.setattr(task_lib, "ARCHIVE_DIR", str(archive))
+    monkeypatch.setattr(
+        reconcile, "_llm_evaluate_proposal",
+        lambda *a, **kw: (True, "auto-approved in test"))
 
 
 # A fixed "now" used everywhere so verdicts are deterministic.
@@ -3347,3 +3350,128 @@ def test_multiple_rejections_uses_latest_date(tmp_path, monkeypatch):
     cards3 = [c for c in _open_human_cards()
               if c.get("proposal", {}).get("op") == "advance-phase"]
     assert cards3 == []
+
+
+# ─── LLM-evaluated proposals ────────────────────────────────────────────────
+
+
+def test_llm_rejects_premature_proposal(tmp_path, monkeypatch):
+    """LLM returning NO suppresses the proposal card."""
+    monkeypatch.setattr(
+        reconcile, "_llm_evaluate_proposal",
+        lambda *a, **kw: (False, "Still in testing, not shipped."))
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development.", date="2026-06-15"),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert cards == []
+
+
+def test_llm_approves_valid_proposal(tmp_path, monkeypatch):
+    """LLM returning YES allows the proposal card."""
+    monkeypatch.setattr(
+        reconcile, "_llm_evaluate_proposal",
+        lambda *a, **kw: (True, "Evidence confirms deployment."))
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development.", date="2026-06-15"),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+
+
+def test_llm_failure_fails_open(tmp_path, monkeypatch):
+    """LLM timeout/error still allows proposal (fail-open)."""
+    monkeypatch.setattr(
+        reconcile, "_llm_evaluate_proposal",
+        lambda *a, **kw: (True, "evaluation unavailable"))
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development.", date="2026-06-15"),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+
+
+def test_llm_not_called_for_tracker_mismatch(tmp_path, monkeypatch):
+    """Tracker-mismatch proposals bypass LLM evaluation."""
+    call_args = []
+    def _tracking_eval(*args, **kwargs):
+        call_args.append(args)
+        return True, "approved"
+    monkeypatch.setattr(reconcile, "_llm_evaluate_proposal", _tracking_eval)
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-789", extra_obs=[
+        dict(kind="status-signal", sentinel="tracker-truth",
+             source="adapter:project_management:VNT-789",
+             claim="Tracker reports status 'Next' for 'Test'.",
+             date="2026-06-15"),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_standup.md",
+             claim="Active work.", date="2026-06-15"),
+    ])
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    tracker_cards = [c for c in _open_human_cards()
+                     if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert len(tracker_cards) == 1
+    for args in call_args:
+        assert "update-tracker" not in str(args)
+
+
+def test_proposal_card_description_includes_phase_definition(tmp_path):
+    """Card description includes the phase definition from the registry."""
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development.", date="2026-06-15"),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+    full = task_lib.read_task(cards[0]["id"])
+    body = full.get("body", "")
+    assert "define -> build" in body or "Change" in body
+
+
+def test_proposal_card_title_shows_from_to(tmp_path):
+    """Card title uses the 'from -> to' format."""
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define", last_cycle=PERIOD,
+        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Active development.", date="2026-06-15"),
+    )
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 1
+    assert "define -> build" in cards[0]["title"]

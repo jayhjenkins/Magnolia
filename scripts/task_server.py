@@ -1240,14 +1240,43 @@ def _apply_cadence_proposal(task_id, t):
     return receipt_id
 
 
+def _open_jira_sync_keys():
+    """Return the set of Jira issue keys already targeted by open sync tasks."""
+    keys = set()
+    for t in task_lib.list_tasks(queue="agent", status="open"):
+        if t.get("task_type") != "ticket-creator":
+            continue
+        tid = t.get("id", "")
+        try:
+            body = task_lib.read_task(tid).get("body", "")
+        except Exception:
+            continue
+        import re as _re
+        m = _re.search(r"<!-- JIRA_ISSUE_KEY:(\S+) -->", body)
+        if m:
+            keys.add(m.group(1))
+    for t in task_lib.list_tasks(queue="agent", status="in-progress"):
+        if t.get("task_type") != "ticket-creator":
+            continue
+        tid = t.get("id", "")
+        try:
+            body = task_lib.read_task(tid).get("body", "")
+        except Exception:
+            continue
+        import re as _re
+        m = _re.search(r"<!-- JIRA_ISSUE_KEY:(\S+) -->", body)
+        if m:
+            keys.add(m.group(1))
+    return keys
+
+
 def _maybe_emit_jira_sync(program_id, op, result, summary):
     """After a cadence proposal is accepted, emit a Jira sync task if the program
     has a project_management tracker binding.
 
-    Creates an agent-queue ticket-creator task that drafts a JIRA_UPDATE block
-    to push the phase/checkpoint change to the bound Jira feature(s). The agent
-    drafts; the human clicks "Update Jira" to publish -- same Tier-2 flow as
-    any other Jira update."""
+    Writes a pre-formatted JIRA_UPDATE block directly into the task body so the
+    card is immediately actionable -- no agent drafting needed. The human clicks
+    the action button to publish. Deduped per Jira issue key."""
     try:
         prog = program_lib.read_program(program_id)
     except FileNotFoundError:
@@ -1261,61 +1290,62 @@ def _maybe_emit_jira_sync(program_id, op, result, summary):
     if not tracker_bindings:
         return
 
+    open_keys = _open_jira_sync_keys()
     title = fm.get("title") or program_id
     phase = fm.get("phase") or "unknown"
-    checkpoints = fm.get("checkpoints") or []
-    cp_summary = "; ".join(
-        f"{c.get('label', c.get('id', '?'))}: {c.get('status', '?')}"
-        + (f" (due {c['due']})" if c.get("due") else "")
-        for c in checkpoints
-    ) or "none"
-
-    anchors = ", ".join(b["anchor"] for b in tracker_bindings)
-    description = (
-        f"A Cadence proposal was accepted for **{title}** ({program_id}):\n\n"
-        f"**{summary}**\n\n"
-        f"Current phase: **{phase}**\n"
-        f"Checkpoints: {cp_summary}\n\n"
-        f"Jira feature(s): {anchors}\n\n"
-        f"Draft a `<!-- JIRA_UPDATE -->` block for each bound Jira feature. "
-        f"Use `<!-- JIRA_ACTION:transition -->` with "
-        f"`<!-- JIRA_TARGET_STATUS:In Progress -->` (or a more specific status "
-        f"matching the phase) to transition the Jira status. If dates also need "
-        f"updating, draft a second block with `<!-- JIRA_ACTION:edit -->` for "
-        f"field changes:\n"
-        f"- Go-to-market / target ship date (based on phase + checkpoint dates)\n"
-        f"- Early adopter (EA) date (if entering beta/execution phase)\n"
-        f"- GA date (if entering shipped/ga phase)\n\n"
-        f"Read the full program file at datasets/programs/{program_id}.md for "
-        f"complete context before drafting."
-    )
 
     for b in tracker_bindings:
         anchor = b["anchor"]
+        if anchor in open_keys:
+            continue
+
+        comment_text = f"Cadence advanced {title} to {phase}."
+        jira_block = (
+            f"<!-- JIRA_UPDATE -->\n"
+            f"<!-- JIRA_ISSUE_KEY:{anchor} -->\n"
+            f"<!-- JIRA_ACTION:comment -->\n"
+            f"<!-- JIRA_PRIORITY: -->\n"
+            f"<!-- JIRA_SUMMARY: -->\n"
+            f"<!-- JIRA_LABELS: -->\n\n"
+            f"### Comment\n"
+            f"{comment_text}\n\n"
+            f"### Fields\n"
+            f"- **Issue:** {anchor}\n"
+            f"- **Action:** Comment\n"
+            f"<!-- /JIRA_UPDATE -->"
+        )
+
+        description = (
+            f"## Description\n\n"
+            f"Cadence proposal accepted: {summary}\n\n"
+            f"## Jira Update\n\n{jira_block}"
+        )
+
         tid, _ = task_lib.create_task(
-            f"Update Jira {anchor}: {summary}",
+            f"Sync Jira {anchor}: {title} -> {phase}",
             queue="agent", domain="ops", creator="cadence",
             description=description,
             tags=[program_id, "cadence"],
             card_type="task",
         )
-        task_lib.update_task(tid, changes={"task_type": "ticket-creator"})
-        _dispatch_bootstrap_task(tid)
+        task_lib.update_task(tid, changes={
+            "task_type": "ticket-creator",
+            "agent_status": "complete",
+        })
+        open_keys.add(anchor)
 
 
 def _apply_cadence_tracker_update(task_id, t, proposal, program_id):
-    """Accept a tracker-status-mismatch proposal: emit a Jira sync agent task.
+    """Accept a tracker-status-mismatch proposal: emit a Jira transition task.
 
-    Unlike advance-phase/archive, this does NOT mutate the program file. It only
-    emits an agent task (ticket-creator) that drafts a Jira status transition.
-    The tracker-truth sentinel will capture the new Jira status on its next run.
+    Writes a pre-formatted JIRA_UPDATE block with transition action directly
+    into the task body. No agent dispatch needed -- the card is immediately
+    actionable. Deduped per Jira issue key.
     """
     tracker_key = proposal.get("tracker_key", "?")
     current_status = proposal.get("current_status", "?")
-    evidence = proposal.get("evidence_claims", [])
-    evidence_str = "; ".join(e[:120] for e in evidence[:3]) if evidence else "activity observed"
 
-    summary = f"Proposed Jira update for {tracker_key} on {program_id}."
+    summary = f"Transition {tracker_key} from '{current_status}' to active."
 
     task_lib.update_task(task_id, comment=f"Accepted: {summary}", actor="human")
     task_lib.complete_task(task_id, actor="human")
@@ -1328,6 +1358,10 @@ def _apply_cadence_tracker_update(task_id, t, proposal, program_id):
         "receipt_kind": "cadence-apply", "source_recommendation": task_id,
         "program_id": program_id})
 
+    open_keys = _open_jira_sync_keys()
+    if tracker_key in open_keys:
+        return receipt_id
+
     try:
         prog = program_lib.read_program(program_id)
     except FileNotFoundError:
@@ -1335,26 +1369,41 @@ def _apply_cadence_tracker_update(task_id, t, proposal, program_id):
     fm = prog.get("frontmatter") or {}
     title = fm.get("title") or program_id
 
+    jira_block = (
+        f"<!-- JIRA_UPDATE -->\n"
+        f"<!-- JIRA_ISSUE_KEY:{tracker_key} -->\n"
+        f"<!-- JIRA_ACTION:transition -->\n"
+        f"<!-- JIRA_TARGET_STATUS:In Progress -->\n"
+        f"<!-- JIRA_PRIORITY: -->\n"
+        f"<!-- JIRA_SUMMARY: -->\n"
+        f"<!-- JIRA_LABELS: -->\n\n"
+        f"### Comment\n"
+        f"Cadence detected active work on {title}. "
+        f"Transitioning from '{current_status}' to an active status.\n\n"
+        f"### Fields\n"
+        f"- **Issue:** {tracker_key}\n"
+        f"- **Action:** Transition to In Progress\n"
+        f"<!-- /JIRA_UPDATE -->"
+    )
+
     description = (
-        f"Jira {tracker_key} currently shows status '{current_status}' but Cadence "
-        f"detected active work on **{title}** ({program_id}).\n\n"
-        f"Evidence: {evidence_str}\n\n"
-        f"Draft a `<!-- JIRA_UPDATE -->` block with `<!-- JIRA_ACTION:transition -->` "
-        f"and `<!-- JIRA_TARGET_STATUS:In Progress -->` to transition {tracker_key} "
-        f"from '{current_status}' to an active status. If you find a more specific "
-        f"status name (e.g. 'In Development') from the evidence, use that instead. "
-        f"Read datasets/programs/{program_id}.md for context before drafting."
+        f"## Description\n\n"
+        f"Transition {tracker_key} from '{current_status}' to active "
+        f"for {title} ({program_id}).\n\n"
+        f"## Jira Update\n\n{jira_block}"
     )
 
     tid, _ = task_lib.create_task(
-        f"Update Jira {tracker_key}: status '{current_status}' -> active",
+        f"Transition {tracker_key}: '{current_status}' -> In Progress",
         queue="agent", domain="ops", creator="cadence",
         description=description,
         tags=[program_id, "cadence"],
         card_type="task",
     )
-    task_lib.update_task(tid, changes={"task_type": "ticket-creator"})
-    _dispatch_bootstrap_task(tid)
+    task_lib.update_task(tid, changes={
+        "task_type": "ticket-creator",
+        "agent_status": "complete",
+    })
 
     return receipt_id
 

@@ -228,10 +228,13 @@ Task {task_id}. Follow these steps:
    - The <!-- JIRA_UPDATE --> and <!-- /JIRA_UPDATE --> markers MUST be present
    - Each <!-- JIRA_FIELD:value --> comment MUST be on its own line
    - JIRA_ISSUE_KEY must be the exact issue key from the task (e.g., `VNT-45655`)
-   - JIRA_ACTION must be one of: comment, edit, comment_and_edit
+   - JIRA_ACTION must be one of: comment, edit, comment_and_edit, transition, transition_and_comment
    - JIRA_PRIORITY: Highest, High, Medium, Low, Lowest (or leave empty if not changing)
    - JIRA_SUMMARY: new summary text (or leave empty if not changing)
    - JIRA_LABELS: updated labels (or leave empty if not changing)
+   - JIRA_TARGET_STATUS: target status for transition actions (e.g., "In Progress", "In Development", "Done")
+   - For `transition` action: include JIRA_TARGET_STATUS. A ### Comment section is optional.
+   - For `transition_and_comment`: include both JIRA_TARGET_STATUS and a ### Comment section.
    - The ### Comment section contains the comment body in markdown (omit if action is `edit` only)
    - The ### Description section is optional — include only when replacing the full description
    - The ### Fields section is the human-readable summary of what will change
