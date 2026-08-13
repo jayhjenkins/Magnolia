@@ -234,6 +234,25 @@ def _attempt_update(task_id, update):
             return ("already_updated", None)
     except FileNotFoundError:
         pass
+
+    action = update.get("action", "comment")
+    expected = update.get("expected_status", "")
+    if action in ("transition", "transition_and_comment") and expected:
+        try:
+            current = jira_publish.fetch_issue(update["issue_key"])
+            if current and current.get("status", "").lower() != expected.lower():
+                msg = (f"Drift resolved: {update['issue_key']} is now "
+                       f"'{current['status']}' (was '{expected}' when observed). "
+                       f"Transition skipped.")
+                _note(task_id, msg)
+                try:
+                    task_lib.complete_task(task_id, actor="system")
+                except Exception:
+                    pass
+                return ("drift_resolved", msg)
+        except Exception:
+            pass
+
     try:
         result = adapters.update_issue("project_management", update)
     except NeedsConfirmation:
