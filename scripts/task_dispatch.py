@@ -133,6 +133,8 @@ def release_lock(fd):
             pass
 
 
+HUMAN_INTERACTIVE_CARDS = {"program-setup", "receipt", "confirm", "graduation", "recommendation"}
+
 # ─── Queue Reading ────────────────────────────────────────────────────────────
 
 def get_actionable_tasks():
@@ -172,8 +174,6 @@ def get_actionable_tasks():
         except json.JSONDecodeError as e:
             log(f"ERROR: Failed to parse {queue} queue JSON: {e}")
             continue
-
-    HUMAN_INTERACTIVE_CARDS = {"program-setup", "receipt", "confirm", "graduation", "recommendation"}
 
     # Filter to actionable tasks
     actionable = []
@@ -1027,6 +1027,9 @@ def main():
         try:
             task_data = task_lib.read_task(task_id)
             fm = task_data.get("frontmatter", {})
+            if fm.get("card_type") in HUMAN_INTERACTIVE_CARDS:
+                log(f"Skipping {task_id}: card_type '{fm.get('card_type')}' is human-interactive", task_id=task_id)
+                sys.exit(0)
             task = {
                 "id": task_id,
                 "title": fm.get("title", "(single dispatch)"),
