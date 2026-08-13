@@ -764,7 +764,7 @@ def _dispatch_agent_task(task_id):
 
 
 _LLM_EVAL_TIMEOUT = 30
-_LLM_EVAL_TIER = "light"
+_LLM_EVAL_TIER = "deep"
 
 
 def _llm_evaluate_proposal(program_title, current_phase, target_phase,

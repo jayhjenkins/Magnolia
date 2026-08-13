@@ -5,7 +5,7 @@ sources:
   - { kind: project_management, mode: read }
 observation_kinds: [completion, status-signal, date-change]
 scope: active-programs
-model_tier: light
+model_tier: standard
 allowed_tools:
   - "Read(*)"
 timeout: 300
