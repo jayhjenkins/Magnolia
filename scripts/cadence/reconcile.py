@@ -962,6 +962,7 @@ def _propose_tracker_update(fm, type_entry, body):
         "op": "update-tracker",
         "tracker_key": anchor,
         "current_status": tracker_status,
+        "tracker_observed": tracker_date,
         "evidence_claims": evidence_claims[:3],
     }
 
@@ -970,11 +971,12 @@ def _build_tracker_update_description(mutation, program_id):
     """Build a clear tracker-update proposal card body."""
     key = mutation.get("tracker_key", "?")
     status = mutation.get("current_status", "?")
+    observed = mutation.get("tracker_observed", "?")
     claims = mutation.get("evidence_claims", [])
     cite = claims[0][:120] if claims else "activity evidence"
     return (
-        f"Change Jira {key} status: currently '{status}', "
-        f"evidence shows active work.\n"
+        f"Change Jira {key} status: currently '{status}' "
+        f"(as of {observed}), evidence shows active work.\n"
         f"Signal: {cite}"
     )
 

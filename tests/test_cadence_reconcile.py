@@ -3172,7 +3172,8 @@ def test_tracker_mismatch_proposal_description(tmp_path):
     pid = _seed_rock_with_tracker(root, tracker_key="VNT-999", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
              source="adapter:project_management:VNT-999",
-             claim="Tracker reports status 'Backlog' for 'Test'."),
+             claim="Tracker reports status 'Backlog' for 'Test'.",
+             date="2026-06-10"),
         dict(kind="status-signal", sentinel="movement-watch",
              source="datasets/meetings/2026-06-15_standup.md",
              claim="Engineering actively building this feature."),
@@ -3187,6 +3188,28 @@ def test_tracker_mismatch_proposal_description(tmp_path):
     body = full_task.get("body", "")
     assert "VNT-999" in body
     assert "Backlog" in body
+    assert "as of 2026-06-10" in body
+
+
+def test_tracker_mismatch_mutation_includes_observed_date(tmp_path):
+    """_propose_tracker_update returns tracker_observed in the mutation."""
+    root = str(tmp_path)
+    pid = _seed_rock_with_tracker(root, tracker_key="VNT-111", extra_obs=[
+        dict(kind="status-signal", sentinel="tracker-truth",
+             source="adapter:project_management:VNT-111",
+             claim="Tracker reports status 'Next' for 'Test'.",
+             date="2026-07-20"),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-07-21_standup.md",
+             claim="Active work."),
+    ])
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("proposal", {}).get("op") == "update-tracker"]
+    assert len(cards) == 1
+    assert cards[0]["proposal"]["tracker_observed"] == "2026-07-20"
 
 
 # ─── Rejection-aware dedup ──────────────────────────────────────────────────

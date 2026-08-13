@@ -1374,6 +1374,7 @@ def _apply_cadence_tracker_update(task_id, t, proposal, program_id):
         f"<!-- JIRA_ISSUE_KEY:{tracker_key} -->\n"
         f"<!-- JIRA_ACTION:transition -->\n"
         f"<!-- JIRA_TARGET_STATUS:In Progress -->\n"
+        f"<!-- JIRA_EXPECTED_STATUS:{current_status} -->\n"
         f"<!-- JIRA_PRIORITY: -->\n"
         f"<!-- JIRA_SUMMARY: -->\n"
         f"<!-- JIRA_LABELS: -->\n\n"
