@@ -252,6 +252,7 @@ def parse_jira_update(body):
         "comment_body": comment_body,
         "description": description,
         "target_status": _field("JIRA_TARGET_STATUS") or "",
+        "expected_status": _field("JIRA_EXPECTED_STATUS") or "",
     }
 
 

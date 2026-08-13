@@ -1,6 +1,7 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import shipper
+import jira_publish
 
 
 def test_attempt_update_no_block():
@@ -83,3 +84,152 @@ def test_emit_jira_receipt_includes_source_title(monkeypatch):
     shipper._emit_jira_receipt("TASK-10", "VNT-100", "https://jira/VNT-100", "Updated")
     assert "Original Request" in created_desc
     assert "VNT-100" in created_title
+
+
+# ─── Pre-transition drift verification ────────────────────────────────────
+
+
+def test_drift_resolved_skips_transition(monkeypatch):
+    """When Jira status has drifted from expected, auto-complete instead of
+    executing the transition."""
+    completed = {}
+    noted = {}
+    monkeypatch.setattr(shipper.task_lib, "read_task",
+                        lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
+    monkeypatch.setattr(shipper.task_lib, "update_task",
+                        lambda tid, **kw: noted.update(kw))
+    monkeypatch.setattr(shipper.task_lib, "complete_task",
+                        lambda tid, **kw: completed.setdefault("id", tid))
+    monkeypatch.setattr(shipper.jira_publish, "fetch_issue",
+                        lambda key: {"status": "In Progress", "title": "Test"})
+    update = {
+        "issue_key": "VNT-100",
+        "action": "transition",
+        "target_status": "In Progress",
+        "expected_status": "Next",
+    }
+    status, payload = shipper._attempt_update("T-1", update)
+    assert status == "drift_resolved"
+    assert "In Progress" in payload
+    assert "Next" in payload
+    assert completed["id"] == "T-1"
+
+
+def test_no_drift_proceeds_with_transition(monkeypatch):
+    """When Jira status still matches expected, proceed with the transition."""
+    completed = {}
+    monkeypatch.setattr(shipper.task_lib, "read_task",
+                        lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
+    monkeypatch.setattr(shipper.adapters, "update_issue",
+                        lambda family, update, root=None: ("VNT-100", "https://jira/VNT-100"))
+    monkeypatch.setattr(shipper.task_lib, "update_task",
+                        lambda tid, **kw: None)
+    monkeypatch.setattr(shipper.task_lib, "complete_task",
+                        lambda tid, **kw: completed.setdefault("id", tid))
+    monkeypatch.setattr(shipper.jira_publish, "_trace_update",
+                        lambda *a, **kw: None)
+    monkeypatch.setattr(shipper.jira_publish, "fetch_issue",
+                        lambda key: {"status": "Next", "title": "Test"})
+    update = {
+        "issue_key": "VNT-100",
+        "action": "transition",
+        "target_status": "In Progress",
+        "expected_status": "Next",
+    }
+    status, payload = shipper._attempt_update("T-1", update)
+    assert status == "ok"
+    assert payload == ("VNT-100", "https://jira/VNT-100")
+
+
+def test_drift_check_fails_open(monkeypatch):
+    """When fetch_issue raises, the transition proceeds (fail-open)."""
+    completed = {}
+    monkeypatch.setattr(shipper.task_lib, "read_task",
+                        lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
+    monkeypatch.setattr(shipper.adapters, "update_issue",
+                        lambda family, update, root=None: ("VNT-100", "https://jira/VNT-100"))
+    monkeypatch.setattr(shipper.task_lib, "update_task",
+                        lambda tid, **kw: None)
+    monkeypatch.setattr(shipper.task_lib, "complete_task",
+                        lambda tid, **kw: completed.setdefault("id", tid))
+    monkeypatch.setattr(shipper.jira_publish, "_trace_update",
+                        lambda *a, **kw: None)
+    def fetch_boom(key):
+        raise RuntimeError("Jira unreachable")
+    monkeypatch.setattr(shipper.jira_publish, "fetch_issue", fetch_boom)
+    update = {
+        "issue_key": "VNT-100",
+        "action": "transition",
+        "target_status": "In Progress",
+        "expected_status": "Next",
+    }
+    status, payload = shipper._attempt_update("T-1", update)
+    assert status == "ok"
+
+
+def test_no_expected_status_skips_drift_check(monkeypatch):
+    """When expected_status is absent, no drift check happens."""
+    completed = {}
+    fetch_calls = []
+    monkeypatch.setattr(shipper.task_lib, "read_task",
+                        lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
+    monkeypatch.setattr(shipper.adapters, "update_issue",
+                        lambda family, update, root=None: ("VNT-100", "https://jira/VNT-100"))
+    monkeypatch.setattr(shipper.task_lib, "update_task",
+                        lambda tid, **kw: None)
+    monkeypatch.setattr(shipper.task_lib, "complete_task",
+                        lambda tid, **kw: completed.setdefault("id", tid))
+    monkeypatch.setattr(shipper.jira_publish, "_trace_update",
+                        lambda *a, **kw: None)
+    def fetch_track(key):
+        fetch_calls.append(key)
+        return {"status": "Done", "title": "Test"}
+    monkeypatch.setattr(shipper.jira_publish, "fetch_issue", fetch_track)
+    update = {
+        "issue_key": "VNT-100",
+        "action": "transition",
+        "target_status": "In Progress",
+    }
+    status, payload = shipper._attempt_update("T-1", update)
+    assert status == "ok"
+    assert fetch_calls == []
+
+
+# ─── parse_jira_update expected_status ─────────────────────────────────────
+
+
+def test_parse_jira_update_expected_status():
+    """parse_jira_update extracts JIRA_EXPECTED_STATUS when present."""
+    body = (
+        "<!-- JIRA_UPDATE -->\n"
+        "<!-- JIRA_ISSUE_KEY:VNT-100 -->\n"
+        "<!-- JIRA_ACTION:transition -->\n"
+        "<!-- JIRA_TARGET_STATUS:In Progress -->\n"
+        "<!-- JIRA_EXPECTED_STATUS:Next -->\n"
+        "<!-- JIRA_PRIORITY: -->\n"
+        "<!-- JIRA_SUMMARY: -->\n"
+        "<!-- JIRA_LABELS: -->\n\n"
+        "### Comment\nTransition comment.\n"
+        "<!-- /JIRA_UPDATE -->"
+    )
+    result = jira_publish.parse_jira_update(body)
+    assert result is not None
+    assert result["expected_status"] == "Next"
+    assert result["target_status"] == "In Progress"
+
+
+def test_parse_jira_update_no_expected_status():
+    """parse_jira_update returns empty expected_status for legacy blocks."""
+    body = (
+        "<!-- JIRA_UPDATE -->\n"
+        "<!-- JIRA_ISSUE_KEY:VNT-100 -->\n"
+        "<!-- JIRA_ACTION:comment -->\n"
+        "<!-- JIRA_PRIORITY: -->\n"
+        "<!-- JIRA_SUMMARY: -->\n"
+        "<!-- JIRA_LABELS: -->\n\n"
+        "### Comment\nSome comment.\n"
+        "<!-- /JIRA_UPDATE -->"
+    )
+    result = jira_publish.parse_jira_update(body)
+    assert result is not None
+    assert result["expected_status"] == ""
