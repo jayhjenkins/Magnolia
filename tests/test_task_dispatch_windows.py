@@ -1,6 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import task_dispatch  # noqa: E402
+import task_lib  # noqa: E402
 
 
 def test_actionable_query_uses_python_not_bash(monkeypatch):
@@ -64,3 +65,27 @@ def test_human_decision_card_types_never_dispatched(monkeypatch):
     actionable = task_dispatch.get_actionable_tasks()
     ids = {t["id"] for t in actionable}
     assert ids == {"TASK-1"}
+
+
+def test_single_task_mode_skips_human_interactive_cards(tmp_path, monkeypatch):
+    """Regression for the --task bypass: task_dispatch.py --task TASK-X must
+    check HUMAN_INTERACTIVE_CARDS before dispatching, same as get_actionable_tasks.
+    Without this, receipt/confirm/graduation cards get dispatched to workers."""
+    monkeypatch.setenv("PM_OS_DIR", str(tmp_path))
+    monkeypatch.setattr(task_lib, "TASKS_DIR", str(tmp_path / "tasks"))
+    os.makedirs(tmp_path / "tasks" / "collab", exist_ok=True)
+
+    tid, _ = task_lib.create_task(
+        "Commented on VNT-100", queue="collab", domain="ops",
+        creator="agent", card_type="receipt",
+        description="**[VNT-100](https://jira/VNT-100)**")
+
+    monkeypatch.setattr(sys, "argv", ["task_dispatch", "--task", tid, "--dry-run"])
+
+    exit_code = None
+    try:
+        task_dispatch.main()
+    except SystemExit as e:
+        exit_code = e.code
+
+    assert exit_code == 0, "receipt card should have been skipped with sys.exit(0)"
