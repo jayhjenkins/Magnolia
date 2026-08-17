@@ -1843,5 +1843,86 @@
     "last_sync": "2026-08-10T09:01:29Z",
     "direction": "local->remote",
     "status": "synced"
+  },
+  "datasets/product/agent-output/2026-08-10_homeowner-message-history-response-for-management-company.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-08-10_homeowner-message-history-response-for-management-company.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-08-10_homeowner-message-history-response-for-management-company.docx",
+    "local_hash": "85667e05d86a20130c6582ca980ade5d7516e4e508c759162e85c58f4fc286b2",
+    "remote_hash": "25a54bdc99d056dd22f157fb6c671347a42f89e146098deec6188f649a0a9ee5",
+    "last_sync": "2026-08-10T13:29:34Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/packages/2026/board-to-cm-communication/PRD_board-to-cm-communication.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/packages/2026/board-to-cm-communication/PRD_board-to-cm-communication.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/packages/2026/board-to-cm-communication/PRD_board-to-cm-communication.docx",
+    "local_hash": "2fdf0841362fb8b1d9ad5a80a6470af5371a3c4fc3f084baa5b8cd09cdcae1f6",
+    "remote_hash": "f044ee54dd7ff02dfafd9f30b68060447dd2273dae0911afc0aa587b86644fb0",
+    "last_sync": "2026-08-10T18:54:13Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-08-10-board-to-community-manager-communication-one-pager.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-08-10-board-to-community-manager-communication-one-pager.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-08-10-board-to-community-manager-communication-one-pager.docx",
+    "local_hash": "34ff65b003c70edf6af15829caebf2dfa6c75bd198a9fe1372c1c9a7e023f71f",
+    "remote_hash": "9688c27fb2385b209e14f0016d8f6b3dd63b25779577bd1552093703fc4a34ac",
+    "last_sync": "2026-08-10T19:59:24Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-08-11_forms-arc-association-scoping-feature-doc.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-08-11_forms-arc-association-scoping-feature-doc.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-08-11_forms-arc-association-scoping-feature-doc.docx",
+    "local_hash": "5e84145c35e1b4fa0206a95d568eb1641fd526f455d67e737fc954d6200abb2d",
+    "remote_hash": "5c5d2dc02ddc81e6d596d6ba0abf0c3a314c234b8d3d7740456df0024b4ceaab",
+    "last_sync": "2026-08-11T18:49:23Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/packages/2026/voice-home-integration/voice-home-integration-one-pager.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/packages/2026/voice-home-integration/voice-home-integration-one-pager.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/packages/2026/voice-home-integration/voice-home-integration-one-pager.docx",
+    "local_hash": "b9d07a2f21b3fcd3a4968fe0fe06b49159d38ad52558461469d550c4b2c53046",
+    "remote_hash": "338ebdbe01a304e18f8f76db1e0ff4a6e5b224e95f0dfa9072f3d9c3c09d69df",
+    "last_sync": "2026-08-11T20:59:23Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/packages/2026/voice-home-integration/PRD_voice-home-integration.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/packages/2026/voice-home-integration/PRD_voice-home-integration.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/packages/2026/voice-home-integration/PRD_voice-home-integration.docx",
+    "local_hash": "6da77fb127007c64adbdee4b8b87c3f6fd15b104db663033057fdc300b749e02",
+    "remote_hash": "7e4ed01a934a2189175e8b9f99ac855f42d8870664e8e8608aa04440cf9671ec",
+    "last_sync": "2026-08-11T20:54:58Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-08-11_resident-experience-long-term-roadmap-strategy-prep.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-08-11_resident-experience-long-term-roadmap-strategy-prep.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-08-11_resident-experience-long-term-roadmap-strategy-prep.docx",
+    "local_hash": "3cf8af40889b087bbe7825b84fdc0e0fa14eabb199fefa2a513311879c273546",
+    "remote_hash": "158496a369b01f4ccf995697fb35ee1785ceabae6d41bd4ee80b9358000a465a",
+    "last_sync": "2026-08-11T21:18:07Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-08-13_vantaca-ai-roi-measurement-framework.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-08-13_vantaca-ai-roi-measurement-framework.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-08-13_vantaca-ai-roi-measurement-framework.docx",
+    "local_hash": "691d67781f41d3f966b5e4fff719706cda3cefacb937c4416db3b9bec2f3563d",
+    "remote_hash": "9c408a72ceeadcab21fe312c0cc6865874a4b4bdf6c8d72e053c892fb21db003",
+    "last_sync": "2026-08-13T20:57:04Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-08-17_doctor-check_TASK-1496.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-08-17_doctor-check_TASK-1496.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-08-17_doctor-check_TASK-1496.docx",
+    "local_hash": "ff58a3a9a72dd25025cc8de0c35ce370038495676701df82a0571c0f6d35fcee",
+    "remote_hash": "f252dbd0ab0dddf05d86f793978ca17246359c2232df3187c3991153e9c69c28",
+    "last_sync": "2026-08-17T10:53:14Z",
+    "direction": "local->remote",
+    "status": "synced"
   }
 }

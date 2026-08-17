@@ -233,3 +233,67 @@ def test_parse_jira_update_no_expected_status():
     result = jira_publish.parse_jira_update(body)
     assert result is not None
     assert result["expected_status"] == ""
+
+
+# ─── Transition action label mapping ────────────────────────────────────────
+
+
+def test_attempt_update_transition_success(monkeypatch):
+    """_attempt_update with transition action returns correct success payload."""
+    completed = {}
+    monkeypatch.setattr(shipper.task_lib, "read_task",
+                        lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
+    monkeypatch.setattr(shipper.adapters, "update_issue",
+                        lambda family, update, root=None: ("VNT-200", "https://jira/VNT-200"))
+    monkeypatch.setattr(shipper.task_lib, "update_task",
+                        lambda tid, **kw: None)
+    monkeypatch.setattr(shipper.task_lib, "complete_task",
+                        lambda tid, **kw: completed.setdefault("id", tid))
+    monkeypatch.setattr(shipper.jira_publish, "_trace_update",
+                        lambda *a, **kw: None)
+    update = {"issue_key": "VNT-200", "action": "transition",
+              "target_status": "In Progress"}
+    status, payload = shipper._attempt_update("T-1", update)
+    assert status == "ok"
+    assert payload == ("VNT-200", "https://jira/VNT-200")
+    assert completed["id"] == "T-1"
+
+
+def test_attempt_update_transition_and_comment_success(monkeypatch):
+    """_attempt_update with transition_and_comment action succeeds."""
+    completed = {}
+    monkeypatch.setattr(shipper.task_lib, "read_task",
+                        lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
+    monkeypatch.setattr(shipper.adapters, "update_issue",
+                        lambda family, update, root=None: ("VNT-300", "https://jira/VNT-300"))
+    monkeypatch.setattr(shipper.task_lib, "update_task",
+                        lambda tid, **kw: None)
+    monkeypatch.setattr(shipper.task_lib, "complete_task",
+                        lambda tid, **kw: completed.setdefault("id", tid))
+    monkeypatch.setattr(shipper.jira_publish, "_trace_update",
+                        lambda *a, **kw: None)
+    update = {"issue_key": "VNT-300", "action": "transition_and_comment",
+              "target_status": "Done", "comment": "Moving to done."}
+    status, payload = shipper._attempt_update("T-1", update)
+    assert status == "ok"
+    assert payload == ("VNT-300", "https://jira/VNT-300")
+
+
+def test_parse_jira_update_transition_action():
+    """parse_jira_update correctly extracts transition action and target_status."""
+    body = (
+        "<!-- JIRA_UPDATE -->\n"
+        "<!-- JIRA_ISSUE_KEY:VNT-43885 -->\n"
+        "<!-- JIRA_ACTION:transition -->\n"
+        "<!-- JIRA_TARGET_STATUS:In Progress -->\n"
+        "<!-- JIRA_PRIORITY: -->\n"
+        "<!-- JIRA_SUMMARY: -->\n"
+        "<!-- JIRA_LABELS: -->\n\n"
+        "### Fields\n- **Issue:** VNT-43885\n"
+        "<!-- /JIRA_UPDATE -->"
+    )
+    result = jira_publish.parse_jira_update(body)
+    assert result is not None
+    assert result["action"] == "transition"
+    assert result["issue_key"] == "VNT-43885"
+    assert result["target_status"] == "In Progress"

@@ -124,8 +124,16 @@ on what the task asks for, choose the right command or sequence:
 **How to choose:** Read the task description carefully, then apply these branches
 in order.
 
-1. **New PRD is the default — and this is the most important rule.** Any ask to
-   "create", "write", "draft", or "author" a PRD means run the full
+0. **Format gate -- non-PRD deliverable?** If the task explicitly requests a
+   **one-pager**, **memo**, **brief**, **FAQ**, **research doc**, or any named
+   format that is NOT a PRD, produce that format directly. Use context-gathering
+   skills (context-search, context-meeting-synthesis) for research, then write the
+   document in the requested format. Do NOT run the ship-it pipeline or produce a
+   PRD when the operator asked for a different deliverable type. One-pagers are
+   concise alignment artifacts (1-2 pages), not condensed PRDs.
+
+1. **New PRD is the default for PRD requests.** Any ask to
+   "create", "write", "draft", or "author" a **PRD** (specifically) means run the full
    `/project:ship-it` pipeline, not a bare `/project:create-prd`. "PRD" here means
    the complete, thorough package — discovery → vision → knowledge base → PRD →
    validation → business case — because that is the standard, default system for
