@@ -199,7 +199,7 @@ Task {task_id}. Follow these steps:
 5. Do the work:
    - Follow the selected skill's workflow step by step.
    - Apply relevant quality gates (prd-validation, product-strategy-validation).
-   - Every claim should cite a source when possible.
+   - **Evidence standards.** Every factual claim must cite its source (transcript date + speaker, Pendo metric, code path, or data query). When a claim cannot be confidently verified, mark it with an inline confidence qualifier -- [confidence: high/medium/low -- basis] -- rather than stating it as absolute fact. Never include forward-looking product commitments ("we recently rolled out...", "we're currently prioritizing...") unless the task explicitly authorizes external-facing roadmap language; default to hedged phrasing ("we are exploring...", "under consideration").
    - **Data-dependency framing.** When the task requests concrete analysis (segmentation, quantification, categorization) but key input data is unavailable, honestly frame the deliverable: title and executive summary must say "framework" or "preliminary analysis pending [specific data]", not present a framework as a completed analysis. Figures that are estimates (no cited basis) must be labeled as estimates, not presented as derived findings.
    - Write output to datasets/product/agent-output/ unless the skill specifies otherwise.
 
