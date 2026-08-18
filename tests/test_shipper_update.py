@@ -35,6 +35,8 @@ def test_attempt_update_success(monkeypatch):
                         lambda tid, **kw: completed.setdefault("id", tid))
     monkeypatch.setattr(shipper.jira_publish, "_trace_update",
                         lambda *a, **kw: None)
+    monkeypatch.setattr(shipper, "_emit_jira_receipt",
+                        lambda *a, **kw: None)
     update = {"issue_key": "VNT-100", "action": "comment"}
     status, payload = shipper._attempt_update("T-1", update)
     assert status == "ok"
@@ -128,6 +130,8 @@ def test_no_drift_proceeds_with_transition(monkeypatch):
                         lambda tid, **kw: completed.setdefault("id", tid))
     monkeypatch.setattr(shipper.jira_publish, "_trace_update",
                         lambda *a, **kw: None)
+    monkeypatch.setattr(shipper, "_emit_jira_receipt",
+                        lambda *a, **kw: None)
     monkeypatch.setattr(shipper.jira_publish, "fetch_issue",
                         lambda key: {"status": "Next", "title": "Test"})
     update = {
@@ -153,6 +157,8 @@ def test_drift_check_fails_open(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "complete_task",
                         lambda tid, **kw: completed.setdefault("id", tid))
     monkeypatch.setattr(shipper.jira_publish, "_trace_update",
+                        lambda *a, **kw: None)
+    monkeypatch.setattr(shipper, "_emit_jira_receipt",
                         lambda *a, **kw: None)
     def fetch_boom(key):
         raise RuntimeError("Jira unreachable")
@@ -180,6 +186,8 @@ def test_no_expected_status_skips_drift_check(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "complete_task",
                         lambda tid, **kw: completed.setdefault("id", tid))
     monkeypatch.setattr(shipper.jira_publish, "_trace_update",
+                        lambda *a, **kw: None)
+    monkeypatch.setattr(shipper, "_emit_jira_receipt",
                         lambda *a, **kw: None)
     def fetch_track(key):
         fetch_calls.append(key)
@@ -251,6 +259,8 @@ def test_attempt_update_transition_success(monkeypatch):
                         lambda tid, **kw: completed.setdefault("id", tid))
     monkeypatch.setattr(shipper.jira_publish, "_trace_update",
                         lambda *a, **kw: None)
+    monkeypatch.setattr(shipper, "_emit_jira_receipt",
+                        lambda *a, **kw: None)
     update = {"issue_key": "VNT-200", "action": "transition",
               "target_status": "In Progress"}
     status, payload = shipper._attempt_update("T-1", update)
@@ -271,6 +281,8 @@ def test_attempt_update_transition_and_comment_success(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "complete_task",
                         lambda tid, **kw: completed.setdefault("id", tid))
     monkeypatch.setattr(shipper.jira_publish, "_trace_update",
+                        lambda *a, **kw: None)
+    monkeypatch.setattr(shipper, "_emit_jira_receipt",
                         lambda *a, **kw: None)
     update = {"issue_key": "VNT-300", "action": "transition_and_comment",
               "target_status": "Done", "comment": "Moving to done."}
