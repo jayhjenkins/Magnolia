@@ -686,3 +686,135 @@ def test_run_sentinel_passes_date_not_timestamp_to_impl(tmp_path, monkeypatch):
     # Telemetry still got a real timestamp (full ISO, longer than a date).
     entry = sentinel_runner.read_sentinel_runs(root)["movement-watch"]
     assert len(entry["last_run"]) > len("2026-06-18")
+
+
+# ─── Layer 1+2 dedup integration tests ─────────────────────────────────────
+
+
+def test_multi_run_dedup_same_source_different_claim(tmp_path, monkeypatch):
+    """Two sentinel runs citing the same meeting with different paraphrasing
+    should NOT produce duplicate observations (Layer 2: normalized source dedup)."""
+    pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
+
+    run1_records = [
+        {"program_id": pid1, "kind": "status-signal",
+         "source": "meetings/2026-08-13_10-20_Jay x Sam 1:1.txt, Jay ~03:38",
+         "claim": "Jay is fairly blind on board analytics.", "confidence": 0.9},
+    ]
+    run2_records = [
+        {"program_id": pid1, "kind": "status-signal",
+         "source": "leadership/2026-08/2026-08-13_10-20_Jay x Sam - 1_1.txt, Jay Jenkins at [03:32:42]",
+         "claim": "Jay spent two hours on session replays, still blind on board.", "confidence": 0.95},
+    ]
+
+    # Run 1
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None, timeout=None: json.dumps(run1_records))
+    s1 = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
+    assert s1["appended"] == 1
+
+    # Run 2 — same meeting, different words
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None, timeout=None: json.dumps(run2_records))
+    s2 = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
+    assert s2["appended"] == 0, "Same source file + kind should be deduped"
+
+
+def test_different_meetings_not_deduped(tmp_path, monkeypatch):
+    """Observations from genuinely different meetings must NOT be deduped."""
+    pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
+
+    run1_records = [
+        {"program_id": pid1, "kind": "status-signal",
+         "source": "2026-08-12_14-52_Resident Experience L10.txt",
+         "claim": "Board frustration declining.", "confidence": 0.9},
+    ]
+    run2_records = [
+        {"program_id": pid1, "kind": "status-signal",
+         "source": "2026-08-13_10-20_Jay x Sam 1:1.txt",
+         "claim": "Still blind on board analytics.", "confidence": 0.9},
+    ]
+
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None, timeout=None: json.dumps(run1_records))
+    s1 = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
+    assert s1["appended"] == 1
+
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None, timeout=None: json.dumps(run2_records))
+    s2 = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
+    assert s2["appended"] == 1, "Different meetings should not be deduped"
+
+
+def test_same_source_different_kind_not_deduped(tmp_path, monkeypatch):
+    """Different observation kinds from the same source file are distinct signals."""
+    pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
+
+    run1_records = [
+        {"program_id": pid1, "kind": "status-signal",
+         "source": "2026-08-13_10-20_standup.txt",
+         "claim": "Active work on feature.", "confidence": 0.9},
+    ]
+    run2_records = [
+        {"program_id": pid1, "kind": "completion",
+         "source": "2026-08-13_10-20_standup.txt",
+         "claim": "Feature shipped.", "confidence": 0.95},
+    ]
+
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None, timeout=None: json.dumps(run1_records))
+    sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
+
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None, timeout=None: json.dumps(run2_records))
+    s2 = sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
+    assert s2["appended"] == 1, "Different kinds from same source should both record"
+
+
+def test_processed_sources_manifest_written(tmp_path, monkeypatch):
+    """After a sentinel run, the processed-sources manifest records the source files."""
+    pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
+    records = [
+        {"program_id": pid1, "kind": "status-signal",
+         "source": "2026-08-13_10-20_standup.txt",
+         "claim": "Progress.", "confidence": 0.9},
+    ]
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda prompt, tier=None, timeout=None: json.dumps(records))
+    sentinel_runner.run_sentinel("movement-watch", root=str(tmp_path))
+
+    manifest = sentinel_runner.read_processed_sources("movement-watch", root=str(tmp_path))
+    assert pid1 in manifest
+    assert "2026-08-13-10-20" in manifest[pid1]
+
+
+def test_processed_sources_in_prompt(tmp_path, monkeypatch):
+    """Processed files appear in the source digest so the LLM skips them."""
+    pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
+    sentinel_runner.record_processed_sources(
+        "movement-watch", {pid1: ["2026-08-10-09-30"]}, root=str(tmp_path))
+
+    definition = {"sources": [{"kind": "transcripts", "mode": "read"}]}
+    digest = sentinel_runner._gather_sources(
+        definition, [], now="2026-08-15", sentinel_name="movement-watch",
+        root=str(tmp_path))
+    assert "2026-08-10-09-30" in digest
+    assert "ALREADY PROCESSED" in digest
+
+
+def test_adapter_sources_exempt_from_normalized_dedup(tmp_path, monkeypatch):
+    """Adapter sources (tracker-truth) are exempt from normalized source dedup."""
+    pid1, _ = _seed_two_programs(tmp_path, monkeypatch)
+
+    program_lib.append_observation(
+        pid1, kind="status-signal", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-123",
+        claim="Tracker reports status 'In Development'.",
+        root=str(tmp_path))
+
+    appended = program_lib.append_observation(
+        pid1, kind="status-signal", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-123",
+        claim="Tracker reports status 'PR Review'.",
+        root=str(tmp_path))
+    assert appended, "Adapter sources with different claims should both record"

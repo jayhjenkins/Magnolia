@@ -38,6 +38,8 @@ _DRIFT_FRACTION = 0.8      # >this fraction of an age/policy limit -> drifting
 _DEFAULT_POLICY_DAYS = 14  # register item age window when none is declared
 _DEFAULT_TOLERANCE = 8     # target series tolerance when none is declared
 _BROKEN_MULTIPLIER = 2     # diff beyond this multiple of tolerance -> broken
+_ARCHIVE_COOLDOWN_DAYS = 7 # don't propose archive within this many days of terminal phase entry
+_TRACKER_STALE_DAYS = 3    # tracker observations older than this are unreliable
 
 
 def _worse(a, b):
@@ -462,7 +464,7 @@ def _open_propose_update_ops(task_lib, program_id):
     Never raises - an unreadable card is simply skipped.
     """
     ops = set()
-    for t in task_lib.list_tasks(queue="human", status="open"):
+    for t in task_lib.list_tasks(queue=None, status="open"):
         if t.get("task_type") != "cadence-propose-update":
             continue
         if program_id not in (t.get("tags") or []):
@@ -478,19 +480,20 @@ def _open_propose_update_ops(task_lib, program_id):
     return ops
 
 
-def _rejected_propose_update_ops(task_lib, program_id):
-    """Return {op: rejection_date} for recently cancelled cadence-propose-update
-    cards tagged with program_id (the rejection-aware half of the dedupe fence).
+def _resolved_propose_update_ops(task_lib, program_id):
+    """Return {op: resolution_date} for recently resolved cadence-propose-update
+    cards tagged with program_id (the resolution-aware half of the dedupe fence).
 
-    Scans the archive for cancelled proposals. For each match, records the
-    rejection date (the ``updated`` field truncated to YYYY-MM-DD). If the same
-    op was rejected multiple times, keeps the latest date. The caller compares
-    this date against the latest observation date in the program body: if no new
-    observations arrived after the rejection, the proposal is suppressed.
+    Scans the archive for cancelled AND completed proposals. For each match,
+    records the resolution date (the ``updated`` field truncated to YYYY-MM-DD).
+    If the same op was resolved multiple times, keeps the latest date. The
+    caller compares this date against the latest observation date in the program
+    body: if no new observations arrived after the resolution, the proposal is
+    suppressed.
     """
-    rejected = {}
+    resolved = {}
     for t in task_lib.list_archived(limit=200):
-        if t.get("status") != "cancelled":
+        if t.get("status") not in ("cancelled", "done"):
             continue
         if t.get("task_type") != "cadence-propose-update":
             continue
@@ -505,15 +508,15 @@ def _rejected_propose_update_ops(task_lib, program_id):
         op = proposal.get("op") if isinstance(proposal, dict) else None
         if not op:
             continue
-        rej_date = (fm.get("updated") or fm.get("created") or "")[:10]
-        if op not in rejected or rej_date > rejected[op]:
-            rejected[op] = rej_date
-    return rejected
+        res_date = (fm.get("updated") or fm.get("created") or "")[:10]
+        if op not in resolved or res_date > resolved[op]:
+            resolved[op] = res_date
+    return resolved
 
 
-def _suppressed_by_rejection(op, rejected_prop_ops, body):
-    """Return True if ``op`` was rejected and no new observations arrived since."""
-    rej_date_str = rejected_prop_ops.get(op)
+def _suppressed_by_resolution(op, resolved_prop_ops, body):
+    """Return True if ``op`` was resolved (cancelled or completed) and no new observations arrived since."""
+    rej_date_str = resolved_prop_ops.get(op)
     if not rej_date_str:
         return False
     latest_obs = _latest_observation_date(body)
@@ -540,7 +543,7 @@ def _open_birth_candidate_ids(task_lib, intake_program_id):
     card is skipped. Never raises.
     """
     ids = set()
-    for t in task_lib.list_tasks(queue="human", status="open"):
+    for t in task_lib.list_tasks(queue=None, status="open"):
         if t.get("task_type") != "cadence-propose-update":
             continue
         if intake_program_id not in (t.get("tags") or []):
@@ -824,6 +827,117 @@ def _llm_evaluate_proposal(program_title, current_phase, target_phase,
     return True, reason
 
 
+def _llm_evaluate_tracker_proposal(program_title, tracker_key, current_status,
+                                    evidence_claims):
+    """Ask Claude whether evidence represents genuine active work vs incidental.
+
+    Returns (approved, reason). Fail-open: returns (True, "evaluation
+    unavailable") on any dispatch failure.
+    """
+    claims_text = "\n".join(f"- {c}" for c in evidence_claims[-5:]) if evidence_claims else "(none)"
+    prompt = (
+        "You are evaluating whether evidence from meetings and documents "
+        "represents genuine active work on a product initiative, or just "
+        "incidental mentions (sharing for awareness, referencing in passing, "
+        "discussing without doing, etc.).\n\n"
+        f"Program: {program_title}\n"
+        f"Tracker: {tracker_key}\n"
+        f"Tracker status: '{current_status}' (considered inactive)\n\n"
+        f"Evidence claims:\n{claims_text}\n\n"
+        "Does this evidence represent genuine active work that contradicts "
+        "the tracker status? Reply with exactly YES or NO on the first line, "
+        "then a one-sentence reason on the second line."
+    )
+    import json as _json
+    import profile_lib
+    model = profile_lib.resolve_model(_LLM_EVAL_TIER)
+    env = platform_lib.headless_claude_env()
+    cmd = [
+        platform_lib.resolve_claude(), "-p", prompt,
+        "--model", model, "--output-format", "json",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, cwd=os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))),
+            env=env, capture_output=True, text=True,
+            timeout=_LLM_EVAL_TIMEOUT,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write(f"[cadence] LLM tracker eval failed ({exc.__class__.__name__}), fail-open\n")
+        return True, "evaluation unavailable"
+    if proc.returncode != 0:
+        sys.stderr.write(f"[cadence] LLM tracker eval exited {proc.returncode}, fail-open\n")
+        return True, "evaluation unavailable"
+    out = (proc.stdout or "").strip()
+    try:
+        envelope = _json.loads(out)
+        if isinstance(envelope, dict) and "result" in envelope:
+            out = envelope["result"]
+    except (ValueError, _json.JSONDecodeError):
+        pass
+    first_line = (out or "").strip().split("\n")[0].strip().upper()
+    reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
+    if first_line.startswith("NO"):
+        return False, reason
+    return True, reason
+
+
+def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
+                                    observations):
+    """Ask Claude whether a program is genuinely ready to archive.
+
+    Returns (approved, reason). Fail-open: returns (True, "evaluation
+    unavailable") on any dispatch failure.
+    """
+    obs_text = "\n".join(f"- {o}" for o in observations[-5:]) if observations else "(none)"
+    cite_text = ", ".join(str(c) for c in citations) if citations else "(none)"
+    prompt = (
+        "You are evaluating whether a product initiative has genuinely "
+        "completed and is ready to archive.\n\n"
+        f"Program: {program_title}\n"
+        f"Reason for archive: {archive_reason}\n"
+        f"Evidence: {cite_text}\n\n"
+        f"Recent observations:\n{obs_text}\n\n"
+        "Is this program genuinely complete and ready to archive, or might "
+        "the completion signal be premature? Reply with exactly YES or NO "
+        "on the first line, then a one-sentence reason on the second line."
+    )
+    import json as _json
+    import profile_lib
+    model = profile_lib.resolve_model(_LLM_EVAL_TIER)
+    env = platform_lib.headless_claude_env()
+    cmd = [
+        platform_lib.resolve_claude(), "-p", prompt,
+        "--model", model, "--output-format", "json",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, cwd=os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))),
+            env=env, capture_output=True, text=True,
+            timeout=_LLM_EVAL_TIMEOUT,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write(f"[cadence] LLM archive eval failed ({exc.__class__.__name__}), fail-open\n")
+        return True, "evaluation unavailable"
+    if proc.returncode != 0:
+        sys.stderr.write(f"[cadence] LLM archive eval exited {proc.returncode}, fail-open\n")
+        return True, "evaluation unavailable"
+    out = (proc.stdout or "").strip()
+    try:
+        envelope = _json.loads(out)
+        if isinstance(envelope, dict) and "result" in envelope:
+            out = envelope["result"]
+    except (ValueError, _json.JSONDecodeError):
+        pass
+    first_line = (out or "").strip().split("\n")[0].strip().upper()
+    reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
+    if first_line.startswith("NO"):
+        return False, reason
+    return True, reason
+
+
 def _gather_observation_claims(body):
     """Extract observation claims from a program body for LLM evaluation."""
     claims = []
@@ -890,20 +1004,23 @@ def _propose_phase_advance(fm, type_entry, body):
 
 _PHASE_EVIDENCE_KINDS = frozenset({"status-signal", "completion", "commitment"})
 
+_PHASE_ADVANCE_KINDS = frozenset({"completion", "commitment"})
+
 
 def _has_phase_evidence(body, since=None):
     """True when the body carries a FRESH, INTERPRETIVE observation strong enough
     to earn a phase-advance proposal.
 
-    Interpretive = an observation whose `source` does NOT start with `adapter:`
-    (adapter observations are the fact door's domain). The kind must be in
-    _PHASE_EVIDENCE_KINDS (status-signal, completion, or commitment). Excluded
-    kinds (risk, blocker, date-change, metric, capture) are context, not evidence
-    of forward motion. When `since` (an ISO date) is given, the observation must
-    be dated on/after it. Tolerant: an unparseable body yields no match.
+    Only `completion` and `commitment` observations qualify. `status-signal`
+    (activity was mentioned) is NOT sufficient -- it records that work is
+    happening, not that a phase transition occurred. The LLM eval gate downstream
+    still sees all observation kinds as context, but the proposal gate here
+    requires a stronger signal. Adapter observations (the fact door's domain) are
+    excluded. When `since` (an ISO date) is given, the observation must be dated
+    on/after it. Tolerant: an unparseable body yields no match.
     """
     for date_str, kind, source, _claim in _iter_observations(body):
-        if kind not in _PHASE_EVIDENCE_KINDS or source.startswith("adapter:"):
+        if kind not in _PHASE_ADVANCE_KINDS or source.startswith("adapter:"):
             continue
         if since and (not date_str or date_str < since):
             continue
@@ -911,7 +1028,7 @@ def _has_phase_evidence(body, since=None):
     return False
 
 
-def _propose_tracker_update(fm, type_entry, body):
+def _propose_tracker_update(fm, type_entry, body, now=None):
     """Detect tracker-status-mismatch: Jira reports inactive but evidence says active.
 
     Returns {"op": "update-tracker", "tracker_key": key, "current_status": status,
@@ -937,6 +1054,17 @@ def _propose_tracker_update(fm, type_entry, body):
         return None
     if tracker_status.lower() not in _INACTIVE_STATUSES:
         return None
+
+    if tracker_date and now is not None:
+        try:
+            tracker_obs_date = date.fromisoformat(tracker_date)
+            if (_to_date(now) - tracker_obs_date).days > _TRACKER_STALE_DAYS:
+                sys.stderr.write(
+                    f"[cadence] Tracker data stale ({tracker_date}), "
+                    f"skipping mismatch proposal\n")
+                return None
+        except (ValueError, TypeError):
+            pass
 
     cutoff = None
     if tracker_date:
@@ -1054,11 +1182,11 @@ def _build_archive_description(mutation, program_id):
     )
 
 
-def _propose_archive(fm, type_entry, body):
+def _propose_archive(fm, type_entry, body, now=None):
     """Propose archive mutation if ANY fact indicates completion.
 
     Facts checked:
-    1. Program phase is terminal
+    1. Program phase is terminal (with cool-down after entry)
     2. A "did-it-work" checkpoint is verified/met
     3. A completion observation cites a tracker as closed
 
@@ -1069,6 +1197,12 @@ def _propose_archive(fm, type_entry, body):
     # Fact 1: Terminal phase
     phase = fm.get("phase")
     if phase and program_lib._terminal_phase(type_entry, phase):
+        if now is not None:
+            entered = _phase_entered_date(fm, phase)
+            if entered is not None:
+                days_at_terminal = (_to_date(now) - entered).days
+                if days_at_terminal < _ARCHIVE_COOLDOWN_DAYS:
+                    return None
         return {
             "op": "archive",
             "reason": f"reached terminal phase: {phase}",
@@ -1288,7 +1422,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
     emitted = []
     open_tags = None        # lazily computed on the first escalate fire
     open_prop_ops = None    # lazily computed on the first propose-update fire
-    rejected_prop_ops = None  # lazily computed: {op: rejection_date} from archive
+    resolved_prop_ops = None  # lazily computed: {op: rejection_date} from archive
     open_agent_types = None  # lazily computed on the first produce-artifact fire
     open_birth_ids = None   # lazily computed on the first candidate-ripe fire
     # Default now to today if not provided (for testing and background runs)
@@ -1384,7 +1518,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             # The ARCHIVE door (inc4b): propose archiving when facts indicate completion.
             # The mutation function is the real gate: _propose_archive checks terminal
             # phase, verified checkpoints, and tracker-closed observations.
-            mutation = _propose_archive(fm, type_entry, body or "")
+            mutation = _propose_archive(fm, type_entry, body or "", now=now)
             if not mutation:
                 continue
             import task_lib
@@ -1392,9 +1526,17 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 open_prop_ops = _open_propose_update_ops(task_lib, program_id)
             if mutation["op"] in open_prop_ops:
                 continue  # an open proposal for the same op already exists -> dedupe
-            if rejected_prop_ops is None:
-                rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
-            if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
+            if resolved_prop_ops is None:
+                resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_resolution(mutation["op"], resolved_prop_ops, body):
+                continue
+            obs_claims = _gather_observation_claims(body)
+            approved, reason = _llm_evaluate_archive_proposal(
+                title, mutation.get("reason", ""), mutation.get("citations", []),
+                obs_claims)
+            if not approved:
+                sys.stderr.write(
+                    f"[cadence] LLM rejected archive {program_id}: {reason}\n")
                 continue
             task_id, _ = task_lib.create_task(
                 title=f"{title}: archive?",
@@ -1426,9 +1568,17 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 open_prop_ops = _open_propose_update_ops(task_lib, program_id)
             if mutation["op"] in open_prop_ops:
                 continue  # an open proposal for the same op already exists -> dedupe
-            if rejected_prop_ops is None:
-                rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
-            if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
+            if resolved_prop_ops is None:
+                resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_resolution(mutation["op"], resolved_prop_ops, body):
+                continue
+            obs_claims = _gather_observation_claims(body)
+            approved, reason = _llm_evaluate_archive_proposal(
+                title, mutation.get("reason", ""), mutation.get("citations", []),
+                obs_claims)
+            if not approved:
+                sys.stderr.write(
+                    f"[cadence] LLM rejected silent archive {program_id}: {reason}\n")
                 continue
             task_id, _ = task_lib.create_task(
                 title=f"{title}: archive?",
@@ -1445,7 +1595,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             open_prop_ops.add(mutation["op"])
 
         elif action == "propose-update" and on == "tracker-status-mismatch":
-            mutation = _propose_tracker_update(fm, type_entry, body or "")
+            mutation = _propose_tracker_update(fm, type_entry, body or "", now=now)
             if not mutation:
                 continue
             import task_lib
@@ -1453,9 +1603,18 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 open_prop_ops = _open_propose_update_ops(task_lib, program_id)
             if mutation["op"] in open_prop_ops:
                 continue
-            if rejected_prop_ops is None:
-                rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
-            if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
+            if resolved_prop_ops is None:
+                resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_resolution(mutation["op"], resolved_prop_ops, body):
+                continue
+            obs_claims = mutation.get("evidence_claims", [])
+            approved, reason = _llm_evaluate_tracker_proposal(
+                title, mutation["tracker_key"], mutation.get("current_status", "?"),
+                obs_claims)
+            if not approved:
+                sys.stderr.write(
+                    f"[cadence] LLM rejected tracker-mismatch {program_id} "
+                    f"{mutation['tracker_key']}: {reason}\n")
                 continue
             task_id, _ = task_lib.create_task(
                 title=f"{title}: update {mutation['tracker_key']} from '{mutation.get('current_status', '?')}'?",
@@ -1480,9 +1639,9 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 open_prop_ops = _open_propose_update_ops(task_lib, program_id)
             if mutation["op"] in open_prop_ops:
                 continue  # an open proposal for the same op already exists -> dedupe
-            if rejected_prop_ops is None:
-                rejected_prop_ops = _rejected_propose_update_ops(task_lib, program_id)
-            if _suppressed_by_rejection(mutation["op"], rejected_prop_ops, body):
+            if resolved_prop_ops is None:
+                resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_resolution(mutation["op"], resolved_prop_ops, body):
                 continue
             target_phase_id = mutation.get("to", "")
             phase_desc = ""
