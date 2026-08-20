@@ -63,8 +63,8 @@
       "phases": [
         { "id": "define", "label": "Define", "max_age_days": 14, "exit_checkpoint": "define-exit", "description": "Scoping and defining the rock. Success criteria and milestones being established." },
         { "id": "build",  "label": "Build",  "max_age_days": 42, "exit_checkpoint": "build-exit", "description": "Active development and execution toward the rock's goals. Work is in progress." },
-        { "id": "beta",   "label": "Beta",   "max_age_days": 21, "exit_checkpoint": "beta-exit", "description": "Feature live with a limited set of early-adopter customers. Gathering feedback and iterating." },
-        { "id": "ga",     "label": "GA", "terminal": true, "description": "Generally available to a broad customer base. Multiple customers actively using the feature, not just one early adopter." }
+        { "id": "beta",   "label": "Beta",   "max_age_days": 21, "exit_checkpoint": "beta-exit", "description": "Changes deployed and being validated against success metrics. Metric targets not yet met." },
+        { "id": "ga",     "label": "GA", "terminal": true, "description": "Rock complete. Success metrics achieved or measurably close to target. All key checkpoints met and no critical blockers remain." }
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],

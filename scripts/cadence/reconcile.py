@@ -771,25 +771,55 @@ _LLM_EVAL_TIER = "deep"
 
 
 def _llm_evaluate_proposal(program_title, current_phase, target_phase,
-                            phase_description, observations):
+                            phase_description, observations,
+                            frontmatter=None, body=None):
     """Ask Claude whether evidence supports advancing to the target phase.
 
     Returns (approved, reason). Fail-open: returns (True, "evaluation
     unavailable") on any dispatch failure so the proposal still reaches the
     human for a decision.
     """
-    obs_text = "\n".join(f"- {o}" for o in observations[-5:]) if observations else "(none)"
+    obs_text = "\n".join(f"- {o}" for o in observations[-15:]) if observations else "(none)"
+    context_parts = []
+    if frontmatter:
+        drift = frontmatter.get("drift", "")
+        if drift:
+            context_parts.append(f"Current drift status: {drift}")
+        checkpoints = frontmatter.get("checkpoints") or []
+        if checkpoints:
+            cp_lines = []
+            for cp in checkpoints:
+                label = cp.get("label", cp.get("id", "?"))
+                status = cp.get("status", "?")
+                due = cp.get("due", "")
+                cp_line = f"  - {label}: {status}"
+                if due:
+                    cp_line += f" (due {due})"
+                cp_lines.append(cp_line)
+            context_parts.append("Checkpoints:\n" + "\n".join(cp_lines))
+    if body:
+        cycle_lines = _extract_recent_cycles(body, max_cycles=4)
+        if cycle_lines:
+            context_parts.append("Recent cycle verdicts:\n" + "\n".join(
+                f"  - {c}" for c in cycle_lines))
+    context_section = ""
+    if context_parts:
+        context_section = "\nProgram health:\n" + "\n".join(context_parts) + "\n"
     prompt = (
         "You are evaluating whether a product initiative should advance to "
-        "the next phase based on the evidence collected from meeting "
-        "transcripts and project trackers.\n\n"
+        "the next phase. You must weigh ALL the evidence -- including "
+        "negative signals (risks, blockers, overdue checkpoints, broken "
+        "drift) -- not just the latest positive observations.\n\n"
         f"Program: {program_title}\n"
         f"Current phase: {current_phase}\n"
         f"Proposed phase: {target_phase}\n"
-        f"What '{target_phase}' means: {phase_description}\n\n"
-        f"Recent evidence:\n{obs_text}\n\n"
-        "Based on this evidence, does the program meet the criteria for "
-        f"'{target_phase}'? Reply with exactly YES or NO on the first line, "
+        f"What '{target_phase}' means: {phase_description}\n"
+        f"{context_section}\n"
+        f"Evidence (oldest to newest):\n{obs_text}\n\n"
+        "Based on ALL the evidence above -- including health status, "
+        "checkpoint progress, and cycle history -- does the program meet "
+        f"the criteria for '{target_phase}'?\n"
+        "Reply with exactly YES or NO on the first line, "
         "then a one-sentence reason on the second line."
     )
     import json as _json
@@ -825,6 +855,28 @@ def _llm_evaluate_proposal(program_title, current_phase, target_phase,
     if first_line.startswith("NO"):
         return False, reason
     return True, reason
+
+
+def _extract_recent_cycles(body, max_cycles=4):
+    """Extract the most recent cycle verdicts from the ## Cycles section."""
+    lines = []
+    in_cycles = False
+    for line in (body or "").split("\n"):
+        if line.strip().startswith("## Cycles"):
+            in_cycles = True
+            continue
+        if in_cycles:
+            if line.strip().startswith("## ") and not line.strip().startswith("## Cycles"):
+                break
+            stripped = line.strip()
+            if stripped.startswith("### "):
+                lines.append(stripped[4:].strip())
+    return lines[-max_cycles:] if lines else []
+
+
+_LLM_EVAL_KINDS = frozenset({
+    "status-signal", "completion", "commitment", "risk", "blocker",
+})
 
 
 def _llm_evaluate_tracker_proposal(program_title, tracker_key, current_status,
@@ -942,7 +994,7 @@ def _gather_observation_claims(body):
     """Extract observation claims from a program body for LLM evaluation."""
     claims = []
     for _date, kind, source, claim in _iter_observations(body or ""):
-        if kind in _PHASE_EVIDENCE_KINDS and not source.startswith("adapter:"):
+        if kind in _LLM_EVAL_KINDS and not source.startswith("adapter:"):
             claims.append(claim)
     return claims
 
@@ -1653,7 +1705,8 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 obs_claims = _gather_observation_claims(body)
                 approved, reason = _llm_evaluate_proposal(
                     title, fm.get("phase", "?"), target_phase_id,
-                    phase_desc, obs_claims)
+                    phase_desc, obs_claims,
+                    frontmatter=fm, body=body)
                 if not approved:
                     sys.stderr.write(
                         f"[cadence] LLM rejected {program_id} "

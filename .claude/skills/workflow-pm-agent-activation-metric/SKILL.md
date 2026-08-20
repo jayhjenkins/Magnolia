@@ -15,7 +15,7 @@ Produce two dated markdown reports (in-flight + next-up) with a per-card table a
 
 ## When to Use
 
-- When Jay asks for updated PM agent activation numbers
+- When the user asks for updated PM agent activation numbers
 - When preparing for leadership updates on AI adoption across product/engineering
 - When comparing PM-OS penetration against the broader AI-DLC adoption
 
@@ -130,7 +130,7 @@ After writing both files, print a concise summary:
 - Next-Up: X cards total, Y PM-OS (Z%), A AI-Enabled (B%)
 - Cards carried forward from prior run: N (unchanged since {prior_date})
 - Cards freshly assessed this run: M (new, updated, or previously Unconfirmed)
-- Any Unconfirmed rows that need Jay's direct call (list them)
+- Any Unconfirmed rows that need the user's direct call (list them)
 
 ---
 
@@ -196,7 +196,7 @@ These are the rules sub-agents must apply. Copy them verbatim into each sub-agen
 
 **Step 6 — Thin/empty → ❌ No.** One-paragraph descriptions, raw bullet fragments, pasted data tables, "items I believe we need" lists, empty descriptions, bug-bucket placeholders — AND child tickets (if checked) also show no AI signals. Validated as correct: INT-11224, VNT-35168, VNT-42879, VNT-36472, VNT-44177.
 
-**Step 7 — Genuinely ambiguous → ⚠️ Unconfirmed.** Some structure but noticeably thinner than the team's normal template, no citation either way, and child tickets inconclusive or not checked. Note what's missing; let Jay resolve.
+**Step 7 — Genuinely ambiguous → ⚠️ Unconfirmed.** Some structure but noticeably thinner than the team's normal template, no citation either way, and child tickets inconclusive or not checked. Note what's missing; let the user resolve.
 
 ---
 
@@ -204,7 +204,7 @@ These are the rules sub-agents must apply. Copy them verbatim into each sub-agen
 
 | Mistake | Why it's wrong | Correct approach |
 |---|---|---|
-| Calling a Home card "No" for PM-OS because description is thin | Jira descriptions can be stale and predate real ship-it work | Use ⚠️ Unconfirmed; let Jay confirm |
+| Calling a Home card "No" for PM-OS because description is thin | Jira descriptions can be stale and predate real ship-it work | Use ⚠️ Unconfirmed; let the user confirm |
 | Requiring an explicit citation for AI-Enabled | Team-template richness IS evidence; over-conservative calls were corrected 5 times in the original pass | Apply the template-richness test |
 | Forcing PM-OS/AI verdict on infra/QA tickets | Test backfill, logging, bug buckets aren't product-spec-driven | Use ➖ N/A |
 | Guessing at auth-walled doc contents | SharePoint, GHE Enterprise, GitBook links return 401/empty shells | Classify the link type; don't guess at contents |
@@ -218,7 +218,7 @@ These are the rules sub-agents must apply. Copy them verbatim into each sub-agen
 - Every Feature card in both status buckets is represented in exactly one row
 - Each row has a concrete, evidence-based Basis (not "seems like it" or "probably")
 - Stats section percentages are mathematically correct
-- Unconfirmed rows are explicitly called out for Jay's resolution
+- Unconfirmed rows are explicitly called out for the user's resolution
 
 ## Related Skills
 
