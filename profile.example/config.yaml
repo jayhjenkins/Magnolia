@@ -3,6 +3,9 @@ models:
   judge: "claude-opus-4-8"
   parser: "claude-haiku-4-5"
   cost_posture: "balanced"   # low | balanced | high
+# CLI harness: which headless CLI to use for LLM dispatch.
+# claude (default) | codex
+harness: "claude"
 active_skill_packs: ["core"]
 server:
   port: 8742

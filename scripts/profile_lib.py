@@ -450,8 +450,29 @@ TIER_MODELS = {
     "standard": "sonnet",
     "deep": "opus",
 }
+CODEX_TIER_MODELS = {
+    "light": "gpt-5.6-luna",
+    "standard": "gpt-5.6-terra",
+    "deep": "gpt-5.6-sol",
+}
+HARNESS_TIER_MAPS = {
+    "claude": TIER_MODELS,
+    "codex": CODEX_TIER_MODELS,
+}
 _POSTURE_SHIFT = {"low": -1, "balanced": 0, "high": 1}
 _DEFAULT_TIER = "standard"
+
+
+def harness(root=None):
+    """The active CLI harness: 'claude' (default) or 'codex'."""
+    return (config(root).get("harness") or "claude").lower()
+
+
+def set_harness(value, root=None):
+    """Set config.yaml['harness'], preserving siblings + comments."""
+    def mutate(doc):
+        doc["harness"] = value
+    _update_yaml("config.yaml", mutate, root)
 
 
 def cost_posture(root=None):
@@ -464,19 +485,22 @@ def resolve_model(worker_tier, posture=None, task_override=None, root=None):
     Precedence: task_override (a model id OR a tier name) wins. Otherwise the
     worker's declared tier is shifted by the posture (low -1 / balanced 0 /
     high +1) and clamped to [light, deep]. Unknown tier -> 'standard';
-    unknown posture -> 'balanced'."""
+    unknown posture -> 'balanced'. The active harness determines the
+    tier-to-model mapping (Claude vs Codex model families)."""
+    active = harness(root)
+    tier_map = HARNESS_TIER_MAPS.get(active, TIER_MODELS)
     if task_override:
-        # Override may be a tier name OR a raw model id; tier names and model ids
-        # are disjoint keyspaces, so check the tier map first.
-        if task_override in TIER_MODELS:            # a tier name
-            return TIER_MODELS[task_override]
-        return task_override                        # an explicit model id
+        if task_override in tier_map:
+            return tier_map[task_override]
+        if task_override in TIER_ORDER:
+            return tier_map[task_override]
+        return task_override
     tier = worker_tier if worker_tier in TIER_ORDER else _DEFAULT_TIER
     if posture is None:
         posture = cost_posture(root)
     shift = _POSTURE_SHIFT.get(posture, 0)
     idx = max(0, min(len(TIER_ORDER) - 1, TIER_ORDER.index(tier) + shift))
-    return TIER_MODELS[TIER_ORDER[idx]]
+    return tier_map[TIER_ORDER[idx]]
 
 
 if __name__ == "__main__":

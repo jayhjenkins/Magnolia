@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import harness_lib            # noqa: E402
+import platform_lib           # noqa: E402
 import profile_lib            # noqa: E402
 import transcript_post        # noqa: E402
 
@@ -126,26 +128,42 @@ def _prompt_ids(state_or_ids):
 
 
 def _fetch_new_meetings(state_or_ids, root=None):
-    """THE mockable seam. Shell out to claude -p + Granola MCP; return a list of
-    new meeting dicts. Validates JSON; one retry on malformed; [] on hard failure.
+    """THE mockable seam. Shell out to the active harness + Granola MCP; return a
+    list of new meeting dicts. Validates JSON; one retry on malformed; [] on hard
+    failure.
 
     Accepts the full state dict (keyed by UUID) or a bare set/iterable of ids.
     `seen` (the FULL set) is the authoritative local dedup; the prompt only
     carries a bounded recent slice."""
     seen = set(state_or_ids)
-    cmd = ["claude", "-p", _fetch_prompt(_prompt_ids(state_or_ids)),
-           "--model", _model(root), "--output-format", "json",
-           "--allowedTools", GRANOLA_TOOLS,
-           "--permission-mode", "bypassPermissions", "--max-turns", "30"]
+    prompt = _fetch_prompt(_prompt_ids(state_or_ids))
+    model = _model(root)
+    cmd, harness_name = harness_lib.build_oneshot_cmd(
+        prompt, model,
+        allowed_tools=GRANOLA_TOOLS,
+        permission_mode="bypassPermissions",
+        max_turns=30,
+    )
+    # Granola needs MCP; fall back to Claude if active harness lacks it.
+    if harness_lib.requires_claude_fallback(harness_name, requires_mcp=True):
+        log.info("harness=%s but Granola needs MCP - falling back to Claude", harness_name)
+        cmd, harness_name = harness_lib.build_oneshot_cmd(
+            prompt, model,
+            harness="claude",
+            allowed_tools=GRANOLA_TOOLS,
+            permission_mode="bypassPermissions",
+            max_turns=30,
+        )
     env = transcript_post._hook_env()    # strips CLAUDECODE so nested claude -p runs
     for attempt in (1, 2):
         try:
             out = subprocess.run(cmd, capture_output=True, text=True,
                                  timeout=FETCH_TIMEOUT, env=env, cwd=str(profile_lib.PM_OS_DIR))
         except Exception as exc:
-            log.error("claude -p fetch failed (attempt %d): %s", attempt, exc)
+            log.error("CLI fetch failed (attempt %d): %s", attempt, exc)
             continue
-        meetings = _parse_fetch_output(out.stdout)
+        raw = harness_lib.unwrap_oneshot_result(out.stdout, harness_name)
+        meetings = _parse_fetch_output(raw)
         if meetings is not None:
             return [m for m in meetings if m.get("id") not in seen and m.get("transcript")]
         log.warning("malformed fetch JSON (attempt %d): rc=%s stderr=%.500s",

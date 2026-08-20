@@ -21,6 +21,7 @@ from typing import Optional
 
 # ── Engine wiring ────────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import harness_lib  # noqa: E402
 import platform_lib  # noqa: E402
 import profile_lib  # noqa: E402
 
@@ -101,28 +102,32 @@ def _keyword_classify(title: str, filename_hint: str = "") -> str:
 
 
 def classify_domain(title: str, content_preview: str, filename_hint: str = "") -> str:
-    """Classify a transcript into one of the valid domain paths via Claude.
+    """Classify a transcript into one of the valid domain paths via the LLM.
     Falls back to keyword rules on any failure."""
     prompt = _build_classify_prompt(title, content_preview)
     try:
-        claude = platform_lib.resolve_claude()
+        model = profile_lib.resolve_model("light")
+        cmd, harness_name = harness_lib.build_oneshot_cmd(
+            prompt, model, max_turns=1,
+        )
+        env = platform_lib.headless_harness_env(harness_name)
         result = subprocess.run(
-            [claude, "-p", prompt, "--max-turns", "1"],
-            env=platform_lib.headless_claude_env(),
+            cmd,
+            env=env,
             capture_output=True, text=True, timeout=30,
             cwd=str(profile_lib.PM_OS_DIR),
         )
         if result.returncode == 0 and result.stdout.strip():
-            raw = result.stdout.strip().lower()
+            raw = (harness_lib.unwrap_oneshot_result(result.stdout, harness_name) or "").strip().lower()
             raw = re.sub(r'["\'\n]', "", raw).strip().rstrip(".")
             if raw in VALID_DOMAINS:
-                log.info("    Claude classified -> %s", raw)
+                log.info("    LLM classified -> %s", raw)
                 return raw
-            log.warning("    Claude returned invalid domain %r, falling back to keywords", raw)
+            log.warning("    LLM returned invalid domain %r, falling back to keywords", raw)
         else:
-            log.warning("    Claude classify failed (rc=%d), falling back to keywords", result.returncode)
+            log.warning("    LLM classify failed (rc=%d), falling back to keywords", result.returncode)
     except Exception as exc:
-        log.warning("    Claude classify error: %s, falling back to keywords", exc)
+        log.warning("    LLM classify error: %s, falling back to keywords", exc)
 
     domain = _keyword_classify(title, filename_hint=filename_hint)
     log.info("    Keyword classified -> %s", domain)

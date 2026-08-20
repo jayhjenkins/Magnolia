@@ -25,6 +25,8 @@ import atexit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import platform_lib
+import profile_lib
+import harness_lib
 from datetime import date
 
 # ─── LangFuse flush registration (graceful degradation) ─────────────────────
@@ -118,33 +120,18 @@ def _get_system_prompt():
 # ─── LLM Calls ──────────────────────────────────────────────────────────────
 
 def call_claude(system: str, user: str, model: str = PARSER_MODEL, timeout: int = 120) -> str:
-    """Run a one-shot headless `claude -p` call and return the printed result.
+    """Run a one-shot headless CLI call and return the printed result.
 
-    Mirrors the dispatch / jira_publish pattern: strip CLAUDE_* env vars to
-    avoid nested-session detection and keep the claude binary on PATH. Used for
-    the lightweight structured-output calls (task parse, cron parse, worker
-    route), which run on Claude Haiku.
-
-    The call is a clean text completion, not an agent loop:
-    - `--system-prompt` replaces the default agentic system prompt with ours,
-    - `--tools ""` disables every tool,
-    - `--setting-sources ""` loads no settings, so no project/user hooks fire
-      (e.g. the SessionStart skill-usage injection) — the call stays hermetic,
-    - `--max-turns 2` (the CLI reports an error at 1 even for a single reply).
+    Delegates to harness_lib.build_hermetic_cmd so the active CLI harness
+    (claude or codex) is used transparently. The call is a clean text
+    completion, not an agent loop — no tools, no hooks.
     """
-    # Strip Claude env vars to prevent nested-session detection; ensure the
-    # claude binary's dirs are on PATH (important under cron / task_server).
-    env = platform_lib.headless_claude_env()
-
-    cmd = [
-        platform_lib.resolve_claude(), "-p", user or system,
-        "--model", model,
-        "--max-turns", "2",
-        "--tools", "",
-        "--setting-sources", "",
-    ]
-    if user:
-        cmd += ["--system-prompt", system]
+    h = profile_lib.harness()
+    env = platform_lib.headless_harness_env(h)
+    cmd, harness_name = harness_lib.build_hermetic_cmd(
+        user or system, model,
+        system_prompt=system if user else None,
+    )
 
     result = subprocess.run(
         cmd,
@@ -155,8 +142,10 @@ def call_claude(system: str, user: str, model: str = PARSER_MODEL, timeout: int 
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"claude CLI failed (exit {result.returncode}): {result.stderr.strip()[:300]}"
+            f"CLI failed (exit {result.returncode}): {result.stderr.strip()[:300]}"
         )
+    if harness_name == "codex":
+        return harness_lib.unwrap_oneshot_result(result.stdout, "codex") or ""
     return result.stdout.strip()
 
 

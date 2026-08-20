@@ -532,11 +532,18 @@ def build_profile(root=None):
         w["model"] = profile_lib.resolve_model(w.get("tier"), posture=posture_level)
     model_posture = {"level": posture_level, "workers": workers}
 
+    harness_value = profile_lib.harness(root)
+    harness_section = {
+        "active": harness_value,
+        "available": ["claude", "codex"],
+    }
+
     return {
         "identity": identity,
         "integrations": integrations,
         "voice": voice,
         "packs": packs,
+        "harness": harness_section,
         "model_posture": model_posture,
     }
 
@@ -1855,6 +1862,26 @@ def handle_set_autonomy(handler):
     enabled = body["enabled"]
     profile_lib.set_autonomy_enforcement(enabled)
     _json_response(handler, {"ok": True, "enabled": enabled})
+
+
+def handle_get_harness(handler):
+    """GET /api/config/harness — current active CLI harness."""
+    _json_response(handler, {"active": profile_lib.harness()})
+
+
+def handle_set_harness(handler):
+    """PUT /api/config/harness {"active": "claude"|"codex"} — switch the CLI harness."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    active = body.get("active")
+    if active not in ("claude", "codex"):
+        _error_response(handler, "Body must include 'active' as 'claude' or 'codex'", status=400)
+        return
+    profile_lib.set_harness(active)
+    _json_response(handler, {"ok": True, "active": active})
 
 
 def handle_demote(handler, task_type):
@@ -3619,6 +3646,14 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/config/autonomy" and method == "POST":
             handle_set_autonomy(self)
+            return True
+
+        if path == "/api/config/harness" and method == "GET":
+            handle_get_harness(self)
+            return True
+
+        if path == "/api/config/harness" and method == "PUT":
+            handle_set_harness(self)
             return True
 
         if path == "/api/profile" and method == "GET":

@@ -107,6 +107,53 @@ def resolve_claude(path=None):
     return "claude"
 
 
+def resolve_codex(path=None):
+    """Absolute path to the codex CLI, or None if not installed.
+
+    Unlike resolve_claude (which falls back to the bare name because claude is
+    required), this returns None when absent so callers can degrade gracefully.
+    """
+    found = shutil.which("codex", path=path)
+    if found:
+        return found
+    for d in _CLAUDE_PREPEND_DIRS:
+        cand = os.path.join(d, "codex")
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+def headless_codex_env(base=None):
+    """Env for a headless `codex` subprocess, cross-platform.
+
+    Mirrors headless_claude_env: strips CODEX* vars to avoid nested-session
+    detection and prepends common install dirs on POSIX.
+    """
+    src = os.environ if base is None else base
+    env = {k: v for k, v in src.items()
+           if not k.startswith(("CODEX",))}
+    cur = env.get("PATH", os.defpath)
+    if os_kind() != "windows":
+        prepend = [d for d in _CLAUDE_PREPEND_DIRS if os.path.isdir(d)]
+        if prepend:
+            env["PATH"] = os.pathsep.join(prepend + [cur])
+    return env
+
+
+def resolve_harness_binary(harness_name, path=None):
+    """Resolve the CLI binary for the named harness ('claude' or 'codex')."""
+    if harness_name == "codex":
+        return resolve_codex(path) or "codex"
+    return resolve_claude(path)
+
+
+def headless_harness_env(harness_name, base=None):
+    """Build the subprocess env for the named harness."""
+    if harness_name == "codex":
+        return headless_codex_env(base)
+    return headless_claude_env(base)
+
+
 def resolve_tool(name):
     """Absolute path to a CLI tool, or None if not found.
 
