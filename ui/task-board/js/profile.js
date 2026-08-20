@@ -10,8 +10,8 @@ let _packPickerOpen = false;
 const PF_TZS = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Singapore'];
 
 const PF_HARNESS_COPY = {
-  claude: ‘Claude CLI (claude -p) with the Claude model family. Full MCP support, fairway hooks, per-tool allowlists.’,
-  codex: ‘Codex CLI (codex exec) with the Terra model family. No MCP, no fairway hooks — best for local-only work.’,
+  claude: "Claude CLI (claude -p) with the Claude model family. Full MCP support, fairway hooks, per-tool allowlists.",
+  codex: "Codex CLI (codex exec) with the Terra model family. No MCP, no fairway hooks - best for local-only work.",
 };
 
 const PF_POSTURE_COPY = {
