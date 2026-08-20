@@ -3498,3 +3498,94 @@ def test_proposal_card_title_shows_from_to(tmp_path):
              if c.get("proposal", {}).get("op") == "advance-phase"]
     assert len(cards) == 1
     assert "define -> build" in cards[0]["title"]
+
+
+# ─── LLM evaluation context tests ─────────────────────────────────────────
+
+
+def test_extract_recent_cycles_returns_last_verdicts():
+    body = (
+        "## Observations\n"
+        "### 2026-08-01 - sentinel:movement-watch [status-signal]\nsource: x\nclaim: y\n\n"
+        "## Cycles\n\n"
+        "### 2026-W31 - drifting\n"
+        "checks: A overdue 2d\n\n"
+        "### 2026-W32 - broken\n"
+        "checks: A overdue 9d\n\n"
+        "### 2026-W33 - broken\n"
+        "checks: A overdue 16d\n\n"
+        "### 2026-W34 - broken\n"
+        "checks: A overdue 23d\n"
+    )
+    cycles = reconcile._extract_recent_cycles(body, max_cycles=3)
+    assert len(cycles) == 3
+    assert cycles[0] == "2026-W32 - broken"
+    assert cycles[-1] == "2026-W34 - broken"
+
+
+def test_extract_recent_cycles_empty_body():
+    assert reconcile._extract_recent_cycles("", max_cycles=4) == []
+    assert reconcile._extract_recent_cycles(None, max_cycles=4) == []
+
+
+def test_gather_observation_claims_includes_risks_and_blockers():
+    body = (
+        "## Observations\n\n"
+        "### 2026-08-01 - sentinel:movement-watch [status-signal]\n"
+        "source: meetings/standup.md\n"
+        "claim: Feature deployed.\nconfidence: 0.90\n\n"
+        "### 2026-08-02 - sentinel:movement-watch [risk]\n"
+        "source: meetings/l10.md\n"
+        "claim: Metric reversed direction.\nconfidence: 0.90\n\n"
+        "### 2026-08-03 - sentinel:movement-watch [blocker]\n"
+        "source: meetings/sync.md\n"
+        "claim: Engineering blocked on QA.\nconfidence: 0.90\n\n"
+        "### 2026-08-04 - sentinel:tracker-truth [status-signal]\n"
+        "source: adapter:project_management:VNT-123\n"
+        "claim: Tracker reports status Next.\n"
+    )
+    claims = reconcile._gather_observation_claims(body)
+    assert "Feature deployed." in claims
+    assert "Metric reversed direction." in claims
+    assert "Engineering blocked on QA." in claims
+    assert not any("Tracker reports" in c for c in claims)
+
+
+def test_llm_eval_receives_frontmatter_and_body(tmp_path, monkeypatch):
+    """LLM evaluation call receives frontmatter (drift, checkpoints) and body."""
+    captured = {}
+
+    def _capture_eval(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return False, "rejected for test"
+
+    monkeypatch.setattr(reconcile, "_llm_evaluate_proposal", _capture_eval)
+    root = str(tmp_path)
+    pid, _ = pl.create_program(
+        type="eos-rock", title="Test Rock", owner_role="pm",
+        frontmatter_extra={
+            "phase": "beta",
+            "phase_entered": {"beta": "2026-06-01"},
+            "last_cycle": "2026-W25",
+            "drift": "broken",
+            "checkpoints": [
+                {"id": "cp1", "label": "Metric target", "due": "2026-09-01",
+                 "status": "pending"},
+            ],
+        },
+        root=root,
+    )
+    pl.append_observation(pid, root=root,
+                          kind="status-signal", sentinel="movement-watch",
+                          source="meetings/standup.md",
+                          claim="Active work.", date="2026-06-15")
+    reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+    assert "kwargs" in captured, "LLM eval was never called"
+    fm = captured["kwargs"].get("frontmatter")
+    assert fm is not None
+    assert "drift" in fm
+    assert len(fm["checkpoints"]) == 1
+    assert fm["checkpoints"][0]["id"] == "cp1"
+    assert captured["kwargs"].get("body") is not None
