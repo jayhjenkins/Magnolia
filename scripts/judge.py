@@ -40,6 +40,7 @@ ENV_FILE = os.path.join(PM_OS_DIR, ".env.langfuse")
 # voice now comes from profile/voice/* via profile_lib.voice_text()
 
 sys.path.insert(0, SCRIPT_DIR)
+import harness_lib  # noqa: E402
 import platform_lib  # noqa: E402
 import profile_lib  # noqa: E402
 import task_lib  # noqa: E402
@@ -429,31 +430,23 @@ def build_prompt(kind, rubric, task_fm, body, evidence, log_tail, voice=None):
 
 
 def run_claude(prompt):
-    """Call Claude headless (Opus). Returns assistant text or None."""
-    env = platform_lib.headless_claude_env()
-    cmd = [platform_lib.resolve_claude(), "-p", prompt, "--model", JUDGE_MODEL, "--output-format", "json"]
+    """Call the headless LLM judge. Returns assistant text or None."""
+    cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, JUDGE_MODEL)
+    env = platform_lib.headless_harness_env(harness_name)
     try:
         proc = subprocess.run(
             cmd, cwd=PM_OS_DIR, env=env, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT
         )
     except FileNotFoundError:
-        log("'claude' not found on PATH — skipping (completion is unaffected)")
+        log("CLI not found on PATH -- skipping (completion is unaffected)")
         return None
     except subprocess.TimeoutExpired:
-        log(f"claude timed out after {CLAUDE_TIMEOUT}s")
+        log(f"CLI timed out after {CLAUDE_TIMEOUT}s")
         return None
     if proc.returncode != 0:
-        log(f"claude exited {proc.returncode}: {proc.stderr.strip()[:300]}")
+        log(f"CLI exited {proc.returncode}: {proc.stderr.strip()[:300]}")
         return None
-    out = proc.stdout.strip()
-    # --output-format json wraps the result in an envelope: {"result": "...", ...}
-    try:
-        env_obj = json.loads(out)
-        if isinstance(env_obj, dict) and "result" in env_obj:
-            return env_obj["result"]
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return out
+    return harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
 
 
 def parse_verdict(text, kind):

@@ -47,6 +47,7 @@ PM_OS_DIR = os.path.dirname(SCRIPT_DIR)
 
 sys.path.insert(0, SCRIPT_DIR)
 import adapters  # noqa: E402
+import harness_lib  # noqa: E402
 import platform_lib  # noqa: E402
 import profile_lib  # noqa: E402
 import program_lib  # noqa: E402
@@ -118,33 +119,23 @@ def _dispatch(prompt, tier=None, timeout=None):
     """
     effective_timeout = timeout or CLAUDE_TIMEOUT
     model = profile_lib.resolve_model(tier or SENTINEL_MODEL_TIER)
-    env = platform_lib.headless_claude_env()
-    cmd = [
-        platform_lib.resolve_claude(), "-p", prompt,
-        "--model", model, "--output-format", "json",
-    ]
+    cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
+    env = platform_lib.headless_harness_env(harness_name)
     try:
         proc = subprocess.run(
             cmd, cwd=PM_OS_DIR, env=env,
             capture_output=True, text=True, timeout=effective_timeout,
         )
     except FileNotFoundError:
-        log("'claude' not found on PATH - skipping (no observations recorded)")
+        log("CLI not found on PATH - skipping (no observations recorded)")
         return None
     except subprocess.TimeoutExpired:
-        log(f"claude timed out after {effective_timeout}s - no observations recorded")
+        log(f"CLI timed out after {effective_timeout}s - no observations recorded")
         return None
     if proc.returncode != 0:
-        log(f"claude exited {proc.returncode}: {proc.stderr.strip()[:300]}")
+        log(f"CLI exited {proc.returncode}: {proc.stderr.strip()[:300]}")
         return None
-    out = (proc.stdout or "").strip()
-    try:
-        envelope = json.loads(out)
-        if isinstance(envelope, dict) and "result" in envelope:
-            return envelope["result"]
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return out
+    return harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
 
 
 # --- The adapter-config seam (Task 4 wires the real check) -------------------

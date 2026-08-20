@@ -9,10 +9,15 @@ let _packPickerOpen = false;
 
 const PF_TZS = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Singapore'];
 
+const PF_HARNESS_COPY = {
+  claude: ‘Claude CLI (claude -p) with the Claude model family. Full MCP support, fairway hooks, per-tool allowlists.’,
+  codex: ‘Codex CLI (codex exec) with the Terra model family. No MCP, no fairway hooks — best for local-only work.’,
+};
+
 const PF_POSTURE_COPY = {
-  low: 'Use the cheapest model that still does a great job. Magnolia reaches for a stronger model only when a task clearly needs it.',
-  balanced: 'A sensible default — lighter models for routine work, stronger ones where quality matters most.',
-  high: 'Reach for the strongest model first. Best quality, higher cost — good when you’re leaning on Magnolia heavily.',
+  low: ‘Use the cheapest model that still does a great job. Magnolia reaches for a stronger model only when a task clearly needs it.’,
+  balanced: ‘A sensible default — lighter models for routine work, stronger ones where quality matters most.’,
+  high: ‘Reach for the strongest model first. Best quality, higher cost — good when you’re leaning on Magnolia heavily.’,
 };
 
 async function renderProfile() {
@@ -40,6 +45,7 @@ function _profileHtml(p) {
   ${_pfIntegrations(p.integrations)}
   ${_pfVoice(p.voice)}
   ${_pfPacks(p.packs)}
+  ${_pfHarness(p.harness)}
   ${_pfPosture(p.model_posture)}`;
 }
 
@@ -211,6 +217,48 @@ async function pfTogglePack(id) {
   _profile.packs.active = Array.from(active);
   await fetch(`${API}/profile/packs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: _profile.packs.active }) });
   document.getElementById('profile-view').innerHTML = _profileHtml(_profile);
+}
+
+/* ── 4b · CLI Harness ─────────────────────────────────────────────────── */
+function _pfHarness(h) {
+  if (!h) return '';
+  const seg = (h.available || ['claude', 'codex']).map(id =>
+    `<button class="${h.active === id ? 'active' : ''}" onclick="pfSetHarness('${id}')">${id[0].toUpperCase() + id.slice(1)}</button>`).join('');
+  return `<section class="pf-section">
+    <div class="pf-section-head"><span class="pf-section-title">CLI Harness</span><span class="pf-section-hint">Which CLI powers Magnolia</span></div>
+    <div class="pf-posture">
+      <div class="pf-seg-row"><div class="pf-seg" id="pf-seg-harness">${seg}</div><span class="pf-saved" id="pf-saved-harness">Saved</span></div>
+      <div class="pf-posture-explain" id="pf-harness-explain">${PF_HARNESS_COPY[h.active] || ''}</div>
+    </div>
+  </section>`;
+}
+
+function _pfPaintHarness(id) {
+  document.querySelectorAll('#pf-seg-harness button').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase() === id));
+  const ex = document.getElementById('pf-harness-explain');
+  if (ex) ex.textContent = PF_HARNESS_COPY[id] || '';
+}
+
+async function pfSetHarness(h) {
+  if (!_profile || !_profile.harness) return;
+  const prev = _profile.harness.active;
+  if (h === prev) return;
+  _profile.harness.active = h;
+  _pfPaintHarness(h);
+  try {
+    const res = await fetch(`${API}/config/harness`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: h }) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const pr = await fetch(`${API}/profile`);
+    if (pr.ok) {
+      _profile = await pr.json();
+      const list = document.getElementById('pf-workers-list');
+      if (list) list.innerHTML = _pfWorkerRows(_profile.model_posture.workers);
+    }
+    _flashSaved('pf-saved-harness');
+  } catch (err) {
+    _profile.harness.active = prev;
+    _pfPaintHarness(prev);
+  }
 }
 
 /* ── 5 · Model posture ────────────────────────────────────────────────── */

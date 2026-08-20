@@ -334,3 +334,65 @@ def test_cost_posture_reads_and_defaults(profile_root, tmp_path):
     assert profile_lib.cost_posture(root=profile_root) == "balanced"   # from fixture config
     # missing config -> default 'balanced'
     assert profile_lib.cost_posture(root=str(tmp_path)) == "balanced"
+
+
+# --- Harness config (multi-harness support) ---
+
+
+def test_harness_defaults_to_claude(tmp_path):
+    # No harness key in config -> "claude"
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("models:\n  judge: opus\n")
+    assert profile_lib.harness(root=str(tmp_path)) == "claude"
+
+
+def test_harness_returns_configured_value(tmp_path):
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("harness: codex\n")
+    assert profile_lib.harness(root=str(tmp_path)) == "codex"
+
+
+def test_set_harness_round_trips(profile_root):
+    profile_lib.set_harness("codex", root=profile_root)
+    assert profile_lib.harness(root=profile_root) == "codex"
+    # siblings preserved
+    assert profile_lib.config(root=profile_root)["active_skill_packs"] == ["core", "pm"]
+
+
+def test_resolve_model_uses_codex_map(tmp_path):
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("harness: codex\n")
+    assert profile_lib.resolve_model("standard", posture="balanced",
+                                     root=str(tmp_path)) == "gpt-5.6-terra"
+
+
+def test_resolve_model_uses_codex_map_deep(tmp_path):
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("harness: codex\n")
+    assert profile_lib.resolve_model("deep", posture="balanced",
+                                     root=str(tmp_path)) == "gpt-5.6-sol"
+
+
+def test_resolve_model_claude_unchanged(tmp_path):
+    # Regression guard: claude harness still uses the original tier map
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("harness: claude\n")
+    assert profile_lib.resolve_model("standard", posture="balanced",
+                                     root=str(tmp_path)) == "sonnet"
+
+
+def test_resolve_model_tier_override_with_codex(tmp_path):
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("harness: codex\n")
+    assert profile_lib.resolve_model("light", posture="low",
+                                     task_override="deep",
+                                     root=str(tmp_path)) == "gpt-5.6-sol"
+
+
+def test_resolve_model_explicit_model_id_passthrough_with_codex(tmp_path):
+    # An explicit model ID is returned verbatim regardless of harness
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("harness: codex\n")
+    assert profile_lib.resolve_model("light", posture="low",
+                                     task_override="claude-opus-4-8",
+                                     root=str(tmp_path)) == "claude-opus-4-8"

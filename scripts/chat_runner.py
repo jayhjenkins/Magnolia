@@ -22,6 +22,7 @@ import signal
 import subprocess
 import uuid
 
+import harness_lib
 import platform_lib
 import profile_lib
 import task_lib
@@ -97,22 +98,12 @@ def build_chat_cmd(session_id, message, model, new_session=False, allowed_tools=
         lives there; it is the REAL enforcement, so it must be passed).
     """
     tools = allowed_tools or ",".join(CHAT_ALLOWED_TOOLS)
-    session_flag = "--session-id" if new_session else "--resume"
-    cmd = [
-        "claude",
-        message,
-        "-p",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--model", model,
-        session_flag, session_id,
-    ]
-    if append_system_prompt is not None:
-        cmd += ["--append-system-prompt", append_system_prompt]
-    if settings is not None:
-        cmd += ["--settings", settings]
-    # --allowedTools stays LAST (variadic; nothing may trail it).
-    cmd += ["--allowedTools", tools]
+    cmd, _h = harness_lib.build_streaming_cmd(
+        session_id, message, model, new_session,
+        allowed_tools=tools,
+        append_system_prompt=append_system_prompt,
+        settings=settings,
+    )
     return cmd
 
 
@@ -364,99 +355,13 @@ _TARGET_KEYS = ("file_path", "path", "pattern", "command", "query", "url", "desc
 
 
 def normalize(raw_event):
-    """Map one raw `claude --output-format stream-json` event to a list of
-    normalized UI events.
+    """Map one raw stream event to a list of normalized UI events.
 
-    The UI kinds are: ``think``, ``tool_step``, ``text``, ``result``, plus
-    ``ask`` (an AskUserQuestion tool_use, carrying ``questions``) and ``plan``
-    (an ExitPlanMode tool_use, carrying ``body``) emitted alongside the
-    ``tool_step`` for those two tools so the Adapt UI can render rich cards.
-    An ``assistant`` event with multiple content blocks yields multiple rows,
-    in order. Uninteresting or unknown events (``system``, ``user``/tool_result,
-    ``rate_limit_event``, anything else) yield ``[]``. Pure: no I/O, never
-    raises on missing/malformed ``message``/``content``.
+    Delegates to harness_lib.normalize_stream_event, which selects the
+    correct parser (Claude stream-json or Codex JSONL) based on the active
+    harness from profile_lib.
     """
-    if not isinstance(raw_event, dict):
-        return []
-
-    etype = raw_event.get("type")
-
-    if etype == "assistant":
-        out = []
-        message = raw_event.get("message") or {}
-        content = message.get("content") or []
-        if not isinstance(content, list):
-            return []
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            btype = block.get("type")
-            if btype == "text":
-                out.append({
-                    "kind": "text",
-                    "role": "assistant",
-                    "text": block.get("text", ""),
-                })
-            elif btype == "thinking":
-                out.append({
-                    "kind": "think",
-                    "role": "assistant",
-                    "text": block.get("thinking", ""),
-                })
-            elif btype == "tool_use":
-                tool_input = block.get("input") or {}
-                target = ""
-                for key in _TARGET_KEYS:
-                    value = tool_input.get(key)
-                    if value:
-                        target = str(value)
-                        break
-                out.append({
-                    "kind": "tool_step",
-                    "role": "assistant",
-                    "verb": block.get("name", ""),
-                    "target": target,
-                })
-                # Adapt build chat: two interactive tools get a SECOND, richer
-                # event ALONGSIDE the tool_step (chat.js ignores unknown kinds,
-                # so the existing chat panel is unaffected). These are the only
-                # two stream primitives the Adapt design renders as cards. The
-                # extra event is best-effort: when claude -p does NOT surface
-                # these as structured tool_use (it may just write prose), no card
-                # appears and the conversational flow carries the UX.
-                name = block.get("name", "")
-                if name == "AskUserQuestion":
-                    out.append({
-                        "kind": "ask",
-                        "role": "assistant",
-                        # The CLI nests the prompts under `questions`; pass it
-                        # through verbatim so the UI can shape options/labels.
-                        "questions": tool_input.get("questions") or [],
-                    })
-                elif name == "ExitPlanMode":
-                    out.append({
-                        "kind": "plan",
-                        "role": "assistant",
-                        # Plan text lives under `plan` in the block input.
-                        "body": tool_input.get("plan") or "",
-                    })
-        return out
-
-    if etype == "result":
-        return [{
-            "kind": "result",
-            "usage": raw_event.get("usage", {}),
-            "cost": raw_event.get("total_cost_usd"),
-            "session_id": raw_event.get("session_id"),
-            # Every tool the session was NOT allowed to run lands here (verified
-            # against the real CLI). run_turn turns a non-empty list into a human
-            # `notice` so the user isn't left with the model's misleading
-            # "approve in the terminal" narration.
-            "permission_denials": raw_event.get("permission_denials") or [],
-        }]
-
-    # system, user/tool_result, rate_limit_event, and anything else: noise.
-    return []
+    return harness_lib.normalize_stream_event(raw_event, profile_lib.harness())
 
 
 # ─── Task 6: orchestration seam ──────────────────────────────────────────────
@@ -498,13 +403,13 @@ def _now_iso():
 
 
 def _chat_env():
-    """Env for the claude subprocess.
+    """Env for the harness subprocess.
 
-    Thin seam over the cross-platform launch abstraction: strips every
-    CLAUDE*/CMUX_CLAUDE* var (so the child doesn't detect a nested session) and
-    fixes PATH per-OS so `claude` resolves under cron/headless.
+    Thin seam over the cross-platform launch abstraction: strips harness-
+    specific nested-session vars and fixes PATH per-OS so the binary resolves
+    under cron/headless.
     """
-    return platform_lib.headless_claude_env()
+    return platform_lib.headless_harness_env(profile_lib.harness())
 
 
 def _spawn(cmd, exit_holder=None):
@@ -526,8 +431,9 @@ def _spawn(cmd, exit_holder=None):
     The subprocess return code is written into ``exit_holder['returncode']``
     (when a dict is supplied) so run_turn can detect abnormal termination (I1).
     """
-    if cmd and cmd[0] == "claude":
-        cmd = [platform_lib.resolve_claude()] + list(cmd[1:])
+    if cmd and cmd[0] in ("claude", "codex"):
+        h = profile_lib.harness()
+        cmd = [platform_lib.resolve_harness_binary(h)] + list(cmd[1:])
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -664,6 +570,12 @@ def run_turn(task_id, message):
             # Drop blank thinking rows — never persist or yield empty think.
             if kind == "think" and not (event.get("text") or "").strip():
                 continue
+
+            # Codex emits session_start (from thread.started) — capture
+            # the session/thread id but don't yield or persist it.
+            if kind == "session_start":
+                result_sid = event.get("session_id") or result_sid
+                continue  # internal event, don't yield or persist
 
             if kind == "result":
                 # Metadata: yield it for the UI, but do not append as a message.

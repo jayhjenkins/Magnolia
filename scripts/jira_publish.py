@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import harness_lib
 import platform_lib
 import profile_lib
 
@@ -354,10 +355,10 @@ JIRA_SYSTEM_PROMPT = (
 
 
 def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
-    """Spawn a fresh Claude session to execute a Jira MCP call.
+    """Spawn a fresh CLI session to execute a Jira MCP call.
 
     Takes the full prompt and a comma-separated string of allowed tool names.
-    The session_id parameter is accepted for API compatibility but ignored —
+    The session_id parameter is accepted for API compatibility but ignored --
     fresh sessions with a strong system prompt are more reliable than resuming
     sessions whose conversation history may contain conflicting instructions
     or accumulated refusals. `max_turns` defaults to 3; the transition path
@@ -365,12 +366,22 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
     Returns (issue_key, issue_url) on success.
     Raises RuntimeError on failure.
     """
-    env = platform_lib.headless_claude_env()
-    claude_bin = platform_lib.resolve_claude()
-
-    cmd = [claude_bin, "-p", prompt, "--max-turns", str(max_turns),
-           "--allowedTools", allowed_tools,
-           "--append-system-prompt", JIRA_SYSTEM_PROMPT]
+    cmd, harness_name = harness_lib.build_oneshot_cmd(
+        prompt, profile_lib.resolve_model("standard"),
+        allowed_tools=allowed_tools,
+        max_turns=max_turns,
+        append_system_prompt=JIRA_SYSTEM_PROMPT,
+    )
+    # Jira operations require MCP; fall back to Claude if active harness lacks it.
+    if harness_lib.requires_claude_fallback(harness_name, requires_mcp=True):
+        cmd, harness_name = harness_lib.build_oneshot_cmd(
+            prompt, profile_lib.resolve_model("standard"),
+            harness="claude",
+            allowed_tools=allowed_tools,
+            max_turns=max_turns,
+            append_system_prompt=JIRA_SYSTEM_PROMPT,
+        )
+    env = platform_lib.headless_harness_env(harness_name)
 
     try:
         result = subprocess.run(
@@ -382,9 +393,10 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
             timeout=120,
         )
     except subprocess.TimeoutExpired:
-        raise RuntimeError("Claude session timed out after 120 seconds")
+        raise RuntimeError("CLI session timed out after 120 seconds")
 
-    output = result.stdout + "\n" + result.stderr
+    text = harness_lib.unwrap_oneshot_result(result.stdout, harness_name) or ""
+    output = text + "\n" + result.stderr
 
     # Parse result
     match = re.search(r"JIRA_RESULT:([^|\s]+)\|(\S+)", output)
@@ -432,7 +444,7 @@ def publish_to_jira(draft, session_id=None):
 
 
 def _run_jira_read_session(issue_key):
-    """Spawn a mini Claude session to read a Jira issue via MCP.
+    """Spawn a mini CLI session to read a Jira issue via MCP.
 
     Returns the raw output string for parsing by fetch_issue.
     Raises RuntimeError on failure.
@@ -454,13 +466,23 @@ For example: JIRA_READ:In Progress|Build the feed widget|2026-09-15|2026-08-01|2
 Or with missing dates: JIRA_READ:Done|Ship the feature|none|none|none
 If the issue is not found: JIRA_READ:NOT_FOUND"""
 
-    env = platform_lib.headless_claude_env()
-    claude_bin = platform_lib.resolve_claude()
+    cmd, harness_name = harness_lib.build_oneshot_cmd(
+        prompt, profile_lib.resolve_model("standard"),
+        allowed_tools="mcp__claude_ai_Jira__getJiraIssue",
+        max_turns=3,
+    )
+    if harness_lib.requires_claude_fallback(harness_name, requires_mcp=True):
+        cmd, harness_name = harness_lib.build_oneshot_cmd(
+            prompt, profile_lib.resolve_model("standard"),
+            harness="claude",
+            allowed_tools="mcp__claude_ai_Jira__getJiraIssue",
+            max_turns=3,
+        )
+    env = platform_lib.headless_harness_env(harness_name)
 
     try:
         result = subprocess.run(
-            [claude_bin, "-p", prompt, "--max-turns", "3",
-             "--allowedTools", "mcp__claude_ai_Jira__getJiraIssue"],
+            cmd,
             cwd=PM_OS_DIR,
             env=env,
             capture_output=True,
@@ -468,9 +490,10 @@ If the issue is not found: JIRA_READ:NOT_FOUND"""
             timeout=120,
         )
     except subprocess.TimeoutExpired:
-        raise RuntimeError("Claude session timed out after 120 seconds")
+        raise RuntimeError("CLI session timed out after 120 seconds")
 
-    return result.stdout + "\n" + result.stderr
+    text = harness_lib.unwrap_oneshot_result(result.stdout, harness_name) or ""
+    return text + "\n" + result.stderr
 
 
 def _clean_date(raw):

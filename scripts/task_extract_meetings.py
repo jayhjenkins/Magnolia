@@ -14,7 +14,9 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import harness_lib  # noqa: E402
 import platform_lib  # noqa: E402
+import profile_lib  # noqa: E402
 import task_lib  # noqa: E402
 
 PM_OS_DIR = Path(__file__).resolve().parent.parent
@@ -114,16 +116,19 @@ def process_transcript(filepath):
 
     before_ids = _snapshot_task_ids()
 
-    claude = platform_lib.resolve_claude()
-    env = platform_lib.headless_claude_env()
+    model = profile_lib.resolve_model("standard")
+    cmd, harness_name = harness_lib.build_oneshot_cmd(
+        _prompt(target), model,
+        allowed_tools="Bash(*),Read(*),Write(*)",
+        max_turns=20,
+    )
+    env = platform_lib.headless_harness_env(harness_name)
     with tempfile.NamedTemporaryFile("w+", delete=False) as tf:
         err_path = tf.name
     try:
         with open(err_path, "w") as errf:
             result = subprocess.run(
-                [claude, "-p", _prompt(target),
-                 "--allowedTools", "Bash(*),Read(*),Write(*)",
-                 "--max-turns", "20"],
+                cmd,
                 cwd=str(PM_OS_DIR), env=env, stderr=errf,
             )
         stderr_text = Path(err_path).read_text(encoding="utf-8", errors="ignore")

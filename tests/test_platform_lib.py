@@ -187,3 +187,71 @@ def test_move_file_creates_parent_dir(tmp_path):
     assert dst.exists()
     assert dst.read_text() == "nested content"
     assert dst.parent.exists()
+
+
+# ─── resolve_codex seam ───────────────────────────────────────────────────────
+
+def test_resolve_codex_uses_which(monkeypatch):
+    monkeypatch.setattr(platform_lib.shutil, "which", lambda n, path=None: "/found/codex")
+    assert platform_lib.resolve_codex() == "/found/codex"
+
+
+def test_resolve_codex_returns_none_when_absent(monkeypatch):
+    monkeypatch.setattr(platform_lib.shutil, "which", lambda n, path=None: None)
+    monkeypatch.setattr(platform_lib.os.path, "isfile", lambda p: False)
+    assert platform_lib.resolve_codex() is None
+
+
+# ─── headless_codex_env ───────────────────────────────────────────────────────
+
+def test_headless_codex_env_strips_codex_vars():
+    base = {"CODEX_SESSION": "x", "CODEX_THREAD": "y", "PATH": "/usr/bin", "HOME": "/h"}
+    env = platform_lib.headless_codex_env(base=base)
+    assert not any(k.startswith("CODEX") for k in env)
+    assert "HOME" in env
+
+
+def test_headless_codex_env_keeps_other_vars():
+    base = {"FOO": "bar", "CLAUDE_X": "keep", "PATH": "/usr/bin"}
+    env = platform_lib.headless_codex_env(base=base)
+    assert env["FOO"] == "bar"
+    # CLAUDE vars are NOT stripped by the codex env helper
+    assert env["CLAUDE_X"] == "keep"
+
+
+# ─── resolve_harness_binary ──────────────────────────────────────────────────
+
+def test_resolve_harness_binary_claude(monkeypatch):
+    monkeypatch.setattr(platform_lib, "resolve_claude", lambda path=None: "/bin/claude")
+    result = platform_lib.resolve_harness_binary("claude")
+    assert result == "/bin/claude"
+
+
+def test_resolve_harness_binary_codex(monkeypatch):
+    monkeypatch.setattr(platform_lib, "resolve_codex", lambda path=None: "/bin/codex")
+    result = platform_lib.resolve_harness_binary("codex")
+    assert result == "/bin/codex"
+
+
+def test_resolve_harness_binary_codex_falls_back(monkeypatch):
+    monkeypatch.setattr(platform_lib, "resolve_codex", lambda path=None: None)
+    result = platform_lib.resolve_harness_binary("codex")
+    assert result == "codex"
+
+
+# ─── headless_harness_env ─────────────────────────────────────────────────────
+
+def test_headless_harness_env_claude(monkeypatch):
+    base = {"CLAUDE_X": "strip", "FOO": "keep", "PATH": "/usr/bin"}
+    env = platform_lib.headless_harness_env("claude", base=base)
+    # Delegates to headless_claude_env -> strips CLAUDE vars
+    assert "CLAUDE_X" not in env
+    assert env["FOO"] == "keep"
+
+
+def test_headless_harness_env_codex(monkeypatch):
+    base = {"CODEX_X": "strip", "FOO": "keep", "PATH": "/usr/bin"}
+    env = platform_lib.headless_harness_env("codex", base=base)
+    # Delegates to headless_codex_env -> strips CODEX vars
+    assert "CODEX_X" not in env
+    assert env["FOO"] == "keep"

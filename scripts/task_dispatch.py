@@ -28,6 +28,7 @@ import platform_lib
 import task_lib
 import packs_lib
 import profile_lib
+import harness_lib
 import adaptations_lib
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -733,16 +734,9 @@ def build_claude_cmd(prompt, model, tools_str, max_turns, session_id=None):
     The prompt MUST stay the first positional arg: --allowedTools is variadic
     and would otherwise swallow a trailing prompt (verified in the CLI spike).
     """
-    sid = session_id or str(uuid.uuid4())
-    cmd = [
-        "claude",
-        prompt,
-        "--model", model,
-        "--allowedTools", tools_str,
-        "--max-turns", max_turns,
-        "--permission-mode", "bypassPermissions",
-        "--session-id", sid,
-    ]
+    cmd, sid, _h = harness_lib.build_background_cmd(
+        prompt, model, tools_str, max_turns, session_id
+    )
     return cmd, sid
 
 
@@ -844,18 +838,19 @@ def dispatch_task(task, dry_run=False, rerun=False, workers=None):
     # Interactive mode (no -p) gets cloud MCPs (Pendo, Jira, M365, etc.)
     # Use `script` to provide a pseudo-TTY for the interactive TUI
     claude_cmd, claude_session_id = build_claude_cmd(prompt, model, tools_str, max_turns)
-    claude_cmd[0] = platform_lib.resolve_claude()
+    harness_name = profile_lib.harness()
+    claude_cmd[0] = platform_lib.resolve_harness_binary(harness_name)
 
-    if platform_lib.os_kind() == "windows":
-        # No `script` (pty) on Windows: run claude directly and tee stdout to the
-        # output_file ourselves (the pty is what wrote it on POSIX).
+    if harness_name == "codex" or platform_lib.os_kind() == "windows":
+        # Codex uses non-interactive exec (no pty needed); Windows lacks `script`.
+        # In both cases run directly and tee stdout to the output file.
         cmd = claude_cmd
         stdout_target = open(output_file, "wb")
     else:
         cmd = ["script", "-q", output_file] + claude_cmd
         stdout_target = subprocess.DEVNULL
 
-    env = platform_lib.headless_claude_env()
+    env = platform_lib.headless_harness_env(harness_name)
 
     try:
         proc = subprocess.Popen(

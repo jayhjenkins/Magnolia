@@ -25,6 +25,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import harness_lib
 import platform_lib
 import program_lib
 
@@ -822,14 +823,10 @@ def _llm_evaluate_proposal(program_title, current_phase, target_phase,
         "Reply with exactly YES or NO on the first line, "
         "then a one-sentence reason on the second line."
     )
-    import json as _json
     import profile_lib
     model = profile_lib.resolve_model(_LLM_EVAL_TIER)
-    env = platform_lib.headless_claude_env()
-    cmd = [
-        platform_lib.resolve_claude(), "-p", prompt,
-        "--model", model, "--output-format", "json",
-    ]
+    cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
+    env = platform_lib.headless_harness_env(harness_name)
     try:
         proc = subprocess.run(
             cmd, cwd=os.path.dirname(os.path.dirname(
@@ -843,13 +840,7 @@ def _llm_evaluate_proposal(program_title, current_phase, target_phase,
     if proc.returncode != 0:
         sys.stderr.write(f"[cadence] LLM eval exited {proc.returncode}, fail-open\n")
         return True, "evaluation unavailable"
-    out = (proc.stdout or "").strip()
-    try:
-        envelope = _json.loads(out)
-        if isinstance(envelope, dict) and "result" in envelope:
-            out = envelope["result"]
-    except (ValueError, _json.JSONDecodeError):
-        pass
+    out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
     first_line = (out or "").strip().split("\n")[0].strip().upper()
     reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
     if first_line.startswith("NO"):
@@ -900,14 +891,10 @@ def _llm_evaluate_tracker_proposal(program_title, tracker_key, current_status,
         "the tracker status? Reply with exactly YES or NO on the first line, "
         "then a one-sentence reason on the second line."
     )
-    import json as _json
     import profile_lib
     model = profile_lib.resolve_model(_LLM_EVAL_TIER)
-    env = platform_lib.headless_claude_env()
-    cmd = [
-        platform_lib.resolve_claude(), "-p", prompt,
-        "--model", model, "--output-format", "json",
-    ]
+    cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
+    env = platform_lib.headless_harness_env(harness_name)
     try:
         proc = subprocess.run(
             cmd, cwd=os.path.dirname(os.path.dirname(
@@ -921,13 +908,7 @@ def _llm_evaluate_tracker_proposal(program_title, tracker_key, current_status,
     if proc.returncode != 0:
         sys.stderr.write(f"[cadence] LLM tracker eval exited {proc.returncode}, fail-open\n")
         return True, "evaluation unavailable"
-    out = (proc.stdout or "").strip()
-    try:
-        envelope = _json.loads(out)
-        if isinstance(envelope, dict) and "result" in envelope:
-            out = envelope["result"]
-    except (ValueError, _json.JSONDecodeError):
-        pass
+    out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
     first_line = (out or "").strip().split("\n")[0].strip().upper()
     reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
     if first_line.startswith("NO"):
@@ -955,14 +936,10 @@ def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
         "the completion signal be premature? Reply with exactly YES or NO "
         "on the first line, then a one-sentence reason on the second line."
     )
-    import json as _json
     import profile_lib
     model = profile_lib.resolve_model(_LLM_EVAL_TIER)
-    env = platform_lib.headless_claude_env()
-    cmd = [
-        platform_lib.resolve_claude(), "-p", prompt,
-        "--model", model, "--output-format", "json",
-    ]
+    cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
+    env = platform_lib.headless_harness_env(harness_name)
     try:
         proc = subprocess.run(
             cmd, cwd=os.path.dirname(os.path.dirname(
@@ -976,13 +953,7 @@ def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
     if proc.returncode != 0:
         sys.stderr.write(f"[cadence] LLM archive eval exited {proc.returncode}, fail-open\n")
         return True, "evaluation unavailable"
-    out = (proc.stdout or "").strip()
-    try:
-        envelope = _json.loads(out)
-        if isinstance(envelope, dict) and "result" in envelope:
-            out = envelope["result"]
-    except (ValueError, _json.JSONDecodeError):
-        pass
+    out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
     first_line = (out or "").strip().split("\n")[0].strip().upper()
     reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
     if first_line.startswith("NO"):
