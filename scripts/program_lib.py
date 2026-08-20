@@ -532,6 +532,57 @@ def _split_at_next_section(text):
     return text[:idx], text[idx + 1:]
 
 
+_SOURCE_FILE_RE = re.compile(
+    r"("
+    r"\d{4}-\d{2}-\d{2}"       # date prefix
+    r"[_\-]"                    # separator
+    r"\d{2}[_\-]\d{2}"         # time (HH-MM or HH_MM)
+    r")"
+)
+
+_SOURCE_ADAPTER_RE = re.compile(r"^adapter:")
+
+
+def _normalize_source_file(source):
+    """Extract a stable file-identity token from a source citation.
+
+    LLM-generated sources vary in path prefix, speaker name, line number,
+    timestamp, and even the exact filename spelling (``1:1`` vs ``1_1``). The
+    only part guaranteed stable across citations of the same meeting is the
+    date-time prefix (``YYYY-MM-DD_HH-MM``). We extract that and use it as the
+    identity token. Two meetings on the same date at different times still get
+    different tokens. Adapter sources pass through as-is.
+    """
+    if not source:
+        return ""
+    s = source.strip()
+    if _SOURCE_ADAPTER_RE.match(s):
+        return s
+    m = _SOURCE_FILE_RE.search(s)
+    if m:
+        return m.group(1).lower().replace("_", "-")
+    return s.lower().strip()
+
+
+def _existing_source_kinds(body):
+    """Return {(kind, normalized_source_file)} for observations on ``body``.
+
+    The semantic dedup fence: an observation from the same source file with the
+    same kind is a duplicate even when the claim text differs (the LLM paraphrased
+    it). Adapter sources are exempt (they produce deterministic claims that the
+    content-hash dedup already catches perfectly). Tolerant: unparseable entries
+    contribute nothing.
+    """
+    pairs = set()
+    for _date, kind, _sentinel, source, _claim in iter_observations(body):
+        if not kind or not source:
+            continue
+        if _SOURCE_ADAPTER_RE.match(source.strip()):
+            continue
+        pairs.add((kind, _normalize_source_file(source)))
+    return pairs
+
+
 def _obs_hash(kind, source, claim):
     """Content hash over (kind, source, claim) for observation dedupe.
 
@@ -635,6 +686,14 @@ def append_observation(program_id, *, kind, sentinel, source, claim,
     # Content-hash dedupe over (kind, source, claim).
     if _obs_hash(kind, source, claim) in _existing_obs_hashes(body):
         return False
+
+    # Normalized-source dedup: same kind + same source file = duplicate even when
+    # the LLM paraphrased the claim differently. Adapter sources are exempt (their
+    # deterministic claims are already caught by the content-hash above).
+    if not _SOURCE_ADAPTER_RE.match(source.strip()):
+        norm = _normalize_source_file(source)
+        if (kind, norm) in _existing_source_kinds(body):
+            return False
 
     entry_date = date or _now_iso()[:10]
     entry_lines = [

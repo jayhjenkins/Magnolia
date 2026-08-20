@@ -60,8 +60,8 @@ Task {task_id}. Follow these steps:
    `profile/voice/email.md` — subject that states the point, light greeting +
    sign-off, 1-3 sentence paragraphs). If a voice file is empty or absent, the
    operator hasn't set their voice yet — draft in a clean, neutral, professional
-   voice. Honor the shared rules — especially
-   **no em dashes** (use a period, comma, or parentheses) and no corporate filler.
+   voice. Honor the shared rules — especially no corporate filler. Note: em dashes
+   are forbidden in Teams but allowed in email (see the email voice guide).
 
 3. Mark it started:
    Run: `./scripts/task.sh agent:start {task_id}`
@@ -78,7 +78,7 @@ Task {task_id}. Follow these steps:
      sentences at most. Lowercase starts and fragments are fine. No em dashes.
    - **Email** — subject line that states the point, light greeting, body in
      1-3 sentence paragraphs, ask up front or clearly marked, light sign-off
-     ("{operator sign-off}"). No em dashes.
+     ("{operator sign-off}"). Em dashes are fine in email per the voice guide.
    Keep the request accurate and addressed to the right person. The message goes
    straight into the card — there is no draft file and no Word document.
 
@@ -106,9 +106,14 @@ Task {task_id}. Follow these steps:
 
 {rerun_block}Important rules:
 - **Voice first.** Match the operator's voice files (`profile/voice/teams.md` +
-  `profile/voice/email.md`) precisely. No em dashes anywhere. No
-  corporate filler ("circle back", "per my last", "I hope this finds you well").
+  `profile/voice/email.md`) precisely. No em dashes in Teams; em dashes are fine
+  in email. No corporate filler ("circle back", "per my last", "I hope this finds
+  you well").
 - **The card is the deliverable.** The message lives in the task's message fields —
   no draft file, no Word document. Don't pass `--output` on complete.
 - **Draft only — never send.** Sending is the operator's manual step from the card.
 - Be concise. A message is not a memo.
+- **You MUST compose original message text.** Never echo, copy, or restate the
+  task description, activity log, or any other task metadata as your draft. If the
+  task says "nudge the team about X," your job is to write the actual nudge in the
+  operator's voice. A completion with no composed message text is a failure.

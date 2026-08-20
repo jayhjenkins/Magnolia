@@ -40,6 +40,12 @@ def _isolated_task_queues(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(
         reconcile, "_llm_evaluate_proposal",
         lambda *a, **kw: (True, "auto-approved in test"))
+    monkeypatch.setattr(
+        reconcile, "_llm_evaluate_tracker_proposal",
+        lambda *a, **kw: (True, "auto-approved in test"))
+    monkeypatch.setattr(
+        reconcile, "_llm_evaluate_archive_proposal",
+        lambda *a, **kw: (True, "auto-approved in test"))
 
 
 # A fixed "now" used everywhere so verdicts are deterministic.
@@ -2880,13 +2886,32 @@ def test_fire_month_occurrence_mid_cycle_fires_on_target_day(tmp_path, monkeypat
 # ─── Inc 2: evidence-based interpretation door ────────────────────────────────
 
 
-def test_status_signal_triggers_phase_advance_proposal(tmp_path):
+def test_status_signal_does_not_trigger_phase_advance(tmp_path):
+    """status-signal is NOT strong enough to trigger a phase advance proposal;
+    only completion and commitment qualify."""
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define",
         extra_obs=dict(kind="status-signal", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
                        claim="Tickets being worked on, engineer actively building."),
+    )
+    result = reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=NOW)
+
+    cards = [c for c in _open_human_cards()
+             if c.get("task_type") == "cadence-propose-update"
+             and c.get("proposal", {}).get("op") == "advance-phase"]
+    assert len(cards) == 0
+
+
+def test_completion_triggers_phase_advance_proposal(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_rock_program(
+        root, phase="define",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
+                       source="datasets/meetings/2026-06-15_standup.md",
+                       claim="Discovery phase is done, moving to build."),
     )
     result = reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -2975,9 +3000,9 @@ def test_proposals_fire_on_non_fresh_cycle_tick(tmp_path):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development underway."),
+                       claim="Define phase done, moving to build."),
     )
     result = reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3020,9 +3045,9 @@ def test_proposals_dedup_across_ticks(tmp_path):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development."),
+                       claim="Define phase complete, moving to build."),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3080,10 +3105,12 @@ def test_tracker_inactive_with_activity_emits_mismatch_proposal(tmp_path):
     pid = _seed_rock_with_tracker(root, tracker_key="VNT-46117", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
              source="adapter:project_management:VNT-46117",
-             claim="Tracker reports status 'Next' for 'Board Frustration UX'."),
+             claim="Tracker reports status 'Next' for 'Board Frustration UX'.",
+             date="2026-06-15"),
         dict(kind="status-signal", sentinel="movement-watch",
              source="datasets/meetings/2026-06-15_standup.md",
-             claim="Active engineering work on board frustration."),
+             claim="Active engineering work on board frustration.",
+             date="2026-06-15"),
     ])
     result = reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3152,10 +3179,11 @@ def test_tracker_mismatch_dedup(tmp_path):
     pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
              source="adapter:project_management:VNT-123",
-             claim="Tracker reports status 'Next' for 'My Rock'."),
+             claim="Tracker reports status 'Next' for 'My Rock'.",
+             date="2026-06-15"),
         dict(kind="status-signal", sentinel="movement-watch",
              source="datasets/meetings/2026-06-15_standup.md",
-             claim="Active work."),
+             claim="Active work.", date="2026-06-15"),
     ])
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW, force=True)
@@ -3173,10 +3201,11 @@ def test_tracker_mismatch_proposal_description(tmp_path):
         dict(kind="status-signal", sentinel="tracker-truth",
              source="adapter:project_management:VNT-999",
              claim="Tracker reports status 'Backlog' for 'Test'.",
-             date="2026-06-10"),
+             date="2026-06-14"),
         dict(kind="status-signal", sentinel="movement-watch",
              source="datasets/meetings/2026-06-15_standup.md",
-             claim="Engineering actively building this feature."),
+             claim="Engineering actively building this feature.",
+             date="2026-06-15"),
     ])
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3188,7 +3217,7 @@ def test_tracker_mismatch_proposal_description(tmp_path):
     body = full_task.get("body", "")
     assert "VNT-999" in body
     assert "Backlog" in body
-    assert "as of 2026-06-10" in body
+    assert "as of 2026-06-14" in body
 
 
 def test_tracker_mismatch_mutation_includes_observed_date(tmp_path):
@@ -3221,9 +3250,9 @@ def test_rejected_proposal_suppressed_same_day(tmp_path, monkeypatch):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development.", date="2026-06-15"),
+                       claim="Define phase complete.", date="2026-06-15"),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3249,9 +3278,9 @@ def test_rejected_proposal_resurfaces_with_new_evidence(tmp_path, monkeypatch):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development.", date="2026-06-15"),
+                       claim="Define phase complete.", date="2026-06-15"),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3264,7 +3293,7 @@ def test_rejected_proposal_resurfaces_with_new_evidence(tmp_path, monkeypatch):
 
     pl.append_observation(
         pid, root=root,
-        kind="status-signal", sentinel="movement-watch",
+        kind="completion", sentinel="movement-watch",
         source="datasets/meetings/2026-06-17_standup.md",
         claim="Feature shipped to production.",
         date="2026-06-17",
@@ -3288,9 +3317,12 @@ def test_rejection_doesnt_block_different_ops(tmp_path, monkeypatch):
              source="adapter:project_management:VNT-123",
              claim="Tracker reports status 'Next' for 'My Rock'.",
              date="2026-06-15"),
-        dict(kind="status-signal", sentinel="movement-watch",
+        dict(kind="completion", sentinel="movement-watch",
              source="datasets/meetings/2026-06-15_standup.md",
-             claim="Active work.", date="2026-06-15"),
+             claim="Define phase complete.", date="2026-06-15"),
+        dict(kind="status-signal", sentinel="movement-watch",
+             source="datasets/meetings/2026-06-15_retro.md",
+             claim="Active work on the rock.", date="2026-06-15"),
     ])
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3340,9 +3372,9 @@ def test_multiple_rejections_uses_latest_date(tmp_path, monkeypatch):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development.", date="2026-06-15"),
+                       claim="Define phase complete.", date="2026-06-15"),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3353,9 +3385,9 @@ def test_multiple_rejections_uses_latest_date(tmp_path, monkeypatch):
 
     pl.append_observation(
         pid, root=root,
-        kind="status-signal", sentinel="movement-watch",
+        kind="completion", sentinel="movement-watch",
         source="datasets/meetings/2026-06-17_update.md",
-        claim="More progress.",
+        claim="Phase done, shipping.",
         date="2026-06-17",
     )
 
@@ -3386,9 +3418,9 @@ def test_llm_rejects_premature_proposal(tmp_path, monkeypatch):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development.", date="2026-06-15"),
+                       claim="Define phase complete.", date="2026-06-15"),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3406,9 +3438,9 @@ def test_llm_approves_valid_proposal(tmp_path, monkeypatch):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development.", date="2026-06-15"),
+                       claim="Define phase complete.", date="2026-06-15"),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3426,9 +3458,9 @@ def test_llm_failure_fails_open(tmp_path, monkeypatch):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development.", date="2026-06-15"),
+                       claim="Define phase complete.", date="2026-06-15"),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3438,13 +3470,13 @@ def test_llm_failure_fails_open(tmp_path, monkeypatch):
     assert len(cards) == 1
 
 
-def test_llm_not_called_for_tracker_mismatch(tmp_path, monkeypatch):
-    """Tracker-mismatch proposals bypass LLM evaluation."""
+def test_tracker_mismatch_calls_llm_gate(tmp_path, monkeypatch):
+    """Tracker-mismatch proposals go through LLM evaluation."""
     call_args = []
     def _tracking_eval(*args, **kwargs):
         call_args.append(args)
         return True, "approved"
-    monkeypatch.setattr(reconcile, "_llm_evaluate_proposal", _tracking_eval)
+    monkeypatch.setattr(reconcile, "_llm_evaluate_tracker_proposal", _tracking_eval)
     root = str(tmp_path)
     pid = _seed_rock_with_tracker(root, tracker_key="VNT-789", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
@@ -3460,8 +3492,7 @@ def test_llm_not_called_for_tracker_mismatch(tmp_path, monkeypatch):
     tracker_cards = [c for c in _open_human_cards()
                      if c.get("proposal", {}).get("op") == "update-tracker"]
     assert len(tracker_cards) == 1
-    for args in call_args:
-        assert "update-tracker" not in str(args)
+    assert len(call_args) >= 1
 
 
 def test_proposal_card_description_includes_phase_definition(tmp_path):
@@ -3469,9 +3500,9 @@ def test_proposal_card_description_includes_phase_definition(tmp_path):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development.", date="2026-06-15"),
+                       claim="Define phase complete.", date="2026-06-15"),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3488,9 +3519,9 @@ def test_proposal_card_title_shows_from_to(tmp_path):
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define", last_cycle=PERIOD,
-        extra_obs=dict(kind="status-signal", sentinel="movement-watch",
+        extra_obs=dict(kind="completion", sentinel="movement-watch",
                        source="datasets/meetings/2026-06-15_standup.md",
-                       claim="Active development.", date="2026-06-15"),
+                       claim="Define phase complete.", date="2026-06-15"),
     )
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
@@ -3577,9 +3608,9 @@ def test_llm_eval_receives_frontmatter_and_body(tmp_path, monkeypatch):
         root=root,
     )
     pl.append_observation(pid, root=root,
-                          kind="status-signal", sentinel="movement-watch",
+                          kind="completion", sentinel="movement-watch",
                           source="meetings/standup.md",
-                          claim="Active work.", date="2026-06-15")
+                          claim="Phase work complete.", date="2026-06-15")
     reconcile.reconcile_program(
         pl.read_program(pid, root=root), _registry(), now=NOW)
     assert "kwargs" in captured, "LLM eval was never called"

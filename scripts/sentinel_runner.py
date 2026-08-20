@@ -171,6 +171,87 @@ def _sheet_configured(name, root=None):
     return bool(profile_lib.eos_sheet(root))
 
 
+# --- Processed-sources manifest (Layer 1 dedup) ----------------------------
+#
+# Tracks which source files a sentinel has already processed per program.
+# After recording observations, the sentinel runner marks the source files as
+# processed. On subsequent runs, processed files are listed in the prompt so
+# the LLM skips them. This prevents the root cause of observation duplication:
+# an LLM re-reading the same transcript and paraphrasing it differently.
+
+def _processed_sources_path(root):
+    return os.path.join(root or os.getcwd(), "datasets", "cadence", "processed-sources.json")
+
+
+def read_processed_sources(sentinel_name, root=None):
+    """Return {program_id: [file_stems]} for a sentinel, or {} if absent."""
+    path = _processed_sources_path(root)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data.get(sentinel_name) or {}
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def record_processed_sources(sentinel_name, new_sources, root=None):
+    """Merge new_sources {program_id: [file_stems]} into the manifest.
+
+    Deduplicates file stems per program, limits to 200 per program (LRU: oldest
+    entries are dropped when the cap is hit). Never raises.
+    """
+    _MAX_PER_PROGRAM = 200
+    root = root or os.getcwd()
+    path = _processed_sources_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError, FileNotFoundError):
+        data = {}
+    sentinel_data = data.setdefault(sentinel_name, {})
+    for pid, stems in new_sources.items():
+        existing = sentinel_data.get(pid, [])
+        merged = list(dict.fromkeys(existing + list(stems)))
+        if len(merged) > _MAX_PER_PROGRAM:
+            merged = merged[-_MAX_PER_PROGRAM:]
+        sentinel_data[pid] = merged
+    temp = path + ".tmp"
+    try:
+        with open(temp, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(temp, path)
+    except Exception as e:
+        log(f"Failed to write processed-sources manifest: {e}")
+
+
+def _extract_source_stems(records):
+    """Extract {program_id: [normalized_file_stems]} from observation records.
+
+    Uses program_lib._normalize_source_file for consistency with the Layer 2
+    dedup in append_observation. Adapter sources are excluded (already
+    deterministic). Never raises.
+    """
+    by_pid = {}
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        pid = rec.get("program_id")
+        source = rec.get("source", "")
+        if not pid or not source:
+            continue
+        if source.strip().startswith("adapter:"):
+            continue
+        stem = program_lib._normalize_source_file(source)
+        if stem:
+            by_pid.setdefault(pid, []).append(stem)
+    for pid in by_pid:
+        by_pid[pid] = list(dict.fromkeys(by_pid[pid]))
+    return by_pid
+
+
 # --- Source gathering (thin, mockable; heavy qmd wiring deferred) ------------
 
 _INCREMENTAL_FALLBACK_DAYS = 14
@@ -183,6 +264,9 @@ def _gather_sources(definition, programs, now=None, sentinel_name=None, root=Non
     starts 1 day before that date (overlap buffer; content-hash dedup prevents
     duplicates). On first run or after a failed run with no last_success, falls
     back to _INCREMENTAL_FALLBACK_DAYS.
+
+    When a processed-sources manifest exists for this sentinel, the already-
+    processed file stems are included in the prompt so the LLM skips them.
     """
     kinds = []
     for src in definition.get("sources") or []:
@@ -208,13 +292,26 @@ def _gather_sources(definition, programs, now=None, sentinel_name=None, root=Non
         except (ValueError, TypeError):
             since = until
 
+    processed_block = ""
+    if sentinel_name:
+        processed = read_processed_sources(sentinel_name, root)
+        all_stems = set()
+        for stems in processed.values():
+            all_stems.update(stems)
+        if all_stems:
+            stems_list = "\n".join(f"  - {s}" for s in sorted(all_stems)[-50:])
+            processed_block = (
+                f"\nALREADY PROCESSED (skip these files entirely -- do NOT re-read "
+                f"or emit observations from them):\n{stems_list}\n"
+            )
+
     return (
         f"Scan window: sources dated between {since} and {until} (inclusive).\n"
         f"IMPORTANT: Only read transcripts dated ON OR AFTER {since}. "
         f"Skip anything older -- it was already processed.\n"
         f"Source kinds in scope: {kinds_line}.\n"
         "(In-window source contents are gathered by the dispatch tools; "
-        "read only what is in scope.)"
+        f"read only what is in scope.){processed_block}"
     )
 
 
@@ -503,6 +600,11 @@ def _run_intake(name, programs, text, root=None, now=None):
 
     log(f"sentinel '{name}': appended {summary['appended']}, "
         f"dropped {summary['dropped']} (intake)")
+
+    new_sources = _extract_source_stems(records)
+    if new_sources:
+        record_processed_sources(name, new_sources, root)
+
     return summary
 
 
@@ -714,6 +816,12 @@ def _run_sentinel_impl(name, root=None, now=None):
 
     log(f"sentinel '{name}': appended {summary['appended']}, "
         f"dropped {summary['dropped']}")
+
+    # Record processed source files so subsequent runs skip them.
+    new_sources = _extract_source_stems(records)
+    if new_sources:
+        record_processed_sources(name, new_sources, root)
+
     return summary
 
 

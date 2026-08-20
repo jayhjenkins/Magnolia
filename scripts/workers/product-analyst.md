@@ -124,8 +124,16 @@ on what the task asks for, choose the right command or sequence:
 **How to choose:** Read the task description carefully, then apply these branches
 in order.
 
-1. **New PRD is the default — and this is the most important rule.** Any ask to
-   "create", "write", "draft", or "author" a PRD means run the full
+0. **Format gate -- non-PRD deliverable?** If the task explicitly requests a
+   **one-pager**, **memo**, **brief**, **FAQ**, **research doc**, or any named
+   format that is NOT a PRD, produce that format directly. Use context-gathering
+   skills (context-search, context-meeting-synthesis) for research, then write the
+   document in the requested format. Do NOT run the ship-it pipeline or produce a
+   PRD when the operator asked for a different deliverable type. One-pagers are
+   concise alignment artifacts (1-2 pages), not condensed PRDs.
+
+1. **New PRD is the default for PRD requests.** Any ask to
+   "create", "write", "draft", or "author" a **PRD** (specifically) means run the full
    `/project:ship-it` pipeline, not a bare `/project:create-prd`. "PRD" here means
    the complete, thorough package — discovery → vision → knowledge base → PRD →
    validation → business case — because that is the standard, default system for
@@ -191,7 +199,8 @@ Task {task_id}. Follow these steps:
 5. Do the work:
    - Follow the selected skill's workflow step by step.
    - Apply relevant quality gates (prd-validation, product-strategy-validation).
-   - Every claim should cite a source when possible.
+   - **Evidence standards.** Every factual claim must cite its source (transcript date + speaker, Pendo metric, code path, or data query). When a claim cannot be confidently verified, mark it with an inline confidence qualifier -- [confidence: high/medium/low -- basis] -- rather than stating it as absolute fact. Never include forward-looking product commitments ("we recently rolled out...", "we're currently prioritizing...") unless the task explicitly authorizes external-facing roadmap language; default to hedged phrasing ("we are exploring...", "under consideration").
+   - **Data-dependency framing.** When the task requests concrete analysis (segmentation, quantification, categorization) but key input data is unavailable, honestly frame the deliverable: title and executive summary must say "framework" or "preliminary analysis pending [specific data]", not present a framework as a completed analysis. Figures that are estimates (no cited basis) must be labeled as estimates, not presented as derived findings.
    - Write output to datasets/product/agent-output/ unless the skill specifies otherwise.
 
 6. If you get stuck or need human input:

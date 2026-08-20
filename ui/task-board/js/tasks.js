@@ -1328,8 +1328,11 @@ async function publishToJira(taskId) {
 }
 
 async function updateJira(taskId) {
-  const task = _taskCache && _taskCache.find(t => t.id === taskId);
-  const update = task ? parseJiraUpdate(task.body) : null;
+  let update = null;
+  try {
+    const r = await fetch(`${API}/tasks/${taskId}`);
+    if (r.ok) { const t = await r.json(); update = parseJiraUpdate(t.body); }
+  } catch (_) { /* fall through with null update — confirm will use generic label */ }
   const actionLabel = update ? {comment: 'Add Comment', edit: 'Update Issue', comment_and_edit: 'Update & Comment', transition: 'Transition Status', transition_and_comment: 'Transition & Comment'}[update.action] || 'Update' : 'Update';
   const isTransition = update && (update.action === 'transition' || update.action === 'transition_and_comment');
   const ok = await confirmAction({
