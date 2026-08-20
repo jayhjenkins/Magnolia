@@ -15,9 +15,9 @@ const PF_HARNESS_COPY = {
 };
 
 const PF_POSTURE_COPY = {
-  low: ‘Use the cheapest model that still does a great job. Magnolia reaches for a stronger model only when a task clearly needs it.’,
-  balanced: ‘A sensible default — lighter models for routine work, stronger ones where quality matters most.’,
-  high: ‘Reach for the strongest model first. Best quality, higher cost — good when you’re leaning on Magnolia heavily.’,
+  low: "Use the cheapest model that still does a great job. Magnolia reaches for a stronger model only when a task clearly needs it.",
+  balanced: "A sensible default — lighter models for routine work, stronger ones where quality matters most.",
+  high: "Reach for the strongest model first. Best quality, higher cost — good when you’re leaning on Magnolia heavily.",
 };
 
 async function renderProfile() {
