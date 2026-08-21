@@ -371,6 +371,7 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
         allowed_tools=allowed_tools,
         max_turns=max_turns,
         append_system_prompt=JIRA_SYSTEM_PROMPT,
+        permission_mode="bypassPermissions",
     )
     # Jira operations require MCP; fall back to Claude if active harness lacks it.
     if harness_lib.requires_claude_fallback(harness_name, requires_mcp=True):
@@ -380,6 +381,7 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
             allowed_tools=allowed_tools,
             max_turns=max_turns,
             append_system_prompt=JIRA_SYSTEM_PROMPT,
+            permission_mode="bypassPermissions",
         )
     env = platform_lib.headless_harness_env(harness_name)
 
@@ -470,6 +472,7 @@ If the issue is not found: JIRA_READ:NOT_FOUND"""
         prompt, profile_lib.resolve_model("standard"),
         allowed_tools="mcp__claude_ai_Jira__getJiraIssue",
         max_turns=3,
+        permission_mode="bypassPermissions",
     )
     if harness_lib.requires_claude_fallback(harness_name, requires_mcp=True):
         cmd, harness_name = harness_lib.build_oneshot_cmd(
@@ -477,6 +480,7 @@ If the issue is not found: JIRA_READ:NOT_FOUND"""
             harness="claude",
             allowed_tools="mcp__claude_ai_Jira__getJiraIssue",
             max_turns=3,
+            permission_mode="bypassPermissions",
         )
     env = platform_lib.headless_harness_env(harness_name)
 
