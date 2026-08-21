@@ -1,8 +1,9 @@
-"""Tests that jira_publish CLI argv includes --permission-mode bypassPermissions.
+"""Tests for jira_publish CLI argv and result parsing.
 
-This is the regression guard: the harness refactor silently dropped permission
-bypass, causing Claude to refuse MCP tool calls in headless publish sessions.
-These tests catch that at the argv level so it never regresses again.
+Regression guards:
+1. CLI argv must include --permission-mode bypassPermissions (harness refactor dropped it)
+2. Result parser must reject template echoes like ISSUE_KEY (Claude echoed the format
+   example instead of calling the MCP tool, and the system marked it as published)
 """
 import subprocess
 import pytest
@@ -113,3 +114,48 @@ class TestRunJiraReadSessionArgv:
         assert "--allowedTools" in argv
         idx = argv.index("--allowedTools")
         assert "getJiraIssue" in argv[idx + 1]
+
+
+class TestResultValidation:
+    """Ensure the parser rejects template echoes and accepts real keys."""
+
+    def test_rejects_template_echo_issue_key(self, jp, monkeypatch):
+        _capture_argv(
+            monkeypatch, jp,
+            '{"result":"JIRA_RESULT:ISSUE_KEY|ISSUE_URL"}')
+        with pytest.raises(RuntimeError, match="Could not parse Jira result"):
+            jp._run_jira_session(
+                "Create this issue...",
+                "mcp__claude_ai_Jira__createJiraIssue",
+            )
+
+    def test_rejects_lowercase_key(self, jp, monkeypatch):
+        _capture_argv(
+            monkeypatch, jp,
+            '{"result":"JIRA_RESULT:test-123|https://x/test-123"}')
+        with pytest.raises(RuntimeError, match="Could not parse Jira result"):
+            jp._run_jira_session(
+                "Create this issue...",
+                "mcp__claude_ai_Jira__createJiraIssue",
+            )
+
+    def test_accepts_real_jira_key(self, jp, monkeypatch):
+        _capture_argv(
+            monkeypatch, jp,
+            '{"result":"JIRA_RESULT:VNT-12345|https://acme.atlassian.net/browse/VNT-12345"}')
+        key, url = jp._run_jira_session(
+            "Create this issue...",
+            "mcp__claude_ai_Jira__createJiraIssue",
+        )
+        assert key == "VNT-12345"
+        assert "VNT-12345" in url
+
+    def test_accepts_project_key_format(self, jp, monkeypatch):
+        _capture_argv(
+            monkeypatch, jp,
+            '{"result":"JIRA_RESULT:TEST-42|https://x/TEST-42"}')
+        key, url = jp._run_jira_session(
+            "Create this issue...",
+            "mcp__claude_ai_Jira__createJiraIssue",
+        )
+        assert key == "TEST-42"

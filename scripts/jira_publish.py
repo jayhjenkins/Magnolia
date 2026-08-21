@@ -400,9 +400,10 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
     text = harness_lib.unwrap_oneshot_result(result.stdout, harness_name) or ""
     output = text + "\n" + result.stderr
 
-    # Parse result
+    # Parse result — validate that the captured key looks like a real Jira key
+    # (PROJECT-123), not a literal template echo (ISSUE_KEY).
     match = re.search(r"JIRA_RESULT:([^|\s]+)\|(\S+)", output)
-    if match:
+    if match and re.fullmatch(r"[A-Z]+-\d+", match.group(1)):
         return match.group(1), match.group(2)
 
     # Check for error
