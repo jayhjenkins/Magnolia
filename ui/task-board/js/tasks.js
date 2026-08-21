@@ -1319,8 +1319,14 @@ async function publishToJira(taskId) {
     const res = await fetch(`${API}/tasks/${taskId}/publish-jira`, { method: 'POST' });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    fetchTasks();
-    closeModal();
+    if (btn && data.issue_key && data.issue_url) {
+      btn.outerHTML = `<a class="jira-success" href="${escapeHtml(data.issue_url)}" target="_blank">${escapeHtml(data.issue_key)} created - open in Jira</a>`;
+      fetchTasks();
+      setTimeout(closeModal, 4000);
+    } else {
+      fetchTasks();
+      closeModal();
+    }
   } catch (err) {
     toast(`Publish failed: ${err.message}`);
     if (btn) { btn.disabled = false; btn.textContent = 'Publish to Jira'; }
@@ -1347,8 +1353,14 @@ async function updateJira(taskId) {
     const res = await fetch(`${API}/tasks/${taskId}/update-jira`, { method: 'POST' });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    fetchTasks();
-    closeModal();
+    if (btn && data.issue_key && data.issue_url) {
+      btn.outerHTML = `<a class="jira-success" href="${escapeHtml(data.issue_url)}" target="_blank">${escapeHtml(data.issue_key)} updated - open in Jira</a>`;
+      fetchTasks();
+      setTimeout(closeModal, 4000);
+    } else {
+      fetchTasks();
+      closeModal();
+    }
   } catch (err) {
     toast(`Update failed: ${err.message}`);
     if (btn) { btn.disabled = false; btn.textContent = actionLabel; }
