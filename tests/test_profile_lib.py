@@ -396,3 +396,30 @@ def test_resolve_model_explicit_model_id_passthrough_with_codex(tmp_path):
     assert profile_lib.resolve_model("light", posture="low",
                                      task_override="claude-opus-4-8",
                                      root=str(tmp_path)) == "claude-opus-4-8"
+
+
+# --- min_tier floor ---
+
+def test_resolve_model_min_tier_prevents_downshift():
+    # low posture shifts standard->light (haiku), but min_tier="standard" floors it
+    assert profile_lib.resolve_model("standard", posture="low",
+                                     min_tier="standard") == "sonnet"
+
+
+def test_resolve_model_min_tier_no_effect_when_above():
+    # balanced posture keeps standard->standard; min_tier="light" is below, no effect
+    assert profile_lib.resolve_model("standard", posture="balanced",
+                                     min_tier="light") == "sonnet"
+
+
+def test_resolve_model_min_tier_with_high_posture():
+    # high posture shifts standard->deep (opus); min_tier="standard" is below, no effect
+    assert profile_lib.resolve_model("standard", posture="high",
+                                     min_tier="standard") == "opus"
+
+
+def test_resolve_model_min_tier_ignored_when_task_override():
+    # task_override wins over everything, including min_tier
+    assert profile_lib.resolve_model("standard", posture="low",
+                                     task_override="haiku",
+                                     min_tier="standard") == "haiku"

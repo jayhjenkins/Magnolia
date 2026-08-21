@@ -479,14 +479,19 @@ def cost_posture(root=None):
     return (config(root).get("models") or {}).get("cost_posture") or "balanced"
 
 
-def resolve_model(worker_tier, posture=None, task_override=None, root=None):
+def resolve_model(worker_tier, posture=None, task_override=None, root=None,
+                   min_tier=None):
     """Resolve the model id for a dispatch.
 
     Precedence: task_override (a model id OR a tier name) wins. Otherwise the
     worker's declared tier is shifted by the posture (low -1 / balanced 0 /
     high +1) and clamped to [light, deep]. Unknown tier -> 'standard';
     unknown posture -> 'balanced'. The active harness determines the
-    tier-to-model mapping (Claude vs Codex model families)."""
+    tier-to-model mapping (Claude vs Codex model families).
+
+    min_tier: optional floor (e.g. 'standard') — the resolved tier will never
+    drop below this regardless of posture shift. Used by dispatch paths that
+    require a minimum capability (MCP tool calling, structured output)."""
     active = harness(root)
     tier_map = HARNESS_TIER_MAPS.get(active, TIER_MODELS)
     if task_override:
@@ -500,6 +505,8 @@ def resolve_model(worker_tier, posture=None, task_override=None, root=None):
         posture = cost_posture(root)
     shift = _POSTURE_SHIFT.get(posture, 0)
     idx = max(0, min(len(TIER_ORDER) - 1, TIER_ORDER.index(tier) + shift))
+    if min_tier and min_tier in TIER_ORDER:
+        idx = max(idx, TIER_ORDER.index(min_tier))
     return tier_map[TIER_ORDER[idx]]
 
 

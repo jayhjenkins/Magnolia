@@ -367,7 +367,7 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
     Raises RuntimeError on failure.
     """
     cmd, harness_name = harness_lib.build_oneshot_cmd(
-        prompt, profile_lib.resolve_model("standard"),
+        prompt, profile_lib.resolve_model("standard", min_tier="standard"),
         allowed_tools=allowed_tools,
         max_turns=max_turns,
         append_system_prompt=JIRA_SYSTEM_PROMPT,
@@ -376,7 +376,7 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
     # Jira operations require MCP; fall back to Claude if active harness lacks it.
     if harness_lib.requires_claude_fallback(harness_name, requires_mcp=True):
         cmd, harness_name = harness_lib.build_oneshot_cmd(
-            prompt, profile_lib.resolve_model("standard"),
+            prompt, profile_lib.resolve_model("standard", min_tier="standard"),
             harness="claude",
             allowed_tools=allowed_tools,
             max_turns=max_turns,
@@ -470,14 +470,14 @@ Or with missing dates: JIRA_READ:Done|Ship the feature|none|none|none
 If the issue is not found: JIRA_READ:NOT_FOUND"""
 
     cmd, harness_name = harness_lib.build_oneshot_cmd(
-        prompt, profile_lib.resolve_model("standard"),
+        prompt, profile_lib.resolve_model("standard", min_tier="standard"),
         allowed_tools="mcp__claude_ai_Jira__getJiraIssue",
         max_turns=3,
         permission_mode="bypassPermissions",
     )
     if harness_lib.requires_claude_fallback(harness_name, requires_mcp=True):
         cmd, harness_name = harness_lib.build_oneshot_cmd(
-            prompt, profile_lib.resolve_model("standard"),
+            prompt, profile_lib.resolve_model("standard", min_tier="standard"),
             harness="claude",
             allowed_tools="mcp__claude_ai_Jira__getJiraIssue",
             max_turns=3,
