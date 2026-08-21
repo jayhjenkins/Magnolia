@@ -515,6 +515,12 @@ def build_profile(root=None):
             opts.append({"id": opt_id, "label": opt_label,
                          "status": status, "detail": (cap or {}).get("detail", "")})
         integrations[out_key] = {"label": label, "active": active, "options": opts}
+        if out_key == "project_management":
+            jcfg = profile_lib.jira_config(root)
+            integrations[out_key]["jira_credentials"] = {
+                "email": jcfg.get("email", ""),
+                "has_token": bool(jcfg.get("api_token", "")),
+            }
 
     voice = {
         "teams": profile_lib.voice_text("teams", root),
@@ -732,6 +738,42 @@ def handle_profile_model_posture(handler):
         _error_response(handler, f"Invalid JSON body: {e}", status=400)
         return
     _respond_apply(handler, apply_profile_model_posture, body)
+
+
+def handle_set_jira_credentials(handler):
+    """PUT /api/profile/integrations/jira-credentials -- body {email, api_token}."""
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    email = (body.get("email") or "").strip()
+    api_token = (body.get("api_token") or "").strip()
+    if not email:
+        _error_response(handler, "email is required", status=400)
+        return
+
+    def mutate(doc):
+        pm = doc.setdefault("project_management", {})
+        jira = pm.setdefault("jira", {})
+        jira["email"] = email
+        if api_token:  # empty string = don't overwrite existing token
+            jira["api_token"] = api_token
+
+    profile_lib._update_yaml("integrations.yaml", mutate)
+    # Reload the module-level jira config in jira_publish
+    try:
+        import jira_publish
+        new_cfg = profile_lib.jira_config()
+        jira_publish.JIRA_CLOUD_ID = new_cfg.get("cloud_id", "")
+        jira_publish.JIRA_PROJECT_KEY = new_cfg.get("project_key", "")
+    except Exception:
+        pass  # jira_publish may not be importable in all environments
+    _json_response(handler, {
+        "ok": True,
+        "email": email,
+        "has_token": bool(api_token or profile_lib.jira_config().get("api_token", "")),
+    })
 
 
 def handle_quality(handler):
@@ -3674,6 +3716,10 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/profile/packs" and method == "POST":
             handle_profile_packs(self)
+            return True
+
+        if path == "/api/profile/integrations/jira-credentials" and method == "PUT":
+            handle_set_jira_credentials(self)
             return True
 
         match = re.match(r"^/api/profile/integrations/([^/]+)$", path)

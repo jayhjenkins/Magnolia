@@ -108,7 +108,23 @@ function _pfIntegrations(ints) {
         </div>`;
       }
     }
-    cats += `<div class="pf-int-cat"><div class="pf-int-cat-head">${escapeHtml(cat.label)}</div><div class="pf-providers">${rows}</div>${locked}</div>`;
+    let credentials = '';
+    if (key === 'project_management' && cat.active === 'jira' && cat.jira_credentials) {
+      const cred = cat.jira_credentials;
+      const tokenPlaceholder = cred.has_token ? 'Configured (leave empty to keep)' : 'Paste your API token';
+      credentials = `<div class="pf-jira-creds">
+        <div class="pf-fields">
+          <div class="pf-field"><label>Jira email</label><input class="pf-input" id="pf-jira-email" value="${escapeHtml(cred.email || '')}" placeholder="you@company.com"></div>
+          <div class="pf-field"><label>API token</label><input class="pf-input" id="pf-jira-token" type="password" value="" placeholder="${escapeHtml(tokenPlaceholder)}"></div>
+        </div>
+        <div class="pf-actions">
+          <button class="btn btn-primary" onclick="pfSaveJiraCreds()">Save credentials</button>
+          <span class="pf-saved" id="pf-saved-jira-creds">Saved</span>
+        </div>
+        <p class="pf-creds-hint">Direct API access for publishing. Create a token at <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">id.atlassian.com</a></p>
+      </div>`;
+    }
+    cats += `<div class="pf-int-cat"><div class="pf-int-cat-head">${escapeHtml(cat.label)}</div><div class="pf-providers">${rows}</div>${locked}${credentials}</div>`;
   }
   return `<section class="pf-section">
     <div class="pf-section-head"><span class="pf-section-title">Integrations</span><span class="pf-section-hint">Tools Magnolia works through</span></div>
@@ -139,6 +155,37 @@ function pfFix(capability) {
       host.insertAdjacentElement('afterend', note);
     }
     note.innerHTML = msg;
+  }
+}
+
+async function pfSaveJiraCreds() {
+  const email = document.getElementById('pf-jira-email').value.trim();
+  const token = document.getElementById('pf-jira-token').value;
+  if (!email) return;
+  const body = { email };
+  if (token) body.api_token = token;
+  try {
+    const res = await fetch(`${API}/profile/integrations/jira-credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (_profile && _profile.integrations && _profile.integrations.project_management) {
+      _profile.integrations.project_management.jira_credentials = {
+        email: data.email,
+        has_token: data.has_token,
+      };
+    }
+    const tokenInput = document.getElementById('pf-jira-token');
+    if (tokenInput) {
+      tokenInput.value = '';
+      tokenInput.placeholder = data.has_token ? 'Configured (leave empty to keep)' : 'Paste your API token';
+    }
+    _flashSaved('pf-saved-jira-creds');
+  } catch (err) {
+    console.error('Failed to save Jira credentials:', err);
   }
 }
 

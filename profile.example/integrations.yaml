@@ -10,6 +10,8 @@ project_management:
     board_id: ""         # e.g. 1096 — the team's Jira board id
     product_area: ""     # e.g. Home AI DLC — the team's product-area / swim-lane label
     conventions: ""      # free-form team nuance the factory captures (e.g. "always set Sprint")
+    email: ""            # Atlassian account email for REST API auth
+    api_token: ""        # Jira API token (id.atlassian.com > Security > API tokens)
 transcript:
   provider: "none"       # otter | granola | none
   target: "datasets/meetings/"
