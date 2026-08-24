@@ -38,7 +38,7 @@ INTAKE_ROUTES = {"observe", "capture", "candidate", "ignore"}
 # Brief §3 closed emitter trigger set — the only triggers an emitter may declare.
 EMITTER_TRIGGERS = {"drift:broken", "candidate-ripe", "phase-advance-proposable",
                     "cycle-fresh", "completion-verified", "silent-too-long",
-                    "tracker-status-mismatch"}
+                    "tracker-status-mismatch", "date-drift"}
 
 
 def _theme_tokens():

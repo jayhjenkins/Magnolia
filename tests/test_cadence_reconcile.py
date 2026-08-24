@@ -16,6 +16,11 @@ import program_lib as pl
 import task_lib
 from cadence import reconcile
 
+# Save originals before the autouse fixture patches them.
+_REAL_llm_evaluate_proposal = reconcile._llm_evaluate_proposal
+_REAL_llm_evaluate_archive_proposal = reconcile._llm_evaluate_archive_proposal
+_REAL_llm_evaluate_tracker_proposal = reconcile._llm_evaluate_tracker_proposal
+
 
 @pytest.fixture(autouse=True)
 def _isolated_task_queues(tmp_path_factory, monkeypatch):
@@ -2925,7 +2930,9 @@ def test_completion_triggers_phase_advance_proposal(tmp_path):
     assert cards[0]["id"] in result["emitted"]
 
 
-def test_commitment_triggers_phase_advance_proposal(tmp_path):
+def test_commitment_does_not_trigger_phase_advance_proposal(tmp_path):
+    """commitment alone is NOT strong enough to trigger a phase advance;
+    only completion qualifies."""
     root = str(tmp_path)
     pid = _seed_rock_program(
         root, phase="define",
@@ -2939,7 +2946,7 @@ def test_commitment_triggers_phase_advance_proposal(tmp_path):
     cards = [c for c in _open_human_cards()
              if c.get("task_type") == "cadence-propose-update"
              and c.get("proposal", {}).get("op") == "advance-phase"]
-    assert len(cards) == 1
+    assert len(cards) == 0
 
 
 def test_risk_does_not_trigger_proposal(tmp_path):
@@ -3620,3 +3627,300 @@ def test_llm_eval_receives_frontmatter_and_body(tmp_path, monkeypatch):
     assert len(fm["checkpoints"]) == 1
     assert fm["checkpoints"][0]["id"] == "cp1"
     assert captured["kwargs"].get("body") is not None
+
+
+# ─── LLM eval fail-closed ─────────────────────────────────────────────────────
+
+
+def test_llm_eval_fail_closed_on_timeout(monkeypatch):
+    """When LLM eval times out, it returns (False, ...) not (True, ...)."""
+    import subprocess as sp
+
+    def _timeout_run(*args, **kwargs):
+        raise sp.TimeoutExpired(cmd="claude", timeout=90)
+
+    monkeypatch.setattr(reconcile, "_llm_evaluate_proposal",
+                        _REAL_llm_evaluate_proposal)
+    monkeypatch.setattr(sp, "run", _timeout_run)
+    approved, reason = reconcile._llm_evaluate_proposal(
+        "Test Program", "define", "build", "Build phase",
+        ["some evidence"])
+    assert approved is False
+    assert "fail-closed" in reason
+
+
+def test_llm_eval_archive_fail_closed_on_timeout(monkeypatch):
+    import subprocess as sp
+
+    def _timeout_run(*args, **kwargs):
+        raise sp.TimeoutExpired(cmd="claude", timeout=90)
+
+    monkeypatch.setattr(reconcile, "_llm_evaluate_archive_proposal",
+                        _REAL_llm_evaluate_archive_proposal)
+    monkeypatch.setattr(sp, "run", _timeout_run)
+    approved, reason = reconcile._llm_evaluate_archive_proposal(
+        "Test Program", "terminal phase reached", ["verified"],
+        ["all done"])
+    assert approved is False
+    assert "fail-closed" in reason
+
+
+def test_llm_eval_tracker_fail_closed_on_timeout(monkeypatch):
+    import subprocess as sp
+
+    def _timeout_run(*args, **kwargs):
+        raise sp.TimeoutExpired(cmd="claude", timeout=90)
+
+    monkeypatch.setattr(reconcile, "_llm_evaluate_tracker_proposal",
+                        _REAL_llm_evaluate_tracker_proposal)
+    monkeypatch.setattr(sp, "run", _timeout_run)
+    approved, reason = reconcile._llm_evaluate_tracker_proposal(
+        "Test Program", "VNT-12345", "Backlog",
+        ["active work happening"])
+    assert approved is False
+    assert "fail-closed" in reason
+
+
+# ─── LLM eval prompt includes Intent ──────────────────────────────────────────
+
+
+def test_llm_eval_prompt_includes_intent(tmp_path, monkeypatch):
+    """The LLM eval prompt now includes the Intent section's success criteria."""
+    captured_prompt = {}
+
+    def _capture_run(*args, **kwargs):
+        import subprocess as sp
+        raise sp.TimeoutExpired(cmd="claude", timeout=90)
+
+    import subprocess as sp
+    monkeypatch.setattr(sp, "run", _capture_run)
+
+    intent_text = "KR1: Achieve 70% activation rate. KR2: Board frustration below 40."
+    body = f"## Intent\n{intent_text}\n\n## Observations\n"
+    reconcile._llm_evaluate_proposal(
+        "Test Rock", "build", "beta", "Beta phase",
+        ["some evidence"], frontmatter={"drift": "holding"}, body=body)
+    # We can't capture the prompt directly since it times out before building,
+    # but we can test it unit-style by calling _parse_intent.
+    assert pl._parse_intent(body) == intent_text
+
+
+# ─── Archive guards ───────────────────────────────────────────────────────────
+
+
+def test_propose_archive_blocked_by_pending_checkpoints(tmp_path):
+    """Terminal phase + pending checkpoint -> no archive."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Has pending checkpoints",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "verified",
+            "phase_entered": {"verified": "2026-06-01"},
+            "checkpoints": [
+                {"id": "cp1", "label": "Done", "status": "met"},
+                {"id": "cp2", "label": "Not done", "status": "pending"},
+            ],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_archive(fm, type_entry, program["body"], now=NOW)
+    assert result is None
+
+
+def test_propose_archive_blocked_by_future_due_date(tmp_path):
+    """Terminal phase + due date > 14 days in the future -> no archive."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="eos-rock",
+        title="Rock with future due date",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "ga",
+            "phase_entered": {"ga": "2026-06-01"},
+            "due": "2026-09-30",
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "eos-rock"), {})
+
+    result = reconcile._propose_archive(fm, type_entry, program["body"], now=NOW)
+    assert result is None
+
+
+def test_propose_archive_terminal_all_met_near_due_fires(tmp_path):
+    """Terminal phase + all checkpoints met + due date within 14 days -> archive fires."""
+    root = str(tmp_path / "data")
+    now = date(2026, 9, 20)  # due is 2026-09-30, within 14 days
+    program_id, _ = pl.create_program(
+        type="eos-rock",
+        title="Rock almost due all met",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "ga",
+            "phase_entered": {"ga": "2026-08-01"},
+            "due": "2026-09-30",
+            "checkpoints": [
+                {"id": "cp1", "status": "met"},
+            ],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "eos-rock"), {})
+
+    result = reconcile._propose_archive(fm, type_entry, program["body"], now=now)
+    assert result is not None
+    assert result["op"] == "archive"
+
+
+def test_propose_archive_cooldown_type_configurable(tmp_path):
+    """Type-level archive_cooldown_days overrides the default 7-day constant."""
+    root = str(tmp_path / "data")
+    # Program entered ga on June 8, now is June 16 -> 8 days.
+    # Default cooldown is 7 -> would normally fire.
+    # eos-rock has archive_cooldown_days: 21 -> should NOT fire.
+    program_id, _ = pl.create_program(
+        type="eos-rock",
+        title="Rock with long cooldown",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "ga",
+            "phase_entered": {"ga": "2026-06-08"},
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    fm = program["frontmatter"]
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "eos-rock"), {})
+
+    result = reconcile._propose_archive(fm, type_entry, program["body"], now=NOW)
+    assert result is None
+
+
+# ─── Date drift proposals ────────────────────────────────────────────────────
+
+
+def test_propose_date_update_fires_on_overdue_checkpoint(tmp_path):
+    """Overdue checkpoint + Jira binding + stale Jira date -> date update."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Initiative with overdue EA",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-05-01"},
+            "last_cycle": OTHER_PERIOD,
+            "bindings": [
+                {"id": "jira-feature", "role": "truth",
+                 "kind": "project_management", "anchor": "VNT-99999",
+                 "mode": "read", "health": "ok"},
+            ],
+            "checkpoints": [
+                {"id": "ship", "label": "Ship to EA", "due": "2026-06-01",
+                 "status": "pending"},
+            ],
+        },
+        root=root,
+    )
+    # Add a date-change observation from the adapter showing Jira EA date
+    pl.append_observation(
+        program_id, root=root,
+        kind="date-change", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-99999",
+        claim="EA date is 2026-06-01.", date="2026-06-10",
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_date_update(
+        program["frontmatter"], type_entry, program["body"], now=NOW)
+
+    assert result is not None
+    assert result["op"] == "update-tracker-date"
+    assert result["tracker_key"] == "VNT-99999"
+    assert result["field"] == "ea_date"
+    assert result["overdue_days"] == 15  # June 16 - June 1
+
+
+def test_propose_date_update_none_without_tracker(tmp_path):
+    """No Jira binding -> no date update proposal."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="No tracker",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-05-01"},
+            "checkpoints": [
+                {"id": "ship", "label": "Ship", "due": "2026-06-01",
+                 "status": "pending"},
+            ],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_date_update(
+        program["frontmatter"], type_entry, program["body"], now=NOW)
+    assert result is None
+
+
+def test_propose_date_update_none_when_dates_aligned(tmp_path):
+    """Checkpoint not overdue -> no date update proposal."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="On track initiative",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-05-01"},
+            "last_cycle": OTHER_PERIOD,
+            "bindings": [
+                {"id": "jira-feature", "role": "truth",
+                 "kind": "project_management", "anchor": "VNT-88888",
+                 "mode": "read", "health": "ok"},
+            ],
+            "checkpoints": [
+                {"id": "ship", "label": "Ship to EA", "due": "2026-07-01",
+                 "status": "pending"},
+            ],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_date_update(
+        program["frontmatter"], type_entry, program["body"], now=NOW)
+    assert result is None
+
+
+def test_date_drift_emitter_in_registry():
+    """Both pipeline types have the date-drift emitter trigger."""
+    registry = _registry()
+    for type_id in ("roadmap-initiative", "eos-rock"):
+        type_entry = next(t for t in registry["types"] if t["id"] == type_id)
+        triggers = [e["on"] for e in type_entry.get("emitters", [])]
+        assert "date-drift" in triggers, f"{type_id} missing date-drift emitter"

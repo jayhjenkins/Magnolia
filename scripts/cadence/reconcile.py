@@ -767,7 +767,7 @@ def _dispatch_agent_task(task_id):
         sys.stderr.write(f"[cadence] Failed to dispatch agent task {task_id}: {e}\n")
 
 
-_LLM_EVAL_TIMEOUT = 30
+_LLM_EVAL_TIMEOUT = 90
 _LLM_EVAL_TIER = "deep"
 
 
@@ -776,9 +776,8 @@ def _llm_evaluate_proposal(program_title, current_phase, target_phase,
                             frontmatter=None, body=None):
     """Ask Claude whether evidence supports advancing to the target phase.
 
-    Returns (approved, reason). Fail-open: returns (True, "evaluation
-    unavailable") on any dispatch failure so the proposal still reaches the
-    human for a decision.
+    Returns (approved, reason). Fail-closed: returns (False, ...) on any
+    dispatch failure so bad proposals don't reach the board.
     """
     obs_text = "\n".join(f"- {o}" for o in observations[-15:]) if observations else "(none)"
     context_parts = []
@@ -806,20 +805,28 @@ def _llm_evaluate_proposal(program_title, current_phase, target_phase,
     context_section = ""
     if context_parts:
         context_section = "\nProgram health:\n" + "\n".join(context_parts) + "\n"
+    intent_section = ""
+    if body:
+        raw_intent = program_lib._parse_intent(body)
+        if raw_intent:
+            intent_section = f"\nSuccess criteria / Intent:\n{raw_intent}\n"
     prompt = (
         "You are evaluating whether a product initiative should advance to "
         "the next phase. You must weigh ALL the evidence -- including "
         "negative signals (risks, blockers, overdue checkpoints, broken "
-        "drift) -- not just the latest positive observations.\n\n"
+        "drift) -- not just the latest positive observations. Pay close "
+        "attention to the success criteria / intent: if KRs or metric "
+        "targets are not met, the program is NOT ready to advance.\n\n"
         f"Program: {program_title}\n"
         f"Current phase: {current_phase}\n"
         f"Proposed phase: {target_phase}\n"
         f"What '{target_phase}' means: {phase_description}\n"
+        f"{intent_section}"
         f"{context_section}\n"
         f"Evidence (oldest to newest):\n{obs_text}\n\n"
-        "Based on ALL the evidence above -- including health status, "
-        "checkpoint progress, and cycle history -- does the program meet "
-        f"the criteria for '{target_phase}'?\n"
+        "Based on ALL the evidence above -- including success criteria, "
+        "health status, checkpoint progress, and cycle history -- does the "
+        f"program meet the criteria for '{target_phase}'?\n"
         "Reply with exactly YES or NO on the first line, "
         "then a one-sentence reason on the second line."
     )
@@ -835,11 +842,11 @@ def _llm_evaluate_proposal(program_title, current_phase, target_phase,
             timeout=_LLM_EVAL_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        sys.stderr.write(f"[cadence] LLM eval failed ({exc.__class__.__name__}), fail-open\n")
-        return True, "evaluation unavailable"
+        sys.stderr.write(f"[cadence] LLM eval failed ({exc.__class__.__name__}), fail-closed\n")
+        return False, "evaluation unavailable -- fail-closed"
     if proc.returncode != 0:
-        sys.stderr.write(f"[cadence] LLM eval exited {proc.returncode}, fail-open\n")
-        return True, "evaluation unavailable"
+        sys.stderr.write(f"[cadence] LLM eval exited {proc.returncode}, fail-closed\n")
+        return False, "evaluation unavailable -- fail-closed"
     out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
     first_line = (out or "").strip().split("\n")[0].strip().upper()
     reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
@@ -874,8 +881,8 @@ def _llm_evaluate_tracker_proposal(program_title, tracker_key, current_status,
                                     evidence_claims):
     """Ask Claude whether evidence represents genuine active work vs incidental.
 
-    Returns (approved, reason). Fail-open: returns (True, "evaluation
-    unavailable") on any dispatch failure.
+    Returns (approved, reason). Fail-closed: returns (False, ...) on any
+    dispatch failure.
     """
     claims_text = "\n".join(f"- {c}" for c in evidence_claims[-5:]) if evidence_claims else "(none)"
     prompt = (
@@ -903,11 +910,11 @@ def _llm_evaluate_tracker_proposal(program_title, tracker_key, current_status,
             timeout=_LLM_EVAL_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        sys.stderr.write(f"[cadence] LLM tracker eval failed ({exc.__class__.__name__}), fail-open\n")
-        return True, "evaluation unavailable"
+        sys.stderr.write(f"[cadence] LLM tracker eval failed ({exc.__class__.__name__}), fail-closed\n")
+        return False, "evaluation unavailable -- fail-closed"
     if proc.returncode != 0:
-        sys.stderr.write(f"[cadence] LLM tracker eval exited {proc.returncode}, fail-open\n")
-        return True, "evaluation unavailable"
+        sys.stderr.write(f"[cadence] LLM tracker eval exited {proc.returncode}, fail-closed\n")
+        return False, "evaluation unavailable -- fail-closed"
     out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
     first_line = (out or "").strip().split("\n")[0].strip().upper()
     reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
@@ -920,8 +927,8 @@ def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
                                     observations):
     """Ask Claude whether a program is genuinely ready to archive.
 
-    Returns (approved, reason). Fail-open: returns (True, "evaluation
-    unavailable") on any dispatch failure.
+    Returns (approved, reason). Fail-closed: returns (False, ...) on any
+    dispatch failure.
     """
     obs_text = "\n".join(f"- {o}" for o in observations[-5:]) if observations else "(none)"
     cite_text = ", ".join(str(c) for c in citations) if citations else "(none)"
@@ -948,11 +955,11 @@ def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
             timeout=_LLM_EVAL_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        sys.stderr.write(f"[cadence] LLM archive eval failed ({exc.__class__.__name__}), fail-open\n")
-        return True, "evaluation unavailable"
+        sys.stderr.write(f"[cadence] LLM archive eval failed ({exc.__class__.__name__}), fail-closed\n")
+        return False, "evaluation unavailable -- fail-closed"
     if proc.returncode != 0:
-        sys.stderr.write(f"[cadence] LLM archive eval exited {proc.returncode}, fail-open\n")
-        return True, "evaluation unavailable"
+        sys.stderr.write(f"[cadence] LLM archive eval exited {proc.returncode}, fail-closed\n")
+        return False, "evaluation unavailable -- fail-closed"
     out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
     first_line = (out or "").strip().split("\n")[0].strip().upper()
     reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
@@ -1027,7 +1034,7 @@ def _propose_phase_advance(fm, type_entry, body):
 
 _PHASE_EVIDENCE_KINDS = frozenset({"status-signal", "completion", "commitment"})
 
-_PHASE_ADVANCE_KINDS = frozenset({"completion", "commitment"})
+_PHASE_ADVANCE_KINDS = frozenset({"completion"})
 
 
 def _has_phase_evidence(body, since=None):
@@ -1132,6 +1139,119 @@ def _build_tracker_update_description(mutation, program_id):
     )
 
 
+_EA_CHECKPOINT_TOKENS = {"ship", "beta", "build-exit", "ea", "ftue-ea"}
+_GA_CHECKPOINT_TOKENS = {"did-it-work", "verified", "ga", "activation"}
+_DATE_DRIFT_OVERDUE_DAYS = 7
+
+
+def _propose_date_update(fm, type_entry, body, now=None):
+    """Detect date drift: checkpoint overdue but Jira date not updated.
+
+    Returns {"op": "update-tracker-date", "tracker_key": key,
+    "field": "ea_date"|"ga_date", "current_jira_date": ...,
+    "checkpoint_id": ..., "checkpoint_label": ..., "overdue_days": int,
+    "reason": ...} or None.
+    """
+    anchor = program_lib.tracker_anchor(fm)
+    if not anchor:
+        return None
+    if now is None:
+        now = datetime.now(timezone.utc)
+    now_date = _to_date(now)
+
+    # Parse latest Jira dates from date-change observations.
+    jira_ea = None
+    jira_ga = None
+    for _date_str, kind, source, claim in _iter_observations(body or ""):
+        if kind != "date-change" or not source.startswith("adapter:"):
+            continue
+        m_ea = re.match(r"EA date is (\S+)\.", claim)
+        if m_ea:
+            jira_ea = _parse_iso_date(m_ea.group(1))
+        m_ga = re.match(r"GA date is (\S+)\.", claim)
+        if m_ga:
+            jira_ga = _parse_iso_date(m_ga.group(1))
+
+    # Scan checkpoints for overdue ones that map to a Jira date field.
+    for cp in fm.get("checkpoints") or []:
+        if cp.get("status") in {"met", "missed", "verified"}:
+            continue
+        due = _parse_iso_date(cp.get("due"))
+        if due is None:
+            continue
+        overdue_days = (now_date - due).days
+        if overdue_days < _DATE_DRIFT_OVERDUE_DAYS:
+            continue
+
+        cp_id = cp.get("id", "")
+        cp_label = cp.get("label", cp_id)
+        # Determine which Jira field this checkpoint maps to.
+        field = None
+        jira_date = None
+        if any(tok in cp_id for tok in _EA_CHECKPOINT_TOKENS):
+            field = "ea_date"
+            jira_date = jira_ea
+        elif any(tok in cp_id for tok in _GA_CHECKPOINT_TOKENS):
+            field = "ga_date"
+            jira_date = jira_ga
+
+        if not field:
+            continue
+
+        # If Jira date is already past the checkpoint due, the date hasn't
+        # been pushed out to reflect the slip.
+        if jira_date and jira_date > now_date:
+            continue
+
+        return {
+            "op": "update-tracker-date",
+            "tracker_key": anchor,
+            "field": field,
+            "current_jira_date": jira_date.isoformat() if jira_date else None,
+            "checkpoint_id": cp_id,
+            "checkpoint_label": cp_label,
+            "overdue_days": overdue_days,
+            "reason": (
+                f"{cp_label} overdue by {overdue_days} days; "
+                f"Jira {field.replace('_', ' ')} should be updated"
+            ),
+        }
+
+    # Also check the program's top-level due date against the GA field.
+    program_due = _parse_iso_date(fm.get("due"))
+    if program_due and jira_ga:
+        if program_due > jira_ga and jira_ga < now_date:
+            return {
+                "op": "update-tracker-date",
+                "tracker_key": anchor,
+                "field": "ga_date",
+                "current_jira_date": jira_ga.isoformat(),
+                "checkpoint_id": None,
+                "checkpoint_label": "program due date",
+                "overdue_days": (now_date - jira_ga).days,
+                "reason": (
+                    f"Jira GA date ({jira_ga.isoformat()}) has passed but "
+                    f"program is due {program_due.isoformat()}"
+                ),
+            }
+
+    return None
+
+
+def _build_date_update_description(mutation, program_id):
+    """Build a date-update proposal card body."""
+    key = mutation.get("tracker_key", "?")
+    field = mutation.get("field", "?").replace("_", " ")
+    current = mutation.get("current_jira_date", "not set")
+    cp_label = mutation.get("checkpoint_label", "?")
+    overdue = mutation.get("overdue_days", 0)
+    return (
+        f"Jira {key} {field} needs updating: {cp_label} is overdue by "
+        f"{overdue} days. Current Jira {field}: {current}.\n"
+        f"Review and update the date in Jira to reflect the actual timeline."
+    )
+
+
 def _build_birth_description(proposal, program_id):
     """Build a <=2-sentence ASCII birth-proposal card body (invariant #8).
 
@@ -1209,9 +1329,10 @@ def _propose_archive(fm, type_entry, body, now=None):
     """Propose archive mutation if ANY fact indicates completion.
 
     Facts checked:
-    1. Program phase is terminal (with cool-down after entry)
-    2. A "did-it-work" checkpoint is verified/met
-    3. A completion observation cites a tracker as closed
+    1. Program phase is terminal (with cool-down, pending-checkpoint guard,
+       and future-due-date guard after entry)
+    2. A "did-it-work" checkpoint is verified/met (strong signal, no guards)
+    3. A completion observation cites a tracker as closed (strong signal)
 
     Returns:
       - A dict with op:"archive", reason, citations if archive is proposed
@@ -1221,10 +1342,23 @@ def _propose_archive(fm, type_entry, body, now=None):
     phase = fm.get("phase")
     if phase and program_lib._terminal_phase(type_entry, phase):
         if now is not None:
+            cooldown = type_entry.get(
+                "archive_cooldown_days", _ARCHIVE_COOLDOWN_DAYS)
             entered = _phase_entered_date(fm, phase)
             if entered is not None:
                 days_at_terminal = (_to_date(now) - entered).days
-                if days_at_terminal < _ARCHIVE_COOLDOWN_DAYS:
+                if days_at_terminal < cooldown:
+                    return None
+            # Guard A: pending checkpoints block archive at terminal phase.
+            _TERMINAL_CP_STATUSES = {"met", "missed", "verified"}
+            for cp in fm.get("checkpoints") or []:
+                if cp.get("status") not in _TERMINAL_CP_STATUSES:
+                    return None
+            # Guard B: future due date (>14 days out) blocks archive.
+            due_raw = fm.get("due")
+            if due_raw:
+                due_date = _parse_iso_date(due_raw)
+                if due_date and (due_date - _to_date(now)).days > 14:
                     return None
         return {
             "op": "archive",
@@ -1649,6 +1783,33 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 tags=[program_id, "cadence"],
                 proposal=mutation,
                 description=_build_tracker_update_description(mutation, program_id),
+            )
+            emitted.append(task_id)
+            open_prop_ops.add(mutation["op"])
+
+        elif action == "propose-update" and on == "date-drift":
+            mutation = _propose_date_update(fm, type_entry, body or "", now=now)
+            if not mutation:
+                continue
+            import task_lib
+            if open_prop_ops is None:
+                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+            if mutation["op"] in open_prop_ops:
+                continue
+            if resolved_prop_ops is None:
+                resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
+            if _suppressed_by_resolution(mutation["op"], resolved_prop_ops, body):
+                continue
+            task_id, _ = task_lib.create_task(
+                title=f"{title}: update Jira {mutation.get('field', 'date').replace('_', ' ')}?",
+                queue="human",
+                priority="high",
+                creator="cadence",
+                card_type="recommendation",
+                task_type="cadence-propose-update",
+                tags=[program_id, "cadence"],
+                proposal=mutation,
+                description=_build_date_update_description(mutation, program_id),
             )
             emitted.append(task_id)
             open_prop_ops.add(mutation["op"])

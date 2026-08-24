@@ -10,6 +10,7 @@
     { "id": "roadmap-initiative", "label": "Roadmap initiative", "family": "roadmap",
       "state_model": "pipeline",
       "archive_after_silent_cycles": 6,
+      "archive_cooldown_days": 14,
       "phases": [
         { "id": "discovery", "label": "Discovery", "max_age_days": 21, "exit_checkpoint": "discovery-exit", "description": "Exploring the problem space, talking to customers, gathering requirements. No committed solution yet." },
         { "id": "planning",  "label": "Planning",  "max_age_days": 14, "exit_checkpoint": "planning-exit", "description": "Solution defined and scoped. Engineering work planned but not yet started." },
@@ -19,7 +20,7 @@
       ],
       "cadence": "weekly",
       "sources": [ { "kind": "transcripts", "mode": "read" }, { "kind": "project_management", "mode": "read" } ],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" }, { "on": "tracker-status-mismatch", "action": "propose-update" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" }, { "on": "tracker-status-mismatch", "action": "propose-update" }, { "on": "date-drift", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
         "signals": [
@@ -60,6 +61,7 @@
 
     { "id": "eos-rock", "label": "EOS rock", "family": "eos",
       "state_model": "pipeline",
+      "archive_cooldown_days": 21,
       "phases": [
         { "id": "define", "label": "Define", "max_age_days": 14, "exit_checkpoint": "define-exit", "description": "Scoping and defining the rock. Success criteria and milestones being established." },
         { "id": "build",  "label": "Build",  "max_age_days": 42, "exit_checkpoint": "build-exit", "description": "Active development and execution toward the rock's goals. Work is in progress." },
@@ -69,7 +71,7 @@
       "cadence": "weekly",
       "sources": [ { "kind": "eos_sheet", "mode": "read" } ],
       "sentinels": ["sheet-watch"],
-      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" }, { "on": "tracker-status-mismatch", "action": "propose-update" } ],
+      "emitters": [ { "on": "drift:broken", "action": "escalate" }, { "on": "phase-advance-proposable", "action": "propose-update" }, { "on": "completion-verified", "action": "propose-update" }, { "on": "silent-too-long", "action": "propose-update" }, { "on": "tracker-status-mismatch", "action": "propose-update" }, { "on": "date-drift", "action": "propose-update" } ],
       "intake": {
         "route": "candidate",
         "signals": [ "quarterly rock commitment declared in a leadership session" ],
