@@ -767,7 +767,7 @@ def _dispatch_agent_task(task_id):
         sys.stderr.write(f"[cadence] Failed to dispatch agent task {task_id}: {e}\n")
 
 
-_LLM_EVAL_TIMEOUT = 90
+_LLM_EVAL_TIMEOUT = 180
 _LLM_EVAL_TIER = "deep"
 
 
