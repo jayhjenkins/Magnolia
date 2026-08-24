@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magnolia — Isometric system map</title>
+<style>
+  :root { --ink:#19233f; --muted:#64748b; --paper:#edf5fa; --line:#c8d9e6; --blue:#4a8fd8; --teal:#20a89c; --violet:#8c6ad8; --amber:#e9a83a; --coral:#e67567; --slate:#5d708a; }
+  * { box-sizing:border-box } body { margin:0; color:var(--ink); background:radial-gradient(ellipse at 8% 2%,#fff8eb 0 12%,transparent 38%),radial-gradient(ellipse at 94% 18%,#e8d9fa 0 7%,transparent 32%),linear-gradient(155deg,#d9f0f5 0%,#f8e9e3 49%,#dbe8f5 100%); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; min-height:100vh; }
+  .page { max-width:1600px; margin:auto; padding:28px; }
+  header { display:flex; gap:22px; align-items:end; justify-content:space-between; border-bottom:1px solid var(--line); padding-bottom:19px; }
+  h1 { font-family:Georgia,serif; font-size:30px; line-height:1.08; margin:0 0 6px; letter-spacing:-.025em; } .eyebrow { color:#086d73; font-size:11px; letter-spacing:.11em; font-weight:800; text-transform:uppercase; } .subtitle { margin:0; color:#41546e; max-width:780px; } .stamp { color:#41546e; font-size:12px; text-align:right; white-space:nowrap; }
+  .layout { display:grid; grid-template-columns:minmax(680px,1.8fr) minmax(315px,.72fr); gap:22px; margin-top:22px; }
+  .map { position:relative; overflow:hidden; min-height:820px; background:radial-gradient(ellipse at 30% 0%,#fff6dd 0 8%,transparent 40%),radial-gradient(ellipse at 75% 76%,#d9d4f3 0 6%,transparent 34%),linear-gradient(145deg,#bfe3ed,#f8e3db 54%,#bfd6ee); border:1px solid #d2dceb; border-radius:18px; box-shadow:0 20px 45px #40536b2b, inset 0 1px #fff; isolation:isolate; }
+  .map::before { content:""; position:absolute; inset:0; z-index:0; pointer-events:none; opacity:.42; background:radial-gradient(ellipse at 17% 31%,#fff 0 4%,transparent 13%),radial-gradient(ellipse at 21% 29%,#fff 0 4%,transparent 15%),radial-gradient(ellipse at 78% 16%,#fff 0 3%,transparent 12%),radial-gradient(ellipse at 84% 17%,#fff 0 4%,transparent 15%); filter:blur(8px); }
+  svg { position:relative; z-index:1; display:block; width:100%; height:820px; cursor:grab; touch-action:none; } svg.is-dragging { cursor:grabbing; } #viewport { transform-origin:0 0; } [data-node] { cursor:pointer; transition:filter .18s ease, opacity .18s ease; } [data-node].selected { filter:drop-shadow(0 0 11px #fff) drop-shadow(0 0 16px #4b85ee); } [data-flow] { transition:opacity .18s ease, stroke-width .18s ease; } .has-focus [data-flow] { opacity:.16; } .has-focus [data-flow].active-flow { opacity:1; stroke-width:7; }
+  .map-tools { position:absolute; z-index:3; top:14px; right:14px; display:flex; align-items:center; gap:7px; padding:7px; border:1px solid #ffffffbb; border-radius:11px; background:#203557b8; backdrop-filter:blur(11px); box-shadow:0 6px 18px #253a5d38; color:#fff; } .map-tools button { appearance:none; width:30px; height:30px; border:0; border-radius:7px; background:#ffffff1e; color:#fff; cursor:pointer; font:700 18px/1 system-ui; } .map-tools button:hover { background:#ffffff40; } .map-tools button:focus-visible { outline:2px solid #ffdea2; outline-offset:2px; } .zoom-readout { min-width:43px; text-align:center; font-size:11px; font-variant-numeric:tabular-nums; }
+  .side { display:flex; flex-direction:column; gap:14px; }
+  .panel { border:1px solid #ffffffa8; background:#fffcf7de; backdrop-filter:blur(12px); border-radius:12px; padding:16px 17px; box-shadow:0 6px 18px #40536b12; } h2 { font-size:13px; letter-spacing:.075em; text-transform:uppercase; color:#475569; margin:0 0 11px; } h3 { margin:12px 0 3px; font-size:14px; } p { margin:0; } .muted { color:var(--muted); } .note { border-left:3px solid var(--amber); padding:3px 0 3px 11px; color:#425066; }
+  .legend { display:grid; grid-template-columns:17px 1fr; gap:8px 10px; align-items:center; font-size:12px; } .key { width:15px; height:5px; border-radius:4px; } .dash { border-top:3px dashed var(--slate); height:0; } .flow { display:grid; grid-template-columns:26px 1fr; gap:9px; margin:8px 0; font-size:12px; }.flow b { color:#2e4058; }
+  .sources { margin:0; padding-left:17px; font-size:12px; }.sources li { margin:6px 0; }.sources a { color:#126a91; text-decoration:none; border-bottom:1px solid #9ac6d7; }.sources a:hover { color:#084c6a; }
+  .focus-panel { background:linear-gradient(135deg,#fff9e9f4,#e9f3fff4); } .focus-kicker { color:#086d73; font-size:10px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; margin-bottom:4px; } .focus-panel h2 { color:#132d50; text-transform:none; letter-spacing:0; font-size:18px; margin-bottom:6px; }
+  .caption { margin-top:18px; color:#536274; font-size:12px; } code { background:#eef1f3; padding:1px 4px; border-radius:3px; color:#334155; font-size:.94em; }
+  @media (max-width:1050px) { .layout { grid-template-columns:1fr; } .map,svg { min-height:720px; height:720px; } header { align-items:start; flex-direction:column; } .stamp { text-align:left; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <div><div class="eyebrow">Current-state infrastructure map · main @ 7aa04ba</div><h1>Magnolia’s control plane and data paths</h1><p class="subtitle">An isometric, source-cited view of how local inputs become task cards, scoped headless work, governed actions, and durable program state.</p></div>
+    <div class="stamp">Read left → right for primary task flow<br>Read bottom → top for scheduled / program flow</div>
+  </header>
+
+  <section class="layout">
+    <div class="map" id="map" aria-label="Interactive isometric Magnolia system diagram">
+      <div class="map-tools" aria-label="Map controls"><button id="zoom-out" type="button" aria-label="Zoom out">−</button><span class="zoom-readout" id="zoom-readout">100%</span><button id="zoom-in" type="button" aria-label="Zoom in">+</button><button id="reset-map" type="button" aria-label="Reset map view" title="Reset view">↺</button></div>
+      <svg id="map-canvas" viewBox="0 0 1080 820" role="img" aria-labelledby="svg-title svg-desc" tabindex="0">
+        <title id="svg-title">Magnolia system map</title><desc id="svg-desc">An isometric grid city with buildings for inputs, board server, task files, dispatch, workers, governance, adapters, cadence, and external systems. Colored arrows label the data carried between them.</desc>
+        <defs>
+          <pattern id="grid" width="42" height="24" patternUnits="userSpaceOnUse" patternTransform="skewY(-30) scale(1 .866)"><path d="M0 0H42M0 0V24" fill="none" stroke="#cddbd6" stroke-width="1" opacity=".75"/></pattern>
+          <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#24384e" flood-opacity=".22"/></filter>
+          <marker id="a-blue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6Z" fill="#4a8fd8"/></marker><marker id="a-teal" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6Z" fill="#20a89c"/></marker><marker id="a-violet" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6Z" fill="#8c6ad8"/></marker><marker id="a-amber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6Z" fill="#e9a83a"/></marker><marker id="a-coral" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6Z" fill="#e67567"/></marker>
+        </defs>
+        <g id="viewport">
+        <rect width="1080" height="820" fill="url(#grid)" opacity=".92"/>
+        <path d="M0 600 L1080 10 M-110 720 L970 130 M150 820 L1080 330" stroke="#d6e1dc" stroke-width="2" opacity=".65"/>
+        <!-- Roads beneath flow lines -->
+        <path d="M58 457 L470 230 L999 514" fill="none" stroke="#ffffff" stroke-width="26" opacity=".8"/><path d="M58 457 L470 230 L999 514" fill="none" stroke="#d4dee1" stroke-width="2"/>
+        <path d="M212 726 L633 495 L1038 273" fill="none" stroke="#ffffff" stroke-width="26" opacity=".8"/><path d="M212 726 L633 495 L1038 273" fill="none" stroke="#d4dee1" stroke-width="2"/>
+        <!-- flow paths -->
+        <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path data-flow="input server" d="M190 276 C270 277 312 322 388 343" stroke="#20a89c" stroke-width="4" marker-end="url(#a-teal)"/><path data-flow="server dispatch" d="M498 361 C579 358 615 354 681 332" stroke="#4a8fd8" stroke-width="4" marker-end="url(#a-blue)"/>
+          <path data-flow="dispatch judge" d="M759 354 C805 381 818 428 808 471" stroke="#8c6ad8" stroke-width="4" marker-end="url(#a-violet)"/><path data-flow="judge adapters" d="M848 461 C914 428 943 394 961 338" stroke="#e67567" stroke-width="4" marker-end="url(#a-coral)"/>
+          <path data-flow="server tasks" d="M411 468 C375 526 335 571 296 611" stroke="#4a8fd8" stroke-width="4" marker-end="url(#a-blue)"/><path data-flow="tasks cadence" d="M367 641 C492 637 557 602 646 562" stroke="#e9a83a" stroke-width="4" marker-end="url(#a-amber)"/>
+          <path data-flow="profile cadence" d="M535 688 C591 663 640 646 690 624" stroke="#20a89c" stroke-width="4" marker-end="url(#a-teal)"/>
+          <path data-flow="cadence programs" d="M820 625 C883 634 931 647 976 668" stroke="#8c6ad8" stroke-width="4" stroke-dasharray="8 8" marker-end="url(#a-violet)"/>
+          <path data-flow="profile judge" d="M548 709 C609 740 708 749 787 724" stroke="#5d708a" stroke-width="3" stroke-dasharray="7 8" marker-end="url(#a-blue)"/>
+        </g>
+        <!-- Payload label pills -->
+        <g class="payload" font-family="Inter, sans-serif" font-size="10" font-weight="800" fill="#fff"><g transform="translate(252 278)"><rect width="104" height="19" rx="9" fill="#127d75"/><text x="9" y="13">transcript text</text></g><g transform="translate(555 334)"><rect width="93" height="19" rx="9" fill="#216fb8"/><text x="9" y="13">task ID + MD</text></g><g transform="translate(790 394)"><rect width="96" height="19" rx="9" fill="#6743a8"/><text x="9" y="13">output + score</text></g><g transform="translate(892 386)"><rect width="103" height="19" rx="9" fill="#ad4139"/><text x="8" y="13">gated publish</text></g><g transform="translate(299 522)"><rect width="100" height="19" rx="9" fill="#216fb8"/><text x="9" y="13">API / card edits</text></g><g transform="translate(476 598)"><rect width="108" height="19" rx="9" fill="#9d6513"/><text x="8" y="13">observations / drift</text></g><g transform="translate(878 646)"><rect width="93" height="19" rx="9" fill="#6743a8"/><text x="9" y="13">program files</text></g></g>
+        <!-- buildings -->
+        <g filter="url(#shadow)">
+          <!-- input dock --> <g data-node="input" transform="translate(84 169)"><path d="M0 84 L87 34 L170 84 L82 133Z" fill="#a8d9d2"/><path d="M0 84V156L82 205V133Z" fill="#398f8b"/><path d="M82 133L170 84V156L82 205Z" fill="#5eb7ad"/><path d="M0 84L87 34L170 84L82 133Z" fill="#d9f0e9"/><path d="M82 51V121" stroke="#519e99" stroke-width="7"/><text x="84" y="95" text-anchor="middle" class="bldg">INPUT DOCK</text><text x="84" y="111" text-anchor="middle" class="small">Otter · Granola</text></g>
+          <!-- server --> <g data-node="server" transform="translate(359 269)"><path d="M0 82 L82 35 L164 82 L82 129Z" fill="#cadff4"/><path d="M0 82V194L82 241V129Z" fill="#3475b9"/><path d="M82 129L164 82V194L82 241Z" fill="#5b9fe2"/><path d="M0 82L82 35L164 82L82 129Z" fill="#edf6fe"/><rect x="24" y="101" width="18" height="55" rx="3" fill="#99c8ef"/><rect x="57" y="120" width="18" height="55" rx="3" fill="#99c8ef"/><text x="82" y="116" text-anchor="middle" class="bldg">BOARD SERVER</text><text x="82" y="133" text-anchor="middle" class="small">HTTP API + UI</text></g>
+          <!-- dispatcher --> <g data-node="dispatch" transform="translate(660 238)"><path d="M0 76 L75 32 L150 76 L75 120Z" fill="#dcd1f4"/><path d="M0 76V169L75 213V120Z" fill="#654ca5"/><path d="M75 120L150 76V169L75 213Z" fill="#9376ce"/><path d="M0 76L75 32L150 76L75 120Z" fill="#f0eafd"/><circle cx="75" cy="85" r="17" fill="#bda7e5"/><path d="M65 85h20M75 75v20" stroke="#fff" stroke-width="3"/><text x="75" y="130" text-anchor="middle" class="bldg">DISPATCH</text><text x="75" y="147" text-anchor="middle" class="small">worker router</text></g>
+          <!-- judge --> <g data-node="judge" transform="translate(740 431)"><path d="M0 74 L70 34 L140 74 L70 114Z" fill="#ead6d0"/><path d="M0 74V160L70 201V114Z" fill="#a94f4b"/><path d="M70 114L140 74V160L70 201Z" fill="#db766a"/><path d="M0 74L70 34L140 74L70 114Z" fill="#fdece6"/><path d="M56 86l10 10 20-24" fill="none" stroke="#c25050" stroke-width="5"/><text x="70" y="132" text-anchor="middle" class="bldg">JUDGE +</text><text x="70" y="148" text-anchor="middle" class="small">trust gate</text></g>
+          <!-- external --> <g data-node="adapters" transform="translate(925 236)"><path d="M0 75 L72 33 L144 75 L72 117Z" fill="#f6d998"/><path d="M0 75V184L72 226V117Z" fill="#b16d25"/><path d="M72 117L144 75V184L72 226Z" fill="#dc9d42"/><path d="M0 75L72 33L144 75L72 117Z" fill="#fff3cf"/><path d="M47 95h50v48H47z" fill="#f8d884"/><text x="72" y="127" text-anchor="middle" class="bldg">ADAPTERS</text><text x="72" y="144" text-anchor="middle" class="small">M365 · Jira · Asana</text></g>
+          <!-- task store --> <g data-node="tasks" transform="translate(219 558)"><path d="M0 77 L76 33 L152 77 L76 121Z" fill="#c3e1f5"/><path d="M0 77V168L76 212V121Z" fill="#277bb1"/><path d="M76 121L152 77V168L76 212Z" fill="#50a5d7"/><path d="M0 77L76 33L152 77L76 121Z" fill="#eaf8ff"/><path d="M49 90h54M49 104h54" stroke="#79c4e7" stroke-width="7"/><text x="76" y="137" text-anchor="middle" class="bldg">TASK VAULT</text><text x="76" y="154" text-anchor="middle" class="small">datasets/tasks/*.md</text></g>
+          <!-- cadence --> <g data-node="cadence" transform="translate(614 530)"><path d="M0 86 L87 36 L174 86 L87 136Z" fill="#cce5db"/><path d="M0 86V190L87 240V136Z" fill="#368b70"/><path d="M87 136L174 86V190L87 240Z" fill="#5cb494"/><path d="M0 86L87 36L174 86L87 136Z" fill="#e8f7f0"/><path d="M54 97a34 34 0 0 1 66 0" fill="none" stroke="#75c7a8" stroke-width="7"/><text x="87" y="145" text-anchor="middle" class="bldg">CADENCE</text><text x="87" y="162" text-anchor="middle" class="small">sentinel → reconcile</text></g>
+          <!-- program archive --> <g data-node="programs" transform="translate(904 626)"><path d="M0 66 L66 28 L132 66 L66 104Z" fill="#dfd8ee"/><path d="M0 66V142L66 180V104Z" fill="#6d6194"/><path d="M66 104L132 66V142L66 180Z" fill="#978aba"/><path d="M0 66L66 28L132 66L66 104Z" fill="#f0edf8"/><text x="66" y="122" text-anchor="middle" class="bldg">PROGRAMS</text><text x="66" y="139" text-anchor="middle" class="small">state + cycles</text></g>
+          <!-- profile --> <g data-node="profile" transform="translate(451 665)"><path d="M0 48 L51 19 L102 48 L51 77Z" fill="#d9e1e8"/><path d="M0 48V109L51 138V77Z" fill="#50677b"/><path d="M51 77L102 48V109L51 138Z" fill="#72899c"/><path d="M0 48L51 19L102 48L51 77Z" fill="#eff4f7"/><text x="51" y="91" text-anchor="middle" class="bldg">PROFILE</text><text x="51" y="107" text-anchor="middle" class="small">identity + config</text></g>
+        </g>
+        <style>.bldg{font:800 11px Inter,sans-serif;fill:#fff;stroke:#152a48;stroke-width:3px;paint-order:stroke fill;letter-spacing:.55px}.small{font:700 10px Inter,sans-serif;fill:#fff;stroke:#152a48;stroke-width:2.4px;paint-order:stroke fill}.payload text{stroke:#152a48;stroke-width:1.5px;paint-order:stroke fill}.road-label{font-family:Inter,sans-serif;font-size:11px;font-weight:700;fill:#233b57;stroke:#fffaf0;stroke-width:3px;paint-order:stroke fill}</style>
+        <g class="road-label"><text x="82" y="405">provider downloads</text><text x="366" y="541">board + CLI read/write</text><text x="667" y="214">Claude -p / scoped worker</text><text x="746" y="665">scheduled program cycle</text><text x="794" y="780">optional Langfuse traces</text></g>
+        </g>
+      </svg>
+    </div>
+    <aside class="side">
+      <section class="panel focus-panel" id="focus-panel" aria-live="polite"><div class="focus-kicker">Explore the map</div><h2>Click a building</h2><p>Click any building to isolate its real dependencies and payloads. Scroll to zoom, drag the skyline to pan, or use the controls in the upper-right.</p></section>
+      <section class="panel"><h2>How to read this</h2><p>The city’s height marks orchestration responsibility, not runtime scale. Solid arrows carry live control/data; dashed arrows are state, telemetry, or configuration feedback. Every outside-world write takes the coral adapter route.</p><h3>Primary path</h3><p class="note">Input or UI request → task markdown → dispatcher → scoped Claude worker → judge / trust enforcement → a parked card, or a Tier‑2-gated publish.</p></section>
+      <section class="panel"><h2>Legend</h2><div class="legend"><span class="key" style="background:#20a89c"></span><span><b>Teal</b> — transcript / intake payload</span><span class="key" style="background:#4a8fd8"></span><span><b>Blue</b> — board API, task ID, markdown</span><span class="key" style="background:#8c6ad8"></span><span><b>Violet</b> — worker output, score, program state</span><span class="key" style="background:#e9a83a"></span><span><b>Amber</b> — observation, drift, proposal</span><span class="key" style="background:#e67567"></span><span><b>Coral</b> — external write (Tier‑2 gate)</span><span class="dash"></span><span><b>Dashed</b> — configuration / durable feedback path</span></div></section>
+      <section class="panel"><h2>Explainer: the critical seams</h2><div class="flow"><b>01</b><span><b>Task vault is the hub.</b> The board and workers both use markdown task artifacts in <code>datasets/tasks</code>; queues determine who acts.</span></div><div class="flow"><b>02</b><span><b>Workers cannot publish directly.</b> Dispatch gives a headless, scoped Claude session task context; shipping is trusted backend code, then adapter code.</span></div><div class="flow"><b>03</b><span><b>The judge controls escalation.</b> A score plus ladder state can revise, park for review, or auto-ship only eligible action types with global autonomy enabled.</span></div><div class="flow"><b>04</b><span><b>Cadence observes before it emits.</b> Sentinels produce cited observations; reconciliation records drift and emits ordinary task cards, not external writes.</span></div></section>
+      <section class="panel"><h2>Source citations</h2><ul class="sources"><li><a href="../../scripts/magnolia.py">scripts/magnolia.py</a> — launcher, port selection, persistent server start.</li><li><a href="../../scripts/task_server.py">scripts/task_server.py</a> — local HTTP API; starts cron, Cadence, and dispatch schedulers.</li><li><a href="../../scripts/task_lib.py">scripts/task_lib.py</a> — markdown task store under <code>datasets/tasks</code>.</li><li><a href="../../scripts/transcript_post.py">scripts/transcript_post.py</a> and <a href="../../scripts/task_extract_meetings.py">task_extract_meetings.py</a> — transcript post-processing and extraction/dispatch.</li><li><a href="../../scripts/task_dispatch.py">scripts/task_dispatch.py</a> — worker selection and headless Claude process.</li><li><a href="../../scripts/enforce_lib.py">scripts/enforce_lib.py</a>, <a href="../../scripts/shipper.py">shipper.py</a>, <a href="../../scripts/adapters/__init__.py">adapters/__init__.py</a> — trust enforcement, auto-ship, confirmation gate.</li><li><a href="../../scripts/sentinel_runner.py">scripts/sentinel_runner.py</a> and <a href="../../scripts/cadence/reconcile.py">cadence/reconcile.py</a> — observations and program reconciliation.</li><li><a href="architecture.md">architecture.md</a> — the maintained narrative map and invariants.</li></ul></section>
+    </aside>
+  </section>
+  <p class="caption">Scope: repository state at <code>main</code> / <code>7aa04ba</code>, inspected 2026‑08‑20. This visual intentionally distinguishes code-backed paths from product intent; optional integrations (for example QMD and Langfuse) are shown only as supporting flows.</p>
+</main>
+<script>
+(() => {
+  const svg = document.getElementById('map-canvas');
+  const viewport = document.getElementById('viewport');
+  const map = document.getElementById('map');
+  const readout = document.getElementById('zoom-readout');
+  const panel = document.getElementById('focus-panel');
+  const nodes = [...document.querySelectorAll('[data-node]')];
+  const flows = [...document.querySelectorAll('[data-flow]')];
+  const details = {
+    input: { name:'Input dock', center:[168,270], text:'Otter and Granola land transcript material locally. The shared post-download path classifies it, starts extraction, and can trigger an optional QMD index update.' },
+    server: { name:'Board server', center:[441,390], text:'The local Python HTTP server serves the board and API. It reads and writes task artifacts and starts the cron, Cadence, and dispatch scheduler threads.' },
+    tasks: { name:'Task vault', center:[295,680], text:'This is the system hub: task markdown under datasets/tasks holds queues, state, outputs, scores, receipts, and the task ID consumed by dispatch.' },
+    dispatch: { name:'Dispatch', center:[735,344], text:'The dispatcher matches a queueable task to one scoped worker, resolves its configured model, then launches a headless Claude process with task context.' },
+    judge: { name:'Judge + trust gate', center:[810,530], text:'Post-judge policy reads score, per-type ladder state, and global autonomy. It can park, request a bounded revision, or auto-ship only eligible action types.' },
+    adapters: { name:'Adapters', center:[997,360], text:'M365, Jira, and Asana sit behind adapter contracts. Publishing comes through trusted backend code and preserves the first-write NeedsConfirmation gate.' },
+    cadence: { name:'Cadence', center:[701,655], text:'Scheduled sentinels make source-cited observations; reconciliation computes drift and emits normal task cards. Cadence itself makes no external write.' },
+    programs: { name:'Programs', center:[970,720], text:'Program markdown stores declarative standing-loop state and append-only cycles. Dashed violet flow shows the durable program-state path.' },
+    profile: { name:'Profile', center:[502,735], text:'Per-person profile/config supplies identity, integrations, packs, model posture, and autonomy settings without hardcoding them into the shared engine.' }
+  };
+  let scale = 1, tx = 0, ty = 0, drag = null;
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  function render() { viewport.setAttribute('transform', `translate(${tx} ${ty}) scale(${scale})`); readout.textContent = `${Math.round(scale * 100)}%`; }
+  function point(event) { const r = svg.getBoundingClientRect(); return { x:(event.clientX-r.left) * 1080/r.width, y:(event.clientY-r.top) * 820/r.height }; }
+  function zoom(next, anchor={x:540,y:410}) { next = clamp(next,.55,4); const factor = next/scale; tx = anchor.x - (anchor.x-tx)*factor; ty = anchor.y - (anchor.y-ty)*factor; scale = next; render(); }
+  function focus(id) {
+    const d = details[id]; if (!d) return;
+    nodes.forEach(n => n.classList.toggle('selected', n.dataset.node === id));
+    flows.forEach(f => f.classList.toggle('active-flow', f.dataset.flow.split(' ').includes(id)));
+    map.classList.add('has-focus');
+    panel.innerHTML = `<div class="focus-kicker">Selected system</div><h2>${d.name}</h2><p>${d.text}</p><p class="muted" style="margin-top:9px">Highlighted arrows are the code-backed paths directly connected to this component. Click the sky or press Esc to clear.</p>`;
+    const targetScale = Math.max(scale,1.38); scale = targetScale; tx = 540 - d.center[0] * scale; ty = 410 - d.center[1] * scale; render();
+  }
+  function clearFocus() { nodes.forEach(n => n.classList.remove('selected')); flows.forEach(f => f.classList.remove('active-flow')); map.classList.remove('has-focus'); panel.innerHTML = '<div class="focus-kicker">Explore the map</div><h2>Click a building</h2><p>Click any building to isolate its real dependencies and payloads. Scroll to zoom, drag the skyline to pan, or use the controls in the upper-right.</p>'; }
+  nodes.forEach(n => { n.setAttribute('tabindex','0'); n.setAttribute('role','button'); n.setAttribute('aria-label', `Explore ${details[n.dataset.node].name}`); n.addEventListener('click', e => { e.stopPropagation(); focus(n.dataset.node); }); n.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focus(n.dataset.node); } }); });
+  svg.addEventListener('wheel', e => { e.preventDefault(); zoom(scale * (e.deltaY < 0 ? 1.15 : .87), point(e)); }, {passive:false});
+  svg.addEventListener('pointerdown', e => { if (e.target.closest('[data-node]')) return; drag = { x:e.clientX, y:e.clientY, tx, ty }; svg.setPointerCapture(e.pointerId); svg.classList.add('is-dragging'); });
+  svg.addEventListener('pointermove', e => { if (!drag) return; const r=svg.getBoundingClientRect(); tx=drag.tx+(e.clientX-drag.x)*1080/r.width; ty=drag.ty+(e.clientY-drag.y)*820/r.height; render(); });
+  svg.addEventListener('pointerup', e => { drag=null; svg.classList.remove('is-dragging'); });
+  svg.addEventListener('click', e => { if (e.target === svg || e.target.id === 'viewport') clearFocus(); });
+  document.getElementById('zoom-in').addEventListener('click', () => zoom(scale * 1.25)); document.getElementById('zoom-out').addEventListener('click', () => zoom(scale * .8)); document.getElementById('reset-map').addEventListener('click', () => { scale=1; tx=0; ty=0; render(); clearFocus(); });
+  svg.addEventListener('keydown', e => { if (e.key === 'Escape') { clearFocus(); svg.focus(); } if (e.key === '+' || e.key === '=') zoom(scale*1.2); if (e.key === '-') zoom(scale*.83); });
+  render();
+})();
+</script>
+</body>
+</html>

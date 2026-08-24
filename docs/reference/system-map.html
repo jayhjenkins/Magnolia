@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Magnolia · Isometric System Map</title>
+<style>
+:root{
+  --bg:#0E1220; --panel:#141A2C; --panel2:#101629; --ink:#E6ECF6; --dim:#8A95B2;
+  --board:#3E7CBA; --auto:#E8843C; --safe:#4CBE6B; --ext:#9C7CD6; --bone:#E8A33D;
+  --line:#22304C; --line2:#2A3352;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 -apple-system,"Segoe UI",Inter,"Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased}
+header{padding:18px 24px 12px;border-bottom:1px solid var(--line2)}
+header h1{margin:0 0 4px;font-size:18px;letter-spacing:.01em;font-weight:650}
+header .meta{color:var(--dim);font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+header .meta a{color:#8FD3FF;text-decoration:none}
+header .meta code{color:#BFD0F2}
+.wrap{display:grid;grid-template-columns:250px minmax(0,1fr) 340px;gap:16px;padding:16px 24px;align-items:start}
+@media(max-width:1180px){.wrap{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.panel h2{margin:0 0 12px;font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:var(--dim);font-weight:600}
+.legend h3{margin:16px 0 8px;font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em}
+.swatch{display:grid;grid-template-columns:16px 1fr;gap:9px;align-items:center;margin-bottom:7px;font-size:12.5px}
+.dot{width:12px;height:12px;border-radius:3px;justify-self:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}
+.arrow{width:20px;height:0;justify-self:center;border-top:2px solid;position:relative}
+.arrow::after{content:"\25B6";position:absolute;right:-9px;top:-9px;font-size:10px;line-height:1}
+.inv{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.inv li{font-size:12px;color:var(--dim);line-height:1.4}
+.inv b{color:var(--ink);font-weight:600;display:inline-block;min-width:18px}
+.inv code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#8FD3FF;background:#0C1020;padding:1px 4px;border-radius:4px}
+.map{background:radial-gradient(ellipse 80% 55% at 50% 32%,#18203A 0%,#0E1220 78%);border:1px solid var(--line);border-radius:12px;position:relative;overflow:hidden}
+.map .title{position:absolute;left:16px;top:12px;font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--dim);font-weight:600}
+.map .count{position:absolute;right:16px;bottom:12px;font-size:11px;color:var(--dim);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.map svg{display:block;width:100%;height:min(78vh,720px);touch-action:manipulation}
+.lbl{fill:var(--ink);font:600 10.5px/1 -apple-system,system-ui,sans-serif;letter-spacing:.03em}
+.sub{fill:rgba(230,236,246,.42);font:9px/1 -apple-system,system-ui,sans-serif}
+.pay{fill:rgba(255,255,255,.5);font:9.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+.flow{stroke-dasharray:5 7;animation:flow 1.3s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-12}}
+.ext-line{stroke-dasharray:7 6;animation:flow 2.6s linear infinite}
+.bd{cursor:pointer}
+.bd .top{transition:stroke .15s ease,stroke-width .15s ease}
+.bd:hover .top{stroke:rgba(255,255,255,.35);stroke-width:1.6}
+.bd.sel .top{stroke:#FFD38A;stroke-width:2.6}
+.bd.sel{filter:drop-shadow(0 0 7px rgba(255,211,138,.35))}
+details{margin-top:10px}
+details summary{cursor:pointer;list-style:none;font-size:12px;font-weight:600;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;gap:8px}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:"\25B8";color:var(--dim);font-size:11px;transition:transform .15s}
+details[open] summary::before{transform:rotate(90deg)}
+details[open] summary{margin-bottom:0}
+.dbody{padding:10px 4px 2px;font-size:12.5px;line-height:1.5}
+.tagline{color:var(--dim);font-size:13px}
+.fname{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#BFD0F2;padding:1px 0}
+.fname::before{content:"\2022  ";color:var(--dim)}
+.edge-li{font-size:12px;padding:5px 0;border-bottom:1px solid #1A2237}
+.edge-li:last-child{border-bottom:none}
+.edge-li .kn{display:inline-block;font-size:10px;padding:1px 6px;border-radius:9px;margin-right:7px;font-weight:600;letter-spacing:.02em}
+.edge-li code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#8FD3FF}
+.hint{color:var(--dim);font-size:12px;line-height:1.5;margin:12px 0 0}
+.hint code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#8FD3FF}
+footer{padding:12px 24px 22px;border-top:1px solid var(--line2);color:var(--dim);font-size:12px;line-height:1.6}
+footer b{color:var(--ink)}
+footer .src{margin-top:6px;font-size:11px;opacity:.85;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.kchip{display:inline-block;font-size:10px;padding:1px 7px;border-radius:9px;font-weight:600;margin-left:6px;vertical-align:middle}
+</style>
+</head>
+<body>
+<header>
+  <h1>Magnolia &mdash; Isometric System Map</h1>
+  <div class="meta">branch <code>main</code> &middot; commit <code>7aa04ba</code> &middot; 2026-08-18 &middot; traced from <a href="docs/reference/architecture.md">architecture.md</a> + <a href="docs/reference/cadence.md">cadence.md</a></div>
+</header>
+
+<div class="wrap">
+  <!-- LEGEND -->
+  <div class="panel legend">
+    <h2>Legend</h2>
+    <div class="swatch"><span class="dot" style="background:#3E7CBA"></span><span>Front plane &middot; human-facing (board, cadence)</span></div>
+    <div class="swatch"><span class="dot" style="background:#E8843C"></span><span>Agent plane &middot; the auto-spine (dispatcher, pool, cron, factory)</span></div>
+    <div class="swatch"><span class="dot" style="background:#4CBE6B"></span><span>Safety &middot; enforcement (judge, ladder, shipper, adapters)</span></div>
+    <div class="swatch"><span class="dot" style="background:#9C7CD6"></span><span>External &middot; off-system (Jira, M365, Pendo, Databricks)</span></div>
+    <div class="swatch"><span class="dot" style="background:#E8A33D"></span><span>Backbone &middot; declarative (profile, skills, card registry)</span></div>
+
+    <h3>Arrows &mdash; real paths</h3>
+    <div class="swatch"><span class="arrow" style="border-color:#E8843C;color:#E8843C"></span><span>control / invoke</span></div>
+    <div class="swatch"><span class="arrow" style="border-color:#3E7CBA;color:#3E7CBA"></span><span>data / read&middot;write</span></div>
+    <div class="swatch"><span class="arrow" style="border-color:#4CBE6B;color:#4CBE6B"></span><span>safety / gate</span></div>
+    <div class="swatch"><span class="arrow" style="border-color:#9C7CD6;color:#9C7CD6;border-top-style:dashed"></span><span>external (Tier-2 gated)</span></div>
+
+    <h3>Invariants (CLAUDE.md)</h3>
+    <ul class="inv">
+      <li><b>#1</b> identity only via <code>profile/</code> + <code>profile_lib.py</code></li>
+      <li><b>#3</b> cards use theme tokens only &mdash; no hardcoded color</li>
+      <li><b>#5</b> Tier-2: one confirm per external write</li>
+      <li><b>#6</b> never delete &mdash; version-suffix &ldquo;v1&rdquo;/&ldquo;v2&rdquo;</li>
+      <li><b>#7</b> <code>~/pm-os</code> retired; this repo (8744) is canonical</li>
+      <li><b>#9</b> program types declarative + closed-set (gated)</li>
+    </ul>
+
+    <h3>Reading the map</h3>
+    <p class="hint">The <b style="color:var(--ink)">engine</b> (shared, de-personalized) reads identity only through the <b style="color:var(--ink)">profile</b> hub, and works on the per-person <b style="color:var(--ink)">datasets</b> corpus. All external writes funnel down the safety column: <code>shipper</code> &rarr; <code>adapters</code> &rarr; provider. Cadence (blue, left) emits verbs onto the board; the quality trio (green, bottom) governs that autonomy.</p>
+  </div>
+
+  <!-- MAP -->
+  <div class="map">
+    <div class="title">System Map &middot; 26 subsystems</div>
+    <div class="count" id="count"></div>
+    <svg id="map" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Isometric system map of the Magnolia PM-OS engine">
+      <defs>
+        <pattern id="tile" width="6" height="6" patternUnits="userSpaceOnUse">
+          <rect width="6" height="6" fill="#101629"/>
+        </pattern>
+      </defs>
+      <g id="grid"></g>
+      <g id="edges"></g>
+      <g id="blds"></g>
+    </svg>
+  </div>
+
+  <!-- EXPLAINER -->
+  <div class="panel">
+    <h2>Explainer &mdash; select a building</h2>
+    <div id="dempty" class="hint">Click any building on the map to load its function, the control/data paths it owns, and its cited source files. The detail pane also lists every inbound and outbound arrow for that subsystem.</div>
+    <div id="d"></div>
+    <div class="hint">Every <code>file:</code> reference is a real path at HEAD (<code>7aa04ba</code>). Citations trace to the canonical sources the repo mandates &mdash; when code and doc disagree, the code wins.</div>
+  </div>
+</div>
+
+<footer>
+  <b>How to read the data flow.</b> A verb is born (board / quick-add / meeting / cron / cadence) &rarr; lands in the <b>task system</b> &rarr; the <b>dispatcher</b> matches a <b>worker</b> (scoped tools + skills) &rarr; the <b>agent runner</b> (<code>claude</code>) does the work and self-reports via the <b>task CLI</b> &rarr; the <b>judge/ladder/shipper</b> trio grades, gates, and (only if allowed) ships. External writes always pass the <b>adapter seam</b> (Tier-2, invariant #5). Cadence observes programs, reconciles drift, and emits verbs back onto the board.
+  <div class="src">Canonical: docs/reference/architecture.md &middot; docs/reference/cadence.md &middot; docs/reference/invariants.md &middot; scripts/* &middot; ui/task-board/* &middot; tests/*</div>
+</footer>
+
+<script>
+"use strict";
+/* ── Isometric constants ─────────────────────────────────────────────── */
+const GW=32, GH=16, OX=0, OY=0;
+const iso=(gx,gy)=>[OX+(gx-gy)*GW, OY+(gx+gy)*GH];
+function ground(gx,gy,fx,fy){
+  return [iso(gx,gy),iso(gx+fx,gy),iso(gx+fx,gy+fy),iso(gx,gy+fy)]; // NW NE SE SW
+}
+const poly=p=>p.map(v=>v[0].toFixed(1)+","+v[1].toFixed(1)).join(" ");
+function parseHex(h){h=h.replace("#","");return[parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+const toHex=(r,g,b)=>{const c=x=>("0"+Math.max(0,Math.min(255,x|0)).toString(16)).slice(-2);return "#"+c(r)+c(g)+c(b);};
+const shade=(h,a)=>{const[r,g,b]=parseHex(h);return toHex(r+a,g+a,b+a);};
+const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const kindCol={control:"#E8843C",data:"#3E7CBA",safety:"#4CBE6B",ext:"#9C7CD6"};
+
+/* ── Building spec (grid cell, size, height, color, role, citations) ──
+   Every file path is real at commit 7aa04ba. Roles map to legend colors. */
+const B={
+  board:{gx:4,gy:3,h:72,c:"#3E7CBA",role:"Front",short:"TASK BOARD",tag:"front door",
+    desc:"Local HTTP server (Python stdlib) that renders the board UI and exposes the JSON API. The single seam between the human and the engine, and the host for the cron, dispatch, and cadence daemon threads.",
+    files:["scripts/task_server.py","ui/task-board/index.html","ui/task-board/js/app.js","ui/task-board/js/router.js","bin/magnolia"],
+    reads:"task files · profile · card registry · quality frontmatter · cadence payload",
+    writes:"task frontmatter (comment / done / dispatch)",inv:"#5"},
+
+  profile:{gx:5,gy:4,h:52,c:"#E8A33D",role:"Backbone",short:"PROFILE",tag:"identity hub",
+    desc:"The one place person + integration identity lives. Every engine component reads identity and providers through this API surface — never a hardcoded literal. It is what makes invariant #1 true.",
+    files:["scripts/profile_lib.py","profile.example/profile.yaml","profile.example/README.md","tests/test_engine_no_jay.py"],
+    reads:"(nothing — it IS the source)",
+    writes:"identity · providers · cost posture · autonomy_enforcement · server port",inv:"#1"},
+
+  taskstore:{gx:6,gy:3,h:40,c:"#3E7CBA",role:"Front",short:"TASK SYSTEM",tag:"4 queues",
+    desc:"Four queues — human / agent / collab / waiting — backed by markdown + YAML frontmatter on disk, git as version history. The system of record for work.",
+    files:["scripts/task_lib.py","datasets/tasks/","scripts/task.sh","scripts/parse_task_input.py"],
+    reads:"task frontmatter (status, queue, priority, judge_score, receipt)",
+    writes:"TASK-NNNN.md files (create / complete / archive)",inv:"#7"},
+
+  dispatch:{gx:3,gy:3,h:88,c:"#E8843C",role:"Agent",short:"DISPATCHER",tag:"command spine",
+    desc:"The agent engine. A lockfile-guarded scanner reads the agent+collab queues, LLM-matches each task to exactly one worker, resolves the model, and launches the Claude child process.",
+    files:["scripts/task_dispatch.py","scripts/dispatch_scheduler.py"],
+    reads:"agent+collab queues · worker catalog · active packs · .env.langfuse",
+    writes:"logs/dispatch-* · claude_session_id on the task",inv:"#1"},
+
+  workers:{gx:4,gy:2,h:56,c:"#E8843C",role:"Agent",short:"WORKER POOL",tag:"scope + how",
+    desc:"Declarative worker definitions: allowed tools, named skills, tier, timeout, prompt. Ten workers — the LLM router picks the single best fit per task; regex fallback if the model call fails.",
+    files:["scripts/workers/researcher.md","scripts/workers/message-writer.md","scripts/workers/ticket-creator.md","scripts/workers/scheduler.md","scripts/workers/_default.md"],
+    reads:"worker frontmatter (tools, skills, tier, match rules)",
+    writes:"the dispatch prompt (tools list + max-turns + prompt body)",inv:"#1"},
+
+  runner:{gx:5,gy:2,h:80,c:"#E8843C",role:"Agent",short:"AGENT RUNNER",tag:"claude child",
+    desc:"The spawned Claude Code session. Reads the task + source-meeting transcript, follows a skill, writes the artifact, and self-reports complete/fail/ask via the task CLI. Polling detects self-report and kills the process group.",
+    files:["scripts/task_dispatch.py (dispatch_task)","scripts/chat_runner.py","scripts/live_runs.py","scripts/parse_task_input.py"],
+    reads:"task body · source_meeting transcript · skills catalog",
+    writes:"datasets/ artifacts · task frontmatter · session JSONL",inv:"#1"},
+
+  quality:{gx:4,gy:4,h:64,c:"#4CBE6B",role:"Safety",short:"JUDGE",tag:"shadow judge",
+    desc:"Scores completed tasks into frontmatter (judge_score + per-dimension). It is the enforcement seam: after scoring it calls the tier × score policy that decides what happens next.",
+    files:["scripts/judge.py","scripts/eval_digest.py","scripts/workers/grad-assessor.md"],
+    reads:"completed task frontmatter + agent_output",
+    writes:"judge_score · judge_dimensions · judge_why",inv:"#7"},
+
+  ladder:{gx:5,gy:5,h:96,c:"#4CBE6B",role:"Safety",short:"TRUST LADDER",tag:"autonomy governor",
+    desc:"Per-task-type trust tier (shadow → supervised → autonomous). Policy: judge < bar → park / revise; judge ≥ bar → approve / auto-ship. Three collapsible gates: judge-gated ship, action/artifact split, Tier-2 composition.",
+    files:["scripts/ladder_lib.py","scripts/enforce_lib.py","scripts/graduation_assess.py"],
+    reads:"judge_score · tier · autonomy_enforcement flag",
+    writes:"tier transitions · demote (kill switch)",inv:"#5 #7"},
+
+  shipper:{gx:4,gy:5,h:56,c:"#4CBE6B",role:"Safety",short:"SHIPPER",tag:"outbound door",
+    desc:"One gate for all external writes — send-message / publish-ticket / message-update. It calls adapters.publish() (never a second shipper); the first external write raises NeedsConfirmation for a one-time human confirm.",
+    files:["scripts/shipper.py","scripts/adapters/__init__.py"],
+    reads:"message_body · ticket fields · confirmed flag",
+    writes:"(via adapter) Jira issue · M365 mail/chat · task receipt",inv:"#5 #9"},
+
+  cron:{gx:2,gy:3,h:44,c:"#E8843C",role:"Agent",short:"CRON",tag:"recurring",
+    desc:"Recurring jobs (datasets/cron/jobs.json) with an atomic counter. A daemon thread in task_server.py ticks them on schedule and creates tasks in the normal pipeline (template vars resolve at run time).",
+    files:["scripts/cron_lib.py","scripts/cron_scheduler.py","scripts/seed_default_crons.py"],
+    reads:"jobs.json + _counter",
+    writes:"new tasks into agent/collab queue",inv:"#1"},
+
+  cardtypes:{gx:6,gy:5,h:44,c:"#E8A33D",role:"Backbone",short:"CARD REGISTRY",tag:"card vocabulary",
+    desc:"The card-type registry the board renders. Cards reference theme tokens ONLY — never a hardcoded color / radius / transition. Adding a type is one registry entry via the factory, gated by card_schema.py.",
+    files:["ui/task-board/cardtypes/registry.json","scripts/card_schema.py","ui/task-board/themes/vantaca.css"],
+    reads:"active card_types · theme tokens",
+    writes:"(none — declarative)",inv:"#3 #9"},
+
+  datasets:{gx:6,gy:4,h:34,c:"#3E7CBA",role:"Front",short:"DATASETS",tag:"operator corpus",
+    desc:"Per-person content: meetings, product (PRDs/roadmap/epics), research, recruiting, strategy, tasks. The agent runner reads transcripts here and writes PRDs, memos, assessments back. Never deleted — version-suffixed.",
+    files:["datasets/meetings/","datasets/product/","datasets/research/","datasets/recruiting/"],
+    reads:"source_meeting transcripts · templates · prior artifacts",
+    writes:"PRDs · strategy memos · assessments · digests",inv:"#6"},
+
+  factory:{gx:5,gy:1,h:60,c:"#E8843C",role:"Agent",short:"FACTORY",tag:"self-extension",
+    desc:"Scaffold → capture-to-profile → gate-green → commit → Keep/Undo receipt. Four factories (worker / card-type / adapter / program-type) share the lifecycle via factory_lib. The engine extends itself without hand-writing engine code.",
+    files:["scripts/factory_lib.py",".claude/skills/meta-factory-core/",".claude/skills/meta-create-worker/SKILL.md",".claude/skills/meta-create-card-type/SKILL.md",".claude/skills/meta-create-adapter/SKILL.md",".claude/skills/meta-create-program-type/SKILL.md"],
+    reads:"meta-factory-core SKILL.md · existing registry entries",
+    writes:"new worker .md · registry entries · adapters · Keep/Undo receipts",inv:"#3 #5 #9"},
+
+  skills:{gx:6,gy:1,h:48,c:"#E8A33D",role:"Backbone",short:"SKILL PACKS",tag:"the how",
+    desc:"~90 skills auto-discovered from .claude/skills/<name>/SKILL.md. Active set is per-person via profile config (active_skill_packs) + .claude/packs.yaml. Skills in no pack stay always-visible; packs gate only the dispatch catalog + Profile UI.",
+    files:[".claude/skills/",".claude/packs.yaml","profile.example/config.yaml"],
+    reads:"catalog (name + description per SKILL.md)",
+    writes:"(none — declarative)",inv:"#1"},
+
+  cadence:{gx:2,gy:4,h:84,c:"#3E7CBA",role:"Front",short:"CADENCE",tag:"second organ",
+    desc:"The standing-loop subsystem. A CadenceScheduler daemon (sibling to cron) ticks a cycle per program — observe → reconcile → emit → log. It performs zero external writes itself; outward action rides the existing Tier-2 send path.",
+    files:["scripts/cadence/reconcile.py","scripts/cadence/scheduler.py","scripts/program_lib.py","cadence/programtypes/registry.json"],
+    reads:"program frontmatter · type registry · sentinel observations",
+    writes:"drift verdict · proposal cards (into the task system)",inv:"#5 #9"},
+
+  reconciler:{gx:3,gy:4,h:60,c:"#3E7CBA",role:"Front",short:"RECONCILER",tag:"declared vs seen",
+    desc:"Per program, per cycle: deterministic checks first (dates, aging, adapter truth), judged interpretation only where determinism can't reach. Verdict: holding / drifting / broken. Facts apply mechanically (cited); interpretations become proposal cards.",
+    files:["scripts/cadence/reconcile.py","scripts/sentinel_lib.py"],
+    reads:"sentinel observations · four state models (pipeline/cycle/target/register)",
+    writes:"drift verdict · cited facts · proposal cards",inv:"#9"},
+
+  programs:{gx:2,gy:5,h:44,c:"#3E7CBA",role:"Front",short:"PROGRAMS",tag:"intent over time",
+    desc:"Markdown under datasets/programs/PROG-NNNN.md, shaped by the declarative type registry. Lifecycle: candidate → active → paused → archived (nothing ever deleted). The reconciler and janitor maintain the portfolio.",
+    files:["datasets/programs/","cadence/programtypes/registry.json","scripts/program_schema.py"],
+    reads:"type definition · phase/checkpoint state",
+    writes:"observation ledger (append-only) · cycle log",inv:"#6 #9"},
+
+  sentinels:{gx:1,gy:4,h:56,c:"#9C7CD6",role:"Agent",short:"SENTINELS",tag:"read-only eyes",
+    desc:"Observers on the claude -p substrate with a distinct contract: they return observations, never writes. movement-watch (transcripts), tracker-truth (adapter free-read), sheet-watch (EOS sheet), program-intake (routing).",
+    files:["scripts/sentinel_runner.py","scripts/sentinel_lib.py","scripts/sentinels/movement-watch.md","scripts/sentinels/tracker-truth.md"],
+    reads:"transcripts · Jira · EOS sheet · program frontmatter",
+    writes:"observation records only (no file writes)",inv:"#1 #6"},
+
+  jobs:{gx:1,gy:5,h:32,c:"#9C7CD6",role:"Agent",short:"CRON JOBS",tag:"definitions",
+    desc:"The recurring-job definitions the cron scheduler ticks against. Created tasks flow straight into the normal dispatch pipeline as if human-created.",
+    files:["datasets/cron/jobs.json","datasets/cron/_counter"],
+    reads:"",
+    writes:"(via cron) new tasks",inv:"#1"},
+
+  adapters:{gx:7,gy:4,h:48,c:"#4CBE6B",role:"Safety",short:"ADAPTER SEAM",tag:"Tier-2 gate",
+    desc:"External integrations behind structural Protocols in each family's _contract.py. Families live: project_management (jira/asana), transcript (granola/otter), messaging (m365/Graph). A missing or 'none' provider degrades gracefully — graceful, never fatal.",
+    files:["scripts/adapters/__init__.py","scripts/adapters/project_management/_contract.py","scripts/adapters/transcript/_contract.py","scripts/adapters/messaging/_contract.py"],
+    reads:"provider id · confirmed flag · credentials",
+    writes:"(via provider) the external system",inv:"#5"},
+
+  pm:{gx:8,gy:4,h:40,c:"#9C7CD6",role:"Ext",short:"JIRA · ASANA",tag:"project mgmt",
+    desc:"Live providers jira.py + asana.py. Free read (issue, search); gated write (create/update issue). Tier-2 publish() is the only outbound door, and it is always preceded by a NeedsConfirmation.",
+    files:["scripts/adapters/project_management/jira.py","scripts/adapters/project_management/asana.py","scripts/jira_publish.py"],
+    reads:"issue key · project · board (VNT)",
+    writes:"(gated) Jira / Asana issue",inv:"#5"},
+
+  trans:{gx:9,gy:4,h:44,c:"#9C7CD6",role:"Ext",short:"GRANOLA · OTTER",tag:"transcripts",
+    desc:"Live providers granola.py + otter.py. The sync pipeline pulls transcripts, annotates them into normalized meeting markdown, and feeds the task extractor to spawn tasks in the agent queue.",
+    files:["scripts/adapters/transcript/granola.py","scripts/adapters/transcript/otter.py","scripts/annotate_meetings.py","scripts/task_extract_meetings.py"],
+    reads:"transcript ids · granola_folder · meetings",
+    writes:"(local) datasets/meetings/*.md · tasks",inv:"#1"},
+
+  msg:{gx:10,gy:4,h:48,c:"#9C7CD6",role:"Ext",short:"M365 · GRAPH",tag:"messaging",
+    desc:"Live provider m365.py (Microsoft Graph). Email via sendMail, Teams via chat. The first-ever send raises NeedsConfirmation; later sends fire straight through once confirmed.",
+    files:["scripts/adapters/messaging/m365.py","scripts/send_message_graph.py"],
+    reads:"message_body · channel · recipient",
+    writes:"(gated) Graph mail / chat",inv:"#5"},
+
+  cloud:{gx:10,gy:5,h:38,c:"#9C7CD6",role:"Ext",short:"PENDO · DATABRICKS",tag:"analytics MCP",
+    desc:"Pendo MCP: product analytics, Pendo Listen, session replays, AI agent analytics. Vantaca Databricks MCP: Gong calls, Zendesk tickets, Azure DevOps work items. These power the Pendo + Rocks + Databricks context skills.",
+    files:[".claude/skills/context-pendo-analytics/",".claude/skills/context-databricks-analytics/",".mcp.json"],
+    reads:"subId · app id · SQL · segment id",
+    writes:"(none — read-only MCP)",inv:"#1"},
+
+  gates:{gx:6,gy:6,h:40,c:"#4CBE6B",role:"Safety",short:"GATES · TESTS",tag:"must stay green",
+    desc:"Every commit: pytest + card_schema.py + test_engine_no_jay.py + program_schema.py + portability_gate.py — plus the trust-ladder, shipper, and factory test families. A failing gate blocks a ship. The denylist test enforces invariant #1 in code.",
+    files:["tests/","scripts/card_schema.py","scripts/program_schema.py","scripts/portability_gate.py","tests/test_engine_no_jay.py"],
+    reads:"worker frontmatter · registry schema · code",
+    writes:"(none)",inv:"#1 #3 #9"},
+
+  cli:{gx:4,gy:6,h:36,c:"#9C7CD6",role:"Agent",short:"TASK CLI",tag:"shell seam",
+    desc:"The human + agent shell for the task system: add / list / show / update / done / inbox / agent:start / agent:complete / agent:fail / agent:ask. The agent runner uses it to self-report state back to the task file.",
+    files:["scripts/task.sh","scripts/task_cli.py"],
+    reads:"task frontmatter",
+    writes:"task frontmatter (status · agent_status)",inv:"#1"},
+
+  onboarding:{gx:3,gy:5,h:52,c:"#3E7CBA",role:"Front",short:"ONBOARDING",tag:"first-run",
+    desc:"The conversational, task-driven concierge (meta-onboard). Served at / when the first-run gate (_should_onboard) is active; completes by writing a live profile so the board takes over. Seeds the trust ladder (shadow by default).",
+    files:[".claude/skills/meta-onboard/","scripts/onboard_runner.py","ui/task-board/onboarding.html","scripts/trust_seed.py"],
+    reads:"profile.onboarded flag · doctor.py capabilities",
+    writes:"profile.yaml · config.yaml · capabilities.json · trust seed",inv:"#1 #7"}
+};
+
+/* ── Edges: [source, target, kind, payload] ───────────────────────────── */
+const E=[
+  ["board","cli","data","GET/POST /api/tasks *"],
+  ["board","taskstore","data","task CRUD · JSON"],
+  ["board","profile","data","GET/PUT /api/profile"],
+  ["board","dispatch","control","spawn `claude --task`"],
+  ["board","quality","data","GET /api/quality"],
+  ["board","cadence","data","GET /api/cadence"],
+  ["board","ladder","safety","POST demote (kill switch)"],
+  ["board","cardtypes","data","card render tokens"] ,
+  ["board","onboarding","control","first-run gate ( serve / )"],
+
+  ["dispatch","workers","data","list workers · LLM router"],
+  ["dispatch","profile","data","resolve_model(tier, posture)"],
+  ["dispatch","runner","control","Popen `claude` (worker prompt)"],
+  ["dispatch","quality","control","spawn judge after agent"],
+  ["dispatch","gates","safety","tests guard the dispatch path"],
+
+  ["workers","runner","data","allowed_tools · max_turns · prompt"],
+  ["workers","skills","data","skills catalog (filtered)"],
+  ["workers","cli","control","task.sh show · agent:*"],
+
+  ["runner","cloud","ext","MCP tools (Pendo · Databricks)"],
+  ["runner","cli","control","task.sh agent:complete"],
+  ["runner","datasets","data","reads transcripts · writes artifacts"],
+  ["runner","pm","ext","Jira / Asana provider read"],
+  ["runner","trans","ext","transcript provider read"],
+
+  ["quality","ladder","data","score → tier policy"],
+  ["ladder","shipper","control","tier policy → auto-ship"],
+  ["ladder","profile","data","autonomy_enforcement"],
+  ["profile","ladder","data","tier_of(type)"],
+
+  ["shipper","adapters","control","adapters.publish(family, draft)"],
+  ["shipper","taskstore","data","emit receipt tasks"],
+  ["adapters","pm","ext","jira.asana provider.publish()"],
+  ["adapters","trans","ext","granola.otter provider.publish()"],
+  ["adapters","msg","ext","m365 provider.publish()"],
+
+  ["board","msg","ext","handle_send_message"],
+  ["board","pm","ext","handle_jira"],
+
+  ["cadence","reconciler","control","CadenceScheduler.tick"],
+  ["cadence","programs","data","list programs (registry)"],
+  ["cadence","taskstore","control","emissions → tasks (outbound)"],
+  ["cadence","profile","data","profile_lib for sentinels"],
+  ["cadence","quality","control","judge cadence cards"],
+
+  ["reconciler","sentinels","data","observations ledger"],
+  ["reconciler","programs","data","apply facts · emit proposals"],
+  ["reconciler","adapters","ext","tracker-truth adapter read"],
+
+  ["sentinels","profile","data","resolve sentinel models"],
+  ["sentinels","trans","ext","transcript sources"],
+  ["sentinels","pm","ext","Jira read (tracker-truth)"],
+  ["sentinels","programs","data","candidates → intake register"],
+
+  ["programs","skills","data","skill references"],
+  ["programs","datasets","data","observations in datasets"],
+
+  ["factory","workers","control","scaffold worker.md → validate"],
+  ["factory","skills","control","scaffold skill + SKILL.md"],
+  ["factory","cardtypes","control","scaffold card entry → validate"],
+  ["factory","adapters","control","scaffold adapter → validate"],
+  ["factory","gates","safety","validate-* gate (must pass)"],
+  ["factory","profile","data","capture-to-profile rule"],
+
+  ["skills","workers","data","skills supply the how"],
+  ["skills","cardtypes","data","card-type skill registry"],
+  ["skills","datasets","data","workflow templates"],
+
+  ["cardtypes","gates","safety","card_schema.py gate"],
+  ["cardtypes","factory","data","meta-create-card-type"],
+
+  ["profile","adapters","data","provider id selection"],
+  ["profile","workers","data","model + tier defaults"],
+  ["profile","skills","data","active_skill_packs"],
+  ["profile","onboarding","data","onboarded flag · voice · integrations"],
+
+  ["gates","runner","safety","pytest · test_* · portability"],
+  ["gates","ladder","safety","test_ladder_lib · test_enforce_lib"],
+  ["gates","shipper","safety","test_shipper_autoship"],
+
+  ["cli","taskstore","data","read/write task frontmatter"],
+  ["cli","runner","control","task.sh agent:ask (pause)"],
+
+  ["onboarding","profile","data","seeds profile (first-run)"],
+  ["onboarding","gates","safety","doctor.py capability probe"]
+];
+
+/* ── Render ──────────────────────────────────────────────────────────── */
+const svg=document.getElementById("map"), NS="http://www.w3.org/2000/svg";
+const gGrid=document.getElementById("grid"), gEdge=document.getElementById("edges"), gBld=document.getElementById("blds");
+let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+function ext(x,y,px=14,py=40){minx=Math.min(minx,x-px);maxx=Math.max(maxx,x+px);miny=Math.min(miny,y-py);maxy=Math.max(maxy,y+px);}
+function mk(tag,attrs){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+
+/* grid */
+for(let gx=0;gx<=11;gx++)for(let gy=0;gy<=8;gy++){
+  const[NW,NE,SE,SW]=ground(gx,gy,1,1);
+  gGrid.appendChild(mk("polygon",{points:poly([NW,NE,SE,SW]),fill:"url(#tile)",stroke:"#1A2237","stroke-width":"0.5"}));
+}
+
+/* edges (roof-center anchors, shortened) */
+function roofC(b){const[NW,NE,SE,SW]=ground(b.gx,b.gy,1,1);return[(NW[0]+NE[0]+SE[0]+SW[0])/4,(NW[1]+NE[1]+SE[1]+SW[1])/4-b.h];}
+E.forEach(([a,b,kind,payload])=>{
+  if(!B[a]||!B[b])return;
+  const A=roofC(B[a]),C=roofC(B[b]);
+  let dx=C[0]-A[0],dy=C[1]-A[1];const L=Math.hypot(dx,dy)||1;
+  const sx=A[0]+dx*14/L, sy=A[1]+dy*14/L, tx=C[0]-dx*14/L, ty=C[1]-dy*14/L;
+  const col=kindCol[kind], w=kind==="safety"?2.2:1.7;
+  const id="arw-"+a+"-"+b;
+  const defs=mk("marker",{id,viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"6.5",markerHeight:"6.5",orient:"auto"});
+  defs.appendChild(mk("path",{d:"M0,0 L10,5 L0,10 z",fill:col}));
+  gEdge.appendChild(defs);
+  const line=mk("line",{x1:sx.toFixed(1),y1:sy.toFixed(1),x2:tx.toFixed(1),y2:ty.toFixed(1),stroke:col,"stroke-width":w,opacity:"0.5","marker-end":`url(#${id})`,vectorEffect:"non-scaling-stroke"});
+  if(kind==="control"||kind==="data")line.setAttribute("class","flow");
+  if(kind==="ext")line.setAttribute("class","ext-line");
+  gEdge.appendChild(line);
+  if(payload){
+    const mx=(sx+tx)/2,my=(sy+ty)/2;
+    const t=mk("text",{x:mx.toFixed(1),y:(my-5).toFixed(1),"text-anchor":"middle",class:"pay"});
+    t.textContent=payload; gEdge.appendChild(t);
+    ext(mx,my,120,60);
+  }
+});
+
+/* buildings (painter's order by depth), + labels */
+const blds=Object.keys(B).map(k=>({k,b:B[k]})).sort((p,q)=>(p.b.gx+p.b.gy)-(q.b.gx+q.b.gy)||p.b.gx-q.b.gx);
+const topFaces={};
+blds.forEach(({k,b})=>{
+  const[gx,gy,h,c]=  [b.gx,b.gy,b.h,b.c];
+  const[NW,NE,SE,SW]=ground(gx,gy,1,1);
+  const tN=[NW[0],NW[1]-h],tE=[NE[0],NE[1]-h],tS=[SE[0],SE[1]-h],tW=[SW[0],SW[1]-h];
+  const g=mk("g",{class:"bd","data-key":k});
+  // shadow
+  const shN=[NW[0]-9,NW[1]+9],shE=[NE[0]+9,NE[1]+9],shS=[SE[0],SE[1]+18],shW=[SW[0]-9,SW[1]+9];
+  g.appendChild(mk("polygon",{points:poly([shN,shE,shS,shW]),fill:"#000",opacity:"0.20"}));
+  // right face (NE→SE)
+  g.appendChild(mk("polygon",{points:poly([NE,SE,tS,tE]),fill:shade(c,-52)}));
+  // left face (SW→SE)
+  g.appendChild(mk("polygon",{points:poly([SW,SE,tS,tW]),fill:shade(c,-26)}));
+  // top face
+  const top=mk("polygon",{points:poly([tN,tE,tS,tW]),fill:shade(c,30),class:"top",stroke:shade(c,80),"stroke-width":"0.8"});
+  g.appendChild(top); topFaces[k]=top;
+  // labels (centered on the top face, above it)
+  const cx=(tN[0]+tE[0]+tS[0]+tW[0])/4, cy=(tN[1]+tE[1]+tS[1]+tW[1])/4;
+  const lab=mk("text",{x:cx.toFixed(1),y:(cy-2).toFixed(1),"text-anchor":"middle",class:"lbl"});
+  lab.textContent=b.short; g.appendChild(lab);
+  const sub=mk("text",{x:cx.toFixed(1),y:(cy+9).toFixed(1),"text-anchor":"middle",class:"sub"});
+  sub.textContent=b.role+" · "+b.tag; g.appendChild(sub);
+  // transparent hit polygon covering the whole block (roof + column)
+  const hit=mk("polygon",{points:poly([NW,NE,SE,SW,tS,tW,tN,tE]),fill:"#fff","fill-opacity":"0","pointer-events":"all"});
+  hit.addEventListener("click",()=>select(k));
+  g.addEventListener("mouseenter",()=>{ if(selected!==k) top.style.stroke="rgba(255,255,255,.55)";});
+  g.addEventListener("mouseleave",()=>{ if(selected!==k) top.style.stroke=shade(c,80);});
+  gBld.appendChild(g);
+  ext(cx,cy-h,120,120); ext(cx,cy+20,80,30);
+});
+
+/* viewBox */
+minx-=24;maxx+=24;miny-=46;maxy+=30;
+svg.setAttribute("viewBox",`${minx.toFixed(0)} ${miny.toFixed(0)} ${((maxx-minx)).toFixed(0)} ${((maxy-miny)).toFixed(0)}`);
+document.getElementById("count").textContent="main · 7aa04ba · "+Object.keys(B).length+" buildings · "+E.length+" paths";
+
+/* ── Explainer panel ──────────────────────────────────────────────────── */
+let selected=null;
+const d=document.getElementById("d"), dempty=document.getElementById("dempty");
+function knChip(kind){const col=kindCol[kind]||"#3E7CBA";return `<span class="kn" style="background:${col}22;color:${col}">${kind}</span>`;}
+function edgeList(dir,a){
+  const rows=E.filter(e=>(dir==="in"&&e[1]===a)||(dir==="out"&&e[0]===a));
+  if(!rows.length)return `<div class="fname" style="color:var(--dim)">—</div>`;
+  return rows.map(e=>{
+    const o=dir==="in"?e[0]:e[1];
+    const from = dir==="in" ? B[o].short : B[a].short;
+    const to   = dir==="in" ? B[a].short : B[o].short;
+    return `<div class="edge-li">${knChip(e[2])}<b style="font-weight:600">${from}</b> &rarr; <b style="font-weight:600">${to}</b><br><code style="color:#8FD3FF">${esc(e[3])}</code></div>`;
+  }).join("");
+}
+function select(k){
+  const b=B[k]; if(!b)return;
+  // selection highlight
+  document.querySelectorAll(".bd").forEach(g=>g.classList.remove("sel"));
+  const g=document.querySelector(`.bd[data-key="${k}"]`);
+  if(g)g.classList.add("sel");
+  if(topFaces[k]) topFaces[k].style.stroke="#FFD38A";
+  selected=k;
+  dempty.style.display="none";
+  const filesHtml=b.files.map(f=>`<div class="fname">${esc(f)}</div>`).join("");
+  const inb=E.filter(e=>e[1]===k).length, outb=E.filter(e=>e[0]===k).length;
+  d.innerHTML=`
+    <div style="margin:0 0 4px"><b style="font-size:15px">${b.short}</b><span class="kchip" style="background:${b.c}22;color:${b.c}">${b.role}</span><span style="color:var(--dim);font-size:12px">&middot; ${esc(b.tag)}</span></div>
+    <div class="tagline" style="margin-bottom:10px">${esc(b.desc)}</div>
+    <details><summary>Reads</summary><div class="dbody">${esc(b.reads)||"<span style='color:var(--dim)'>—</span>"}</div></details>
+    <details><summary>Writes</summary><div class="dbody">${esc(b.writes)||"<span style='color:var(--dim)'>—</span>"}</div></details>
+    <details open><summary>Files (${b.files.length})</summary><div class="dbody">${filesHtml}</div></details>
+    <details open><summary>Inbound · Outbound (${inb} / ${outb})</summary><div class="dbody">${edgeList("in",k)}${edgeList("out",k)}</div></details>
+    <div class="hint" style="margin-top:12px"><b>Invariant(s) ${esc(b.inv)}.</b> The invariants in the legend are what keep this subsystem on the rails.</div>`;
+}
+</script>
+</body>
+</html>

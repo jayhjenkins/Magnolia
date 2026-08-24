@@ -91,6 +91,12 @@ One-line inventory of every job an agent should be able to accomplish. Write as 
 
 ---
 
+## Fleet Skill Drafts
+
+See `fleet-skill-drafts.md` in this package folder for the companion artifact — PM-authored draft skill specs that translate each scenario above into instructive agent definitions the fleet skill builder can implement.
+
+---
+
 ## Changelog
 
 | Date | Changes | By |

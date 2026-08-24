@@ -3803,6 +3803,10 @@ def main():
     except Exception as e:
         print(f"Warning: legacy onboarding migration skipped: {e}")
 
+    # Bind the port FIRST — if it fails, exit before starting any daemon threads
+    # or writing to jobs.json (prevents the truncate-on-crash race).
+    server = ReusableHTTPServer(("127.0.0.1", PORT), TaskServerHandler)
+
     # Seed default cron jobs on first run (jobs.json is gitignored).
     try:
         import seed_default_crons
@@ -3824,7 +3828,6 @@ def main():
     dispatch_scheduler = DispatchScheduler(dispatch_fn=_spawn_task_dispatch)
     dispatch_scheduler.start()
 
-    server = ReusableHTTPServer(("127.0.0.1", PORT), TaskServerHandler)
     print(f"PM-OS Task Server running at http://127.0.0.1:{PORT}")
     print(f"  API:    http://127.0.0.1:{PORT}/api/tasks")
     print(f"  Cron:   http://127.0.0.1:{PORT}/api/cron")

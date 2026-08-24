@@ -76,16 +76,23 @@ def _load_jobs():
 
 
 def _save_jobs(jobs):
-    """Atomically write all jobs to JSON file."""
+    """Atomically write all jobs to JSON file via temp+rename."""
     os.makedirs(CRON_DIR, exist_ok=True)
-    fd = open(JOBS_FILE, "w")
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=CRON_DIR, suffix=".tmp")
     try:
-        platform_lib.lock(fd)
-        json.dump(jobs, fd, indent=2, default=str)
-        fd.write("\n")
-    finally:
-        platform_lib.unlock(fd)
-        fd.close()
+        with os.fdopen(tmp_fd, "w") as f:
+            json.dump(jobs, f, indent=2, default=str)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, JOBS_FILE)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ─── Template Variables ──────────────────────────────────────────────────────

@@ -72,6 +72,34 @@ DEFAULTS = [
             ),
         },
     },
+    {
+        "name": "Resident Experience scorecard — weekly refresh",
+        "cron_expr": "3 13 * * 0",  # Sunday 13:03 UTC (9:03am ET)
+        "cron_human": "Every Sunday at 9:03am ET",
+        "task_template": {
+            "title": "Resident Experience scorecard refresh — {date}",
+            "queue": "agent", "priority": "high", "domain": "metrics",
+            "description": (
+                "Run the metric-scorecard-fetch skill to refresh all auto-sourceable "
+                "Resident Experience scorecard metrics from Pendo and Databricks, record "
+                "values to datasets/scorecard/values.json, and rebuild the dashboard HTML."
+            ),
+        },
+    },
+    {
+        "name": "Weekly PM-Agent-Activation Rate Calculation",
+        "cron_expr": "37 8 * * 2",  # Tuesday 08:37 UTC
+        "cron_human": "Every Tuesday at 8:37am UTC",
+        "task_template": {
+            "title": "PM-Agent-Activation rate calculation {date}",
+            "queue": "agent", "priority": "low", "domain": "metrics",
+            "description": (
+                "Run the workflow-pm-agent-activation-metric skill to audit all in-flight "
+                "and next-up Jira Feature cards for PM-OS/ship-it origin and AI-enablement, "
+                "and produce two dated markdown reports with per-card verdicts and summary stats."
+            ),
+        },
+    },
 ]
 
 

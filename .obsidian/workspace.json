@@ -4,21 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "fd4e808e59c58f56",
+        "id": "45d4a0a4387f909f",
         "type": "tabs",
         "children": [
           {
-            "id": "fa3e0c0226a74f9e",
+            "id": "1e5f5d903797f68e",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "datasets/product/agent-output/2026-08-13_predictable-release-cadence-pitch_one-pager.md",
+                "file": "datasets/recruiting/sr-pm-payments_2026-05-27/candidates/james-harris/interview-transcript.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "2026-08-13_predictable-release-cadence-pitch_one-pager"
+              "title": "interview-transcript"
             }
           }
         ]
@@ -41,7 +41,9 @@
               "type": "file-explorer",
               "state": {
                 "sortOrder": "alphabetical",
-                "autoReveal": false
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
               },
               "icon": "lucide-folder-closed",
               "title": "Files"
@@ -53,7 +55,7 @@
             "state": {
               "type": "search",
               "state": {
-                "query": "agent activated",
+                "query": "datasets/product/agent-output/2026-06-01_home-team-velocity-analysis.md",
                 "matchingCase": false,
                 "explainSearch": false,
                 "collapseAll": false,
@@ -183,49 +185,53 @@
       "bases:Create new base": false
     }
   },
-  "active": "fa3e0c0226a74f9e",
+  "active": "0a9573a883880805",
   "lastOpenFiles": [
-    "datasets/tasks/_archive/2026-08/TASK-1511.md",
-    "datasets/tasks/_chat/TASK-1509.chat.jsonl",
-    "datasets/product/agent-output/2026-08-17_board-frustration-deep-dive.html",
-    "datasets/tasks/human/TASK-1520.md",
-    "datasets/tasks/_archive/2026-08/TASK-1505.md",
-    "datasets/tasks/human/TASK-1519.md",
-    "datasets/tasks/_archive/2026-08/TASK-1504.md",
-    "logs/judge-TASK-1516.log",
-    "datasets/product/agent-output/2026-08-17_home-team-priority-list.md",
-    "logs/judge-TASK-1518.log",
-    "logs/judge-TASK-1515.log",
-    "logs/dispatch-TASK-1516.log",
-    "logs/dispatch-TASK-1518.log",
-    "datasets/tasks/collab/TASK-1518.md",
-    "datasets/tasks/waiting/TASK-1517.md",
-    "datasets/tasks/agent/TASK-1516.md",
-    "datasets/tasks/_chat/TASK-1503.chat.jsonl",
-    "logs/dispatch-TASK-1515.log",
-    "datasets/tasks/collab/TASK-1515.md",
-    "datasets/tasks/waiting/TASK-1514.md",
-    "datasets/tasks/_archive/2026-08/TASK-1493.md",
-    "datasets/tasks/_archive/2026-08/TASK-1492.md",
-    "datasets/tasks/agent/TASK-1513.md",
-    "datasets/tasks/human/TASK-1512.md",
-    "datasets/tasks/_archive/2026-08/TASK-1488.md",
-    "datasets/tasks/_archive/2026-08/TASK-1491.md",
-    "datasets/tasks/_archive/2026-08/TASK-1487.md",
-    "datasets/meetings/product/home/2026-08/2026-08-14_09-50_Home Standup.txt",
-    "datasets/tasks/_archive/2026-08/TASK-1490.md",
-    "datasets/tasks/_archive/2026-08/TASK-1489.md",
-    "datasets/tasks/human/TASK-1511.md",
-    "datasets/tasks/_archive/2026-08/TASK-1486.md",
-    "datasets/tasks/agent/TASK-1510.md",
-    "datasets/tasks/human/TASK-1509.md",
-    "datasets/tasks/_archive/2026-08/TASK-1484.md",
-    "datasets/tasks/_archive/2026-08/TASK-1485.md",
-    "datasets/product/agent-output/golden-age-site/images/router.png",
-    "datasets/product/agent-output/golden-age-site/images/inversion.png",
-    "datasets/product/agent-output/golden-age-site/images/hero.png",
-    "datasets/product/agent-output/golden age images/router.png",
-    "datasets/product/agent-output/golden age images/inversion.png",
-    "datasets/product/agent-output/golden age images/Hero.png"
+    "datasets/tasks/_archive/2026-08/TASK-1746.md",
+    "datasets/tasks/_archive/2026-08/TASK-1742.md",
+    "datasets/tasks/_archive/2026-08/TASK-1718.md",
+    "datasets/tasks/_archive/2026-08/TASK-1735.md",
+    "datasets/tasks/_archive/2026-08/TASK-1745.md",
+    "datasets/tasks/_archive/2026-08/TASK-1732.md",
+    "datasets/tasks/_archive/2026-08/TASK-1744.md",
+    "datasets/tasks/_archive/2026-08/TASK-1731.md",
+    "datasets/tasks/_archive/2026-08/TASK-1743.md",
+    "datasets/tasks/_archive/2026-08/TASK-1733.md",
+    "datasets/tasks/_archive/2026-08/TASK-1734.md",
+    "datasets/tasks/_archive/2026-08/TASK-1738.md",
+    "logs/judge-TASK-1742.log",
+    "logs/dispatch-TASK-1742.log",
+    "datasets/tasks/collab/TASK-1742.md",
+    "datasets/tasks/_chat/TASK-1734.chat.jsonl",
+    "datasets/tasks/_archive/2026-08/TASK-1736.md",
+    "datasets/tasks/_chat/TASK-1733.chat.jsonl",
+    "datasets/tasks/_chat/TASK-1732.chat.jsonl",
+    "datasets/tasks/_archive/2026-08/TASK-1711.md",
+    "datasets/tasks/_chat/TASK-1731.chat.jsonl",
+    "datasets/tasks/_archive/2026-08/TASK-1713.md",
+    "datasets/tasks/_archive/2026-08/TASK-1630.md",
+    "datasets/tasks/_archive/2026-08/TASK-1529.md",
+    "logs/judge-TASK-1738.log",
+    "datasets/tasks/collab/TASK-1741.md",
+    "datasets/tasks/_archive/2026-08/TASK-1730.md",
+    "datasets/tasks/collab/TASK-1740.md",
+    "datasets/evals/feedback-loop/2026-08-24/recommendations.md",
+    "datasets/product/agent-output/2026-08-24_board-president-persona_robert-lieberman-alliant.tmp.md",
+    "logs/judge-TASK-1739.log",
+    "datasets/product/agent-output/2026-08-24_board-president-persona_robert-lieberman-alliant.md",
+    "datasets/evals/feedback-loop/2026-08-24/product-scope-discipline.patch",
+    "datasets/evals/feedback-loop/2026-08-24/schedule-meeting-slot-quality.patch",
+    "datasets/tasks/agent/TASK-1739.md",
+    "datasets/evals/feedback-loop/2026-08-24/digest.md",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/safari-na3_-uQk.svg",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/firefox-nightly-Cp5nfeDT.svg",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/firefox-beta-k3eOH_eK.svg",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/firefox-1bWoP6pv.svg",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/traceViewer/playwright-logo.svg",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/playwright-logo.svg",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/recorder/playwright-logo.svg",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/tools/dashboard/appIcon.png",
+    "venv/lib/python3.14/site-packages/playwright/driver/package/lib/server/chromium/appIcon.png",
+    "datasets/product/agent-output/golden-age-site/images/router.png"
   ]
 }

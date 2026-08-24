@@ -86,6 +86,8 @@ If `source_meeting` exists, read the transcript and look for scheduling hints:
 
 Use these to narrow the search window. If no hints, default to **next 5 business days**.
 
+If the task or transcript mentions alternative days ("Monday or Tuesday", "this week or next"), search ALL mentioned alternatives — do not limit to the first one. When the ask names two consecutive days, set `--start` and `--end` to span both.
+
 ### 3. Resolve Attendee Emails
 
 If any attendee entry looks like a name (no `@`), attempt to resolve it in this order:
@@ -98,6 +100,10 @@ If any attendee entry looks like a name (no `@`), attempt to resolve it in this 
    ./scripts/task.sh agent:ask {TASK_ID} "I need the email address for {name}. Who should I invite?"
    ```
    Then STOP. Do not continue.
+
+**Organizer as attendee.** Always include the operator (jay.jenkins@vantaca.com) as an explicit attendee in the `--attendees` list so they appear on the invite — do not assume the calendar provider adds the organizer automatically.
+
+**Optional attendees.** If the task mentions someone with hedging language ("possibly", "maybe", "if available"), note them in the `## Suggested Times` output as "Optional: {name} ({email})" beneath the slot list. Do not block on their availability when finding slots, but do not silently drop them — they should appear on the calendar invite as optional.
 
 ### 4. Find Available Times
 
@@ -133,6 +139,11 @@ If the result has zero slots (`"slots": []`) OR `empty_reason` indicates `Attend
 ### 5. Format Suggested Times
 
 Write a `## Suggested Times` section into the task description. Each slot MUST include an HTML comment with machine-parseable data followed by a human-readable line.
+
+**Slot quality rules:**
+1. **No weekends or out-of-hours.** Every proposed slot must fall within Monday–Friday, 9:30 AM – 5:00 PM ET. Discard any Graph-returned slot outside this window.
+2. **Prefer conflict-free for required attendees.** Rank slots where ALL required (non-operator) attendees are free above slots with attendee conflicts. If 3+ conflict-free slots exist, do not include conflicted ones. If fewer than 3 are conflict-free, fill to 4 total with conflicted slots ranked LAST and prefix the availability note with a warning (e.g., "Dennis has a conflict — Trisha free").
+3. **Operator soft conflicts are fine.** The operator's own tentative/soft conflicts may be noted inline but do not deprioritize the slot.
 
 **For each slot, cross-reference the ET time against the Operator's Calendar Structure Reference (below) and append a short contextual note** after the availability info. The note should help the operator evaluate soft tradeoffs at a glance. Keep each note to 1 short sentence max.
 
