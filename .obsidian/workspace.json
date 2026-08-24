@@ -187,6 +187,8 @@
   },
   "active": "0a9573a883880805",
   "lastOpenFiles": [
+    "datasets/tasks/human/TASK-1747.md",
+    "datasets/tasks/_archive/2026-08/TASK-1740.md",
     "datasets/tasks/_archive/2026-08/TASK-1746.md",
     "datasets/tasks/_archive/2026-08/TASK-1742.md",
     "datasets/tasks/_archive/2026-08/TASK-1718.md",
@@ -221,8 +223,6 @@
     "datasets/product/agent-output/2026-08-24_board-president-persona_robert-lieberman-alliant.md",
     "datasets/evals/feedback-loop/2026-08-24/product-scope-discipline.patch",
     "datasets/evals/feedback-loop/2026-08-24/schedule-meeting-slot-quality.patch",
-    "datasets/tasks/agent/TASK-1739.md",
-    "datasets/evals/feedback-loop/2026-08-24/digest.md",
     "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/safari-na3_-uQk.svg",
     "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/firefox-nightly-Cp5nfeDT.svg",
     "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/firefox-beta-k3eOH_eK.svg",
