@@ -968,6 +968,58 @@ def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
     return True, reason
 
 
+def _llm_evaluate_date_proposal(program_title, current_phase, field,
+                                 jira_date, observations, phase_description=""):
+    """Ask Claude whether a Jira date is realistic given the program's state.
+
+    Returns (approved, reason). approved=True means the date IS unrealistic and
+    the update proposal should fire. Fail-closed: returns (False, ...) on any
+    dispatch failure so questionable dates don't get flagged without evidence.
+    """
+    obs_text = "\n".join(f"- {o}" for o in observations[-15:]) if observations else "(none)"
+    field_label = field.replace("_", " ").upper()
+    phase_ctx = f"\nWhat '{current_phase}' means: {phase_description}" if phase_description else ""
+    prompt = (
+        "You are evaluating whether a product initiative's Jira date is "
+        "realistic given its current state. Consider ALL the evidence -- "
+        "recent progress, blockers, deployment status, and the overall "
+        "trajectory -- not just the phase label.\n\n"
+        f"Program: {program_title}\n"
+        f"Current phase: {current_phase}{phase_ctx}\n"
+        f"Jira {field_label}: {jira_date}\n\n"
+        f"Recent observations (oldest to newest):\n{obs_text}\n\n"
+        f"Based on the evidence, is the {field_label} of {jira_date} "
+        f"unrealistic and should be updated? Consider whether the program's "
+        f"actual progress supports hitting this date.\n"
+        "Reply with exactly YES (date is unrealistic) or NO (date is "
+        "achievable) on the first line, then a one-sentence reason on the "
+        "second line."
+    )
+    import profile_lib
+    model = profile_lib.resolve_model(_LLM_EVAL_TIER)
+    cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
+    env = platform_lib.headless_harness_env(harness_name)
+    try:
+        proc = subprocess.run(
+            cmd, cwd=os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))),
+            env=env, capture_output=True, text=True,
+            timeout=_LLM_EVAL_TIMEOUT,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write(f"[cadence] LLM date eval failed ({exc.__class__.__name__}), fail-closed\n")
+        return False, "evaluation unavailable -- fail-closed"
+    if proc.returncode != 0:
+        sys.stderr.write(f"[cadence] LLM date eval exited {proc.returncode}, fail-closed\n")
+        return False, "evaluation unavailable -- fail-closed"
+    out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
+    first_line = (out or "").strip().split("\n")[0].strip().upper()
+    reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
+    if first_line.startswith("NO"):
+        return False, reason
+    return True, reason
+
+
 def _gather_observation_claims(body):
     """Extract observation claims from a program body for LLM evaluation."""
     claims = []
@@ -1234,6 +1286,74 @@ def _propose_date_update(fm, type_entry, body, now=None):
                     f"program is due {program_due.isoformat()}"
                 ),
             }
+
+    # Phase-date coherence: detect when Jira EA/GA dates are unrealistic
+    # given the program's current pipeline phase. Catches programs that have
+    # no checkpoints (or none matching EA/GA tokens) but whose tracker dates
+    # conflict with their phase position. Marked source:"phase-coherence" so
+    # the emitter path can gate these through an LLM evaluation.
+    phases = type_entry.get("phases") or []
+    if phases and (jira_ea or jira_ga):
+        current_phase = fm.get("phase")
+        current_idx = next(
+            (i for i, p in enumerate(phases)
+             if isinstance(p, dict) and p.get("id") == current_phase),
+            -1,
+        )
+        if current_idx >= 0:
+            ea_phase_idx = None
+            ga_phase_idx = None
+            for i, ph in enumerate(phases):
+                if not isinstance(ph, dict):
+                    continue
+                cp_id = ph.get("exit_checkpoint") or ""
+                if any(tok in cp_id for tok in _EA_CHECKPOINT_TOKENS):
+                    ea_phase_idx = i
+                if any(tok in cp_id for tok in _GA_CHECKPOINT_TOKENS):
+                    ga_phase_idx = i
+            if ga_phase_idx is None:
+                for i in range(len(phases) - 1, -1, -1):
+                    if isinstance(phases[i], dict) and not phases[i].get("terminal"):
+                        ga_phase_idx = i
+                        break
+
+            if jira_ea and ea_phase_idx is not None and current_idx <= ea_phase_idx:
+                overdue = (now_date - jira_ea).days
+                if overdue >= _DATE_DRIFT_OVERDUE_DAYS:
+                    return {
+                        "op": "update-tracker-date",
+                        "tracker_key": anchor,
+                        "field": "ea_date",
+                        "current_jira_date": jira_ea.isoformat(),
+                        "checkpoint_id": None,
+                        "checkpoint_label": f"phase still {current_phase}",
+                        "overdue_days": overdue,
+                        "source": "phase-coherence",
+                        "reason": (
+                            f"EA date ({jira_ea.isoformat()}) passed {overdue}d ago "
+                            f"but program is still in {current_phase} phase"
+                        ),
+                    }
+
+            if jira_ga and ga_phase_idx is not None and current_idx < ga_phase_idx:
+                days_to_ga = (jira_ga - now_date).days
+                if days_to_ga <= _SOON_WINDOW_DAYS:
+                    overdue = max(0, -days_to_ga)
+                    return {
+                        "op": "update-tracker-date",
+                        "tracker_key": anchor,
+                        "field": "ga_date",
+                        "current_jira_date": jira_ga.isoformat(),
+                        "checkpoint_id": None,
+                        "checkpoint_label": f"phase still {current_phase}",
+                        "overdue_days": overdue,
+                        "source": "phase-coherence",
+                        "reason": (
+                            f"GA date ({jira_ga.isoformat()}) "
+                            + (f"in {days_to_ga}d" if days_to_ga > 0 else f"passed {-days_to_ga}d ago")
+                            + f" but program is still in {current_phase} phase"
+                        ),
+                    }
 
     return None
 
@@ -1800,6 +1920,23 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                 resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
             if _suppressed_by_resolution(mutation["op"], resolved_prop_ops, body):
                 continue
+            if mutation.get("source") == "phase-coherence":
+                phase_desc = ""
+                for ph in (type_entry.get("phases") or []):
+                    if ph.get("id") == fm.get("phase"):
+                        phase_desc = ph.get("description", "")
+                        break
+                obs_claims = _gather_observation_claims(body)
+                approved, reason = _llm_evaluate_date_proposal(
+                    title, fm.get("phase", "?"),
+                    mutation.get("field", "date"),
+                    mutation.get("current_jira_date", "?"),
+                    obs_claims, phase_description=phase_desc)
+                if not approved:
+                    sys.stderr.write(
+                        f"[cadence] LLM says date achievable {program_id} "
+                        f"{mutation.get('field')}: {reason}\n")
+                    continue
             task_id, _ = task_lib.create_task(
                 title=f"{title}: update Jira {mutation.get('field', 'date').replace('_', ' ')}?",
                 queue="human",

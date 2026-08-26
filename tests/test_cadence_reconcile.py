@@ -20,6 +20,7 @@ from cadence import reconcile
 _REAL_llm_evaluate_proposal = reconcile._llm_evaluate_proposal
 _REAL_llm_evaluate_archive_proposal = reconcile._llm_evaluate_archive_proposal
 _REAL_llm_evaluate_tracker_proposal = reconcile._llm_evaluate_tracker_proposal
+_REAL_llm_evaluate_date_proposal = reconcile._llm_evaluate_date_proposal
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +51,9 @@ def _isolated_task_queues(tmp_path_factory, monkeypatch):
         lambda *a, **kw: (True, "auto-approved in test"))
     monkeypatch.setattr(
         reconcile, "_llm_evaluate_archive_proposal",
+        lambda *a, **kw: (True, "auto-approved in test"))
+    monkeypatch.setattr(
+        reconcile, "_llm_evaluate_date_proposal",
         lambda *a, **kw: (True, "auto-approved in test"))
 
 
@@ -3924,3 +3928,202 @@ def test_date_drift_emitter_in_registry():
         type_entry = next(t for t in registry["types"] if t["id"] == type_id)
         triggers = [e["on"] for e in type_entry.get("emitters", [])]
         assert "date-drift" in triggers, f"{type_id} missing date-drift emitter"
+
+
+# ─── Phase-date coherence tests ──────────────────────────────────────────────
+
+def test_phase_coherence_ga_imminent_still_in_execution(tmp_path):
+    """GA date within SOON_WINDOW but program still in execution -> date drift."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Offers - SSO update",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-05-01"},
+            "last_cycle": OTHER_PERIOD,
+            "bindings": [
+                {"id": "jira-feature", "role": "truth",
+                 "kind": "project_management", "anchor": "VNT-43453",
+                 "mode": "read", "health": "ok"},
+            ],
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    pl.append_observation(
+        program_id, root=root,
+        kind="date-change", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-43453",
+        claim="EA date is 2026-06-10.", date="2026-06-05",
+    )
+    pl.append_observation(
+        program_id, root=root,
+        kind="date-change", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-43453",
+        claim="GA date is 2026-06-20.", date="2026-06-05",
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_date_update(
+        program["frontmatter"], type_entry, program["body"], now=NOW)
+
+    assert result is not None
+    assert result["op"] == "update-tracker-date"
+    assert result["source"] == "phase-coherence"
+    # EA date (June 10) is 6 days overdue on June 16 -- just below threshold
+    # but GA date (June 20) is 4 days away and program is still in execution
+    # EA fires first since it's past the 7-day threshold (6 days, under 7)
+    # Actually EA overdue is 6 < 7, so it won't fire. GA is within SOON_WINDOW.
+    assert result["field"] == "ga_date"
+
+
+def test_phase_coherence_ea_overdue_still_in_execution(tmp_path):
+    """EA date past 7+ days but program still in execution -> date drift."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Feature with stale EA",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-05-01"},
+            "last_cycle": OTHER_PERIOD,
+            "bindings": [
+                {"id": "jira-feature", "role": "truth",
+                 "kind": "project_management", "anchor": "VNT-11111",
+                 "mode": "read", "health": "ok"},
+            ],
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    pl.append_observation(
+        program_id, root=root,
+        kind="date-change", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-11111",
+        claim="EA date is 2026-06-01.", date="2026-06-01",
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_date_update(
+        program["frontmatter"], type_entry, program["body"], now=NOW)
+
+    assert result is not None
+    assert result["op"] == "update-tracker-date"
+    assert result["field"] == "ea_date"
+    assert result["source"] == "phase-coherence"
+    assert result["overdue_days"] == 15  # June 16 - June 1
+
+
+def test_phase_coherence_no_fire_when_shipped(tmp_path):
+    """Program already in shipped phase -> no phase-coherence trigger."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="Already shipped",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "shipped",
+            "phase_entered": {"shipped": "2026-06-10"},
+            "last_cycle": OTHER_PERIOD,
+            "bindings": [
+                {"id": "jira-feature", "role": "truth",
+                 "kind": "project_management", "anchor": "VNT-22222",
+                 "mode": "read", "health": "ok"},
+            ],
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    pl.append_observation(
+        program_id, root=root,
+        kind="date-change", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-22222",
+        claim="EA date is 2026-06-01.", date="2026-06-01",
+    )
+    pl.append_observation(
+        program_id, root=root,
+        kind="date-change", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-22222",
+        claim="GA date is 2026-06-20.", date="2026-06-01",
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_date_update(
+        program["frontmatter"], type_entry, program["body"], now=NOW)
+
+    assert result is None
+
+
+def test_phase_coherence_no_fire_without_jira_dates(tmp_path):
+    """No tracker-truth date observations -> no phase-coherence trigger."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="No dates observed",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-05-01"},
+            "last_cycle": OTHER_PERIOD,
+            "bindings": [
+                {"id": "jira-feature", "role": "truth",
+                 "kind": "project_management", "anchor": "VNT-33333",
+                 "mode": "read", "health": "ok"},
+            ],
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_date_update(
+        program["frontmatter"], type_entry, program["body"], now=NOW)
+
+    assert result is None
+
+
+def test_phase_coherence_ga_far_away_no_fire(tmp_path):
+    """GA date far in the future -> no phase-coherence trigger."""
+    root = str(tmp_path / "data")
+    program_id, _ = pl.create_program(
+        type="roadmap-initiative",
+        title="GA far away",
+        owner_role="pm",
+        frontmatter_extra={
+            "phase": "execution",
+            "phase_entered": {"execution": "2026-05-01"},
+            "last_cycle": OTHER_PERIOD,
+            "bindings": [
+                {"id": "jira-feature", "role": "truth",
+                 "kind": "project_management", "anchor": "VNT-44444",
+                 "mode": "read", "health": "ok"},
+            ],
+            "checkpoints": [],
+        },
+        root=root,
+    )
+    pl.append_observation(
+        program_id, root=root,
+        kind="date-change", sentinel="tracker-truth",
+        source="adapter:project_management:VNT-44444",
+        claim="GA date is 2026-08-01.", date="2026-06-01",
+    )
+    program = pl.read_program(program_id, root=root)
+    type_entry = next((t for t in _registry()["types"]
+                       if t["id"] == "roadmap-initiative"), {})
+
+    result = reconcile._propose_date_update(
+        program["frontmatter"], type_entry, program["body"], now=NOW)
+
+    assert result is None
