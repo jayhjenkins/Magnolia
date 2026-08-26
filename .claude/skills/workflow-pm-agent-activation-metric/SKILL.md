@@ -29,9 +29,20 @@ Produce two dated markdown reports (in-flight + next-up) with a per-card table a
 
 ## Workflow
 
-### Phase 0: Load prior run (skip re-assessment of unchanged cards)
+### Phase 0: Load confirmation ledger + prior run
 
-Before pulling from Jira, check for the most recent prior output files in `datasets/product/agent-output/`:
+Before pulling from Jira, load two sources of prior knowledge. The confirmation ledger takes priority over timestamp-based carry-forward.
+
+**Step 0a — Confirmation ledger (highest priority).** Read `datasets/product/agent-output/pm-agent-activation-confirmed-calls.yaml`. This file stores the operator's confirmed verdicts keyed by card key and dimension (`pmos_fit`, `ai_enabled`). Each entry has: `verdict`, `date`, `rationale`, and optional content fingerprints (`spec_ref_at_confirm`, `desc_length_at_confirm`).
+
+Ledger entries are **sticky** — they represent the operator's direct call and are never re-litigated by a sub-agent. A ledger entry is carried forward regardless of `updated` timestamp changes or bucket moves, unless the card's spec content materially changed:
+
+- If `spec_ref_at_confirm` and `desc_length_at_confirm` are both `null` (legacy/seeded entries) → carry forward unconditionally.
+- If fingerprints are populated → after pulling the card in Phase 1, compare the current `customfield_10783` value against `spec_ref_at_confirm` and the current description character count against `desc_length_at_confirm`. If the spec_ref changed OR the description length changed by more than 20% → flag for re-assessment with a note explaining what changed (e.g., "ledger entry exists but spec content changed since {date} confirmation"). Otherwise → carry forward.
+
+When carrying forward a ledger entry, use the verdict from the ledger and mark the basis with the ledger's rationale plus "(confirmed by operator {date}, ledger-protected)" so it's clear this was a direct call, not an algorithmic carry-forward.
+
+**Step 0b — Prior run carry-forward (for cards not in the ledger).** Check for the most recent prior output files in `datasets/product/agent-output/`:
 
 ```bash
 ls -t datasets/product/agent-output/*_in-flight-feature-cards-pmos-ai-audit.md | head -1
@@ -40,16 +51,16 @@ ls -t datasets/product/agent-output/*_next-status-feature-cards-pmos-ai-audit.md
 
 If prior files exist, parse each one to extract a lookup of `{card_key → {verdict_pmos, verdict_ai, basis, updated_date}}`. The `updated` timestamp from the prior run is the key — if a card appeared in the last run, you recorded its Jira `updated` field at that time.
 
-**Carry-forward rule:** After pulling the fresh card list in Phase 1, compare each card's current `updated` timestamp against the prior run's recorded value. If:
+**Carry-forward rule (for cards NOT already covered by the ledger):** After pulling the fresh card list in Phase 1, compare each card's current `updated` timestamp against the prior run's recorded value. If:
 - The card appeared in the prior run, AND
 - Its `updated` timestamp has NOT changed since the prior run, AND
 - Its prior verdict was **not** ⚠️ Unconfirmed (those always get re-assessed)
 
 → **Carry forward** the prior verdict and basis directly into the new output. Mark the basis with "(carried from {prior_date} run)" so it's clear this wasn't freshly assessed.
 
-Only cards that are **new** (not in prior run), **updated** (timestamp changed), or **previously Unconfirmed** get dispatched to sub-agents for full assessment. This dramatically reduces Jira API calls and sub-agent work on repeat runs.
+Only cards that are **new** (not in prior run or ledger), **updated** (timestamp changed and not ledger-protected), or **previously Unconfirmed** (and not ledger-protected) get dispatched to sub-agents for full assessment. This dramatically reduces Jira API calls and sub-agent work on repeat runs.
 
-If no prior files exist, skip this phase entirely and assess everything fresh.
+If no prior files exist and the ledger is empty, skip this phase entirely and assess everything fresh.
 
 ### Phase 1: Pull the card lists
 
@@ -70,7 +81,7 @@ For both, request fields: `summary, status, components, created, updated`
 
 The result will likely be a large JSON. Use `jq` via Bash to extract a flat list: `key, project.key, status.name, created, updated, components[].name, summary` per card.
 
-After extraction, apply the Phase 0 carry-forward rule. Split the remaining cards (new, updated, or previously Unconfirmed) into sub-agent batches. Cards that moved between buckets (e.g., was "Next" last run, now "In Development") should be re-assessed since their status changed.
+After extraction, apply the Phase 0 rules in priority order: ledger-protected cards first (carried forward regardless of bucket moves or timestamp changes, unless spec content changed materially), then timestamp carry-forward for the remainder. Split the remaining cards (new, updated, previously Unconfirmed, or moved buckets — excluding ledger-protected cards) into sub-agent batches.
 
 ### Phase 2: Dispatch sub-agents for assessment
 
@@ -128,9 +139,29 @@ After writing both files, print a concise summary:
 
 - In-Flight: X cards total, Y PM-OS (Z%), A AI-Enabled (B%)
 - Next-Up: X cards total, Y PM-OS (Z%), A AI-Enabled (B%)
+- Cards carried forward from confirmation ledger: N (operator-confirmed, ledger-protected)
 - Cards carried forward from prior run: N (unchanged since {prior_date})
 - Cards freshly assessed this run: M (new, updated, or previously Unconfirmed)
 - Any Unconfirmed rows that need the user's direct call (list them)
+
+### Phase 4a: Update confirmation ledger
+
+After the user confirms or corrects any verdicts (during the Phase 4 review or in subsequent conversation), update the ledger:
+
+1. For each confirmed card+dimension, read the card's current `customfield_10783` (Spec Reference) value and description character count from the Jira data already pulled in Phase 1
+2. Append or update the entry in `datasets/product/agent-output/pm-agent-activation-confirmed-calls.yaml`:
+   ```yaml
+   CARD-KEY:
+     DIMENSION:
+       verdict: "Yes"  # or "No" / "N/A"
+       date: "YYYY-MM-DD"
+       rationale: "Short explanation of the operator's reasoning"
+       spec_ref_at_confirm: "value or null"
+       desc_length_at_confirm: 1234  # or null if unavailable
+   ```
+3. Write the updated YAML file back to disk
+
+This ensures future runs respect the operator's call without requiring re-confirmation, even if the card's `updated` timestamp changes from minor field touches.
 
 ---
 
