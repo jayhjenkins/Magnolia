@@ -1462,12 +1462,12 @@ def _apply_cadence_tracker_update(task_id, t, proposal, program_id):
 
 
 def _apply_cadence_date_update(task_id, t, proposal, program_id):
-    """Accept a date-drift proposal: push the suggested date to Jira.
+    """Accept a date-drift proposal: push the date change to Jira immediately.
 
-    Creates a JIRA_UPDATE block with an edit action targeting the EA or GA
-    date field, dispatches it via the ticket-creator worker. If the proposal
-    carries no suggested_date, falls back to a comment-only update that flags
-    the date for manual review.
+    The user's accept of the recommendation card IS the Tier-2 consent. This
+    creates a sync task with the JIRA_UPDATE block AND immediately executes it
+    via _attempt_update (the same path the board UI's "Publish" button uses).
+    The receipt records the Jira outcome, not just the local accept.
     """
     tracker_key = proposal.get("tracker_key", "?")
     field = proposal.get("field", "ea_date")
@@ -1484,22 +1484,10 @@ def _apply_cadence_date_update(task_id, t, proposal, program_id):
     task_lib.update_task(task_id, comment=f"Accepted: {summary}", actor="human")
     task_lib.complete_task(task_id, actor="human")
 
-    receipt_id, _ = task_lib.create_task(
-        f"Applied: {t.get('title', '')}", queue="human", domain="ops",
-        creator="agent", card_type="receipt",
-        description=f"{summary} Reason: {reason}")
-    task_lib.update_task(receipt_id, changes={
-        "receipt_kind": "cadence-apply", "source_recommendation": task_id,
-        "program_id": program_id})
-
-    open_keys = _open_jira_sync_keys()
-    if tracker_key in open_keys:
-        return receipt_id
-
     try:
         prog = program_lib.read_program(program_id)
     except FileNotFoundError:
-        return receipt_id
+        prog = {"frontmatter": {}}
     fm = prog.get("frontmatter") or {}
     title = fm.get("title") or program_id
 
@@ -1552,11 +1540,32 @@ def _apply_cadence_date_update(task_id, t, proposal, program_id):
         description=description,
         tags=[program_id, "cadence"],
         card_type="task",
+        task_type="ticket-creator",
     )
-    task_lib.update_task(tid, changes={
-        "task_type": "ticket-creator",
-        "agent_status": "complete",
-    })
+
+    update = jira_publish.parse_jira_update(description)
+    jira_outcome = "not executed"
+    if update:
+        status, payload = _attempt_update(tid, update)
+        if status == "ok":
+            issue_key, issue_url = payload
+            jira_outcome = f"Updated {issue_key}: {issue_url}"
+        elif status == "needs_confirm":
+            jira_outcome = "needs Tier-2 confirmation (first external write)"
+        elif status == "already_updated":
+            jira_outcome = "already processed"
+        else:
+            jira_outcome = f"failed: {payload}"
+    else:
+        jira_outcome = "could not parse JIRA_UPDATE block"
+
+    receipt_id, _ = task_lib.create_task(
+        f"Applied: {t.get('title', '')}", queue="human", domain="ops",
+        creator="agent", card_type="receipt",
+        description=f"{summary}\nJira: {jira_outcome}\nReason: {reason}")
+    task_lib.update_task(receipt_id, changes={
+        "receipt_kind": "cadence-apply", "source_recommendation": task_id,
+        "program_id": program_id})
 
     return receipt_id
 
