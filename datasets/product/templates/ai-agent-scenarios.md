@@ -93,7 +93,7 @@ One-line inventory of every job an agent should be able to accomplish. Write as 
 
 ## Fleet Skill Drafts
 
-See `fleet-skill-drafts.md` in this package folder for the companion artifact — PM-authored draft skill specs that translate each scenario above into instructive agent definitions the fleet skill builder can implement.
+See `fleet-skill-drafts.md` in this package folder for the companion artifact — a v1 draft fleet skill for each agent-facing scenario above, written pre-build with no expectation of validation. It exists to force the agent workflow to be thought through now and to give Fleet a running start; their own `build-fleet-skill` pipeline (live API verification, fixtures, QA validation) is what turns it into something real once the feature is actually built.
 
 ---
 

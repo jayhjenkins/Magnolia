@@ -63,7 +63,6 @@ Before starting the interactive session, check the package folder for these arti
 | One-Pager | `{package}/one-pager.md` | Tagline, target audience, differentiators, success metrics, timeline |
 | Living FAQ | `{package}/living-faq.md` | Import all items in the "Open Questions for PM" section that are still UNANSWERED into the PRD Open Questions. Use answered items to inform requirements and customer-facing positioning. |
 | AI Agent Scenarios | `{package}/ai-agent-scenarios.md` | Use Case Inventory, scenarios, and API Requirements → populate Agent/API Scenarios section. Do NOT prescribe endpoint shape in the PRD — engineering owns that. |
-| Fleet Skill Drafts | `{package}/fleet-skill-drafts.md` | PM-authored draft skill specs for fleet agents → populate Fleet Readiness section. Each draft maps a scenario to the domain context, workflow, and guard rails the fleet skill builder needs. |
 
 If upstream artifacts exist, announce what was imported and which sections were pre-populated. Only ask the PM to confirm or refine pre-populated content, not re-enter it.
 
@@ -96,7 +95,6 @@ If upstream artifacts exist, announce what was imported and which sections were 
 **Ask user:**
 - **Use Cases In Scope**: What specific use cases will be supported? Include descriptions.
 - **Agent/API Scenarios**: For each human use case, what is the equivalent agent scenario? Reference the use cases and scenarios in `ai-agent-scenarios.md`. (Pre-populate from `ai-agent-scenarios.md` if available. The PRD references the scenarios; it does NOT duplicate endpoint-level API design.)
-- **Fleet Readiness**: Which scenarios have draft fleet skill specs? Reference `fleet-skill-drafts.md` if available. For each, note the skill name, trigger, and whether the required API capabilities exist yet or are being built as part of this PRD. This section makes fleet enablement part of the definition of done.
 - **Out of Scope**: What are we explicitly NOT doing? Include reasons.
 - **Non-Goals**: What does this product explicitly NOT aim to do? (Distinct from out-of-scope — non-goals define philosophical boundaries, not just "not in this release.")
 
@@ -162,7 +160,7 @@ All phases ship. This is sequencing, not cutting. Include dependency tracking be
 ### Phase 9: Appendix / Upstream Artifact Links
 
 **Link to all upstream artifacts** for traceability:
-- Context Brief, Press Releases, One-Pager, Living FAQ, AI Agent Scenarios, Fleet Skill Drafts
+- Context Brief, Press Releases, One-Pager, Living FAQ, AI Agent Scenarios
 - Any expansion proposals or red team reports (if they exist from a previous `/build` run)
 
 *Only link artifacts that actually exist. Don't create placeholder links.*
