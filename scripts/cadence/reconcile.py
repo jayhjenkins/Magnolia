@@ -970,11 +970,12 @@ def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
 
 def _llm_evaluate_date_proposal(program_title, current_phase, field,
                                  jira_date, observations, phase_description=""):
-    """Ask Claude whether a Jira date is realistic given the program's state.
+    """Ask Claude whether a Jira date is realistic and suggest a replacement.
 
-    Returns (approved, reason). approved=True means the date IS unrealistic and
-    the update proposal should fire. Fail-closed: returns (False, ...) on any
-    dispatch failure so questionable dates don't get flagged without evidence.
+    Returns (approved, reason, suggested_date). approved=True means the date IS
+    unrealistic and the update proposal should fire. suggested_date is an ISO
+    date string or None. Fail-closed: returns (False, ..., None) on any
+    dispatch failure.
     """
     obs_text = "\n".join(f"- {o}" for o in observations[-15:]) if observations else "(none)"
     field_label = field.replace("_", " ").upper()
@@ -990,10 +991,12 @@ def _llm_evaluate_date_proposal(program_title, current_phase, field,
         f"Recent observations (oldest to newest):\n{obs_text}\n\n"
         f"Based on the evidence, is the {field_label} of {jira_date} "
         f"unrealistic and should be updated? Consider whether the program's "
-        f"actual progress supports hitting this date.\n"
-        "Reply with exactly YES (date is unrealistic) or NO (date is "
-        "achievable) on the first line, then a one-sentence reason on the "
-        "second line."
+        f"actual progress supports hitting this date.\n\n"
+        "Reply in exactly three lines:\n"
+        "Line 1: YES (date is unrealistic) or NO (date is achievable)\n"
+        "Line 2: One-sentence reason\n"
+        "Line 3: If YES, a realistic replacement date in YYYY-MM-DD format "
+        "based on the evidence timeline. If NO, write NONE."
     )
     import profile_lib
     model = profile_lib.resolve_model(_LLM_EVAL_TIER)
@@ -1008,16 +1011,23 @@ def _llm_evaluate_date_proposal(program_title, current_phase, field,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         sys.stderr.write(f"[cadence] LLM date eval failed ({exc.__class__.__name__}), fail-closed\n")
-        return False, "evaluation unavailable -- fail-closed"
+        return False, "evaluation unavailable -- fail-closed", None
     if proc.returncode != 0:
         sys.stderr.write(f"[cadence] LLM date eval exited {proc.returncode}, fail-closed\n")
-        return False, "evaluation unavailable -- fail-closed"
+        return False, "evaluation unavailable -- fail-closed", None
     out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
-    first_line = (out or "").strip().split("\n")[0].strip().upper()
-    reason = "\n".join((out or "").strip().split("\n")[1:]).strip() or "no reason given"
+    lines = (out or "").strip().split("\n")
+    first_line = lines[0].strip().upper() if lines else ""
+    reason = lines[1].strip() if len(lines) > 1 else "no reason given"
+    suggested = None
+    if len(lines) > 2:
+        raw = lines[2].strip()
+        suggested = _parse_iso_date(raw)
+        if suggested:
+            suggested = suggested.isoformat()
     if first_line.startswith("NO"):
-        return False, reason
-    return True, reason
+        return False, reason, None
+    return True, reason, suggested
 
 
 def _gather_observation_claims(body):
@@ -1365,11 +1375,23 @@ def _build_date_update_description(mutation, program_id):
     current = mutation.get("current_jira_date", "not set")
     cp_label = mutation.get("checkpoint_label", "?")
     overdue = mutation.get("overdue_days", 0)
-    return (
+    suggested = mutation.get("suggested_date")
+    llm_reason = mutation.get("llm_reason")
+    lines = [
         f"Jira {key} {field} needs updating: {cp_label} is overdue by "
-        f"{overdue} days. Current Jira {field}: {current}.\n"
-        f"Review and update the date in Jira to reflect the actual timeline."
-    )
+        f"{overdue} days. Current Jira {field}: {current}.",
+    ]
+    if llm_reason:
+        lines.append(f"Assessment: {llm_reason}")
+    if suggested:
+        lines.append(
+            f"Accept to update Jira {key} {field} from {current} to {suggested}."
+        )
+    else:
+        lines.append(
+            f"Accept to update the {field} in Jira to reflect the actual timeline."
+        )
+    return "\n".join(lines)
 
 
 def _build_birth_description(proposal, program_id):
@@ -1927,7 +1949,7 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                         phase_desc = ph.get("description", "")
                         break
                 obs_claims = _gather_observation_claims(body)
-                approved, reason = _llm_evaluate_date_proposal(
+                approved, reason, suggested = _llm_evaluate_date_proposal(
                     title, fm.get("phase", "?"),
                     mutation.get("field", "date"),
                     mutation.get("current_jira_date", "?"),
@@ -1937,6 +1959,9 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                         f"[cadence] LLM says date achievable {program_id} "
                         f"{mutation.get('field')}: {reason}\n")
                     continue
+                if suggested:
+                    mutation["suggested_date"] = suggested
+                mutation["llm_reason"] = reason
             task_id, _ = task_lib.create_task(
                 title=f"{title}: update Jira {mutation.get('field', 'date').replace('_', ' ')}?",
                 queue="human",

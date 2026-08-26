@@ -54,7 +54,7 @@ def _isolated_task_queues(tmp_path_factory, monkeypatch):
         lambda *a, **kw: (True, "auto-approved in test"))
     monkeypatch.setattr(
         reconcile, "_llm_evaluate_date_proposal",
-        lambda *a, **kw: (True, "auto-approved in test"))
+        lambda *a, **kw: (True, "auto-approved in test", "2026-09-15"))
 
 
 # A fixed "now" used everywhere so verdicts are deterministic.

@@ -176,6 +176,8 @@ def parse_jira_update(body):
         "description": description,
         "target_status": _field("JIRA_TARGET_STATUS") or "",
         "expected_status": _field("JIRA_EXPECTED_STATUS") or "",
+        "ea_date": _field("JIRA_EA_DATE") or "",
+        "ga_date": _field("JIRA_GA_DATE") or "",
     }
 
 
@@ -446,6 +448,10 @@ def _update_rest(client, update):
             fields["labels"] = update["labels"]
         if update.get("description"):
             fields["description"] = update["description"]
+        if update.get("ea_date"):
+            fields["customfield_10683"] = update["ea_date"]
+        if update.get("ga_date"):
+            fields["customfield_10300"] = update["ga_date"]
         return client.edit_issue(key, fields)
     elif action == "comment_and_edit":
         fields = {}
@@ -457,6 +463,10 @@ def _update_rest(client, update):
             fields["labels"] = update["labels"]
         if update.get("description"):
             fields["description"] = update["description"]
+        if update.get("ea_date"):
+            fields["customfield_10683"] = update["ea_date"]
+        if update.get("ga_date"):
+            fields["customfield_10300"] = update["ga_date"]
         client.edit_issue(key, fields)
         return client.add_comment(key, update["comment_body"])
     elif action == "transition":

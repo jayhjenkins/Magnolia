@@ -1244,6 +1244,9 @@ def _apply_cadence_proposal(task_id, t):
     if proposal.get("op") == "update-tracker":
         return _apply_cadence_tracker_update(task_id, t, proposal, program_id)
 
+    if proposal.get("op") == "update-tracker-date":
+        return _apply_cadence_date_update(task_id, t, proposal, program_id)
+
     try:
         result = program_lib.apply_mutation(program_id, proposal)
     except ValueError as e:
@@ -1445,6 +1448,106 @@ def _apply_cadence_tracker_update(task_id, t, proposal, program_id):
 
     tid, _ = task_lib.create_task(
         f"Transition {tracker_key}: '{current_status}' -> In Progress",
+        queue="agent", domain="ops", creator="cadence",
+        description=description,
+        tags=[program_id, "cadence"],
+        card_type="task",
+    )
+    task_lib.update_task(tid, changes={
+        "task_type": "ticket-creator",
+        "agent_status": "complete",
+    })
+
+    return receipt_id
+
+
+def _apply_cadence_date_update(task_id, t, proposal, program_id):
+    """Accept a date-drift proposal: push the suggested date to Jira.
+
+    Creates a JIRA_UPDATE block with an edit action targeting the EA or GA
+    date field, dispatches it via the ticket-creator worker. If the proposal
+    carries no suggested_date, falls back to a comment-only update that flags
+    the date for manual review.
+    """
+    tracker_key = proposal.get("tracker_key", "?")
+    field = proposal.get("field", "ea_date")
+    current = proposal.get("current_jira_date", "?")
+    suggested = proposal.get("suggested_date")
+    reason = proposal.get("llm_reason") or proposal.get("reason", "date drift detected")
+
+    field_label = field.replace("_", " ")
+    if suggested:
+        summary = f"Update {tracker_key} {field_label}: {current} -> {suggested}."
+    else:
+        summary = f"Flag {tracker_key} {field_label} for review (currently {current})."
+
+    task_lib.update_task(task_id, comment=f"Accepted: {summary}", actor="human")
+    task_lib.complete_task(task_id, actor="human")
+
+    receipt_id, _ = task_lib.create_task(
+        f"Applied: {t.get('title', '')}", queue="human", domain="ops",
+        creator="agent", card_type="receipt",
+        description=f"{summary} Reason: {reason}")
+    task_lib.update_task(receipt_id, changes={
+        "receipt_kind": "cadence-apply", "source_recommendation": task_id,
+        "program_id": program_id})
+
+    open_keys = _open_jira_sync_keys()
+    if tracker_key in open_keys:
+        return receipt_id
+
+    try:
+        prog = program_lib.read_program(program_id)
+    except FileNotFoundError:
+        return receipt_id
+    fm = prog.get("frontmatter") or {}
+    title = fm.get("title") or program_id
+
+    jira_date_field = "JIRA_EA_DATE" if field == "ea_date" else "JIRA_GA_DATE"
+    if suggested:
+        jira_block = (
+            f"<!-- JIRA_UPDATE -->\n"
+            f"<!-- JIRA_ISSUE_KEY:{tracker_key} -->\n"
+            f"<!-- JIRA_ACTION:comment_and_edit -->\n"
+            f"<!-- JIRA_SUMMARY: -->\n"
+            f"<!-- JIRA_PRIORITY: -->\n"
+            f"<!-- JIRA_LABELS: -->\n"
+            f"<!-- {jira_date_field}:{suggested} -->\n\n"
+            f"### Comment\n"
+            f"Cadence detected {field_label} drift on {title}: "
+            f"{current} is no longer realistic. "
+            f"Updated to {suggested}. Reason: {reason}\n\n"
+            f"### Fields\n"
+            f"- **Issue:** {tracker_key}\n"
+            f"- **Action:** Update {field_label} to {suggested}\n"
+            f"<!-- /JIRA_UPDATE -->"
+        )
+    else:
+        jira_block = (
+            f"<!-- JIRA_UPDATE -->\n"
+            f"<!-- JIRA_ISSUE_KEY:{tracker_key} -->\n"
+            f"<!-- JIRA_ACTION:comment -->\n"
+            f"<!-- JIRA_SUMMARY: -->\n"
+            f"<!-- JIRA_PRIORITY: -->\n"
+            f"<!-- JIRA_LABELS: -->\n\n"
+            f"### Comment\n"
+            f"Cadence flagged {field_label} drift on {title}: "
+            f"current {field_label} of {current} may need updating. "
+            f"Reason: {reason}\n\n"
+            f"### Fields\n"
+            f"- **Issue:** {tracker_key}\n"
+            f"- **Action:** Review {field_label}\n"
+            f"<!-- /JIRA_UPDATE -->"
+        )
+
+    description = (
+        f"## Description\n\n"
+        f"Update {tracker_key} {field_label} for {title} ({program_id}).\n\n"
+        f"## Jira Update\n\n{jira_block}"
+    )
+
+    tid, _ = task_lib.create_task(
+        f"Update {tracker_key} {field_label}: {current} -> {suggested or 'review'}",
         queue="agent", domain="ops", creator="cadence",
         description=description,
         tags=[program_id, "cadence"],
