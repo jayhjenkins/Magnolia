@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Magnolia · System City Map</title>
+<style>
+:root{--bg:#0b0f1a;--pnl:rgba(18,24,42,.92);--bdr:rgba(255,255,255,.08);--ink:#e0e8f4;--dim:#6b7a96}
+*{box-sizing:border-box;margin:0}body{background:var(--bg);color:var(--ink);font:13px/1.5 -apple-system,"Segoe UI",Inter,sans-serif;min-height:100vh;overflow-x:hidden}
+header{padding:16px 24px 12px;border-bottom:1px solid var(--bdr);display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
+h1{font-size:17px;font-weight:650}.meta{color:var(--dim);font-size:11px;font-family:ui-monospace,monospace}.meta code{color:#bfd0f2}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 305px;gap:14px;padding:14px 20px;align-items:start}
+.mw{position:relative;background:radial-gradient(ellipse 80% 55% at 42% 28%,#151d35,#0b0f1a);border:1px solid var(--bdr);border-radius:14px;overflow:hidden}
+.mw svg{display:block;width:100%;height:min(76vh,660px);cursor:grab;touch-action:none}.mw svg.dr{cursor:grabbing}
+.ct{position:absolute;top:10px;right:10px;display:flex;gap:5px;align-items:center;padding:5px 7px;background:rgba(10,14,26,.85);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1);border-radius:9px}
+.ct button{width:26px;height:26px;border:0;border-radius:5px;background:rgba(255,255,255,.08);color:#fff;cursor:pointer;font:700 15px/1 system-ui}.ct button:hover{background:rgba(255,255,255,.18)}
+.ct .zv{min-width:36px;text-align:center;font-size:10px;color:var(--dim);font-family:ui-monospace,monospace}
+.sd{display:flex;flex-direction:column;gap:11px;max-height:calc(100vh - 80px);overflow-y:auto}
+.pn{background:var(--pnl);border:1px solid var(--bdr);border-radius:11px;padding:13px 15px;backdrop-filter:blur(10px)}
+.pn h2{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);font-weight:600;margin-bottom:9px}
+.lr{display:grid;grid-template-columns:13px 1fr;gap:7px;align-items:center;margin-bottom:5px;font-size:11.5px}.lr b{font-weight:600}
+.ld{width:11px;height:11px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+.ll{width:18px;height:0;border-top:2px solid}.ll.da{border-top-style:dashed}
+.de{color:var(--dim);font-size:12px;line-height:1.5}
+.dd{color:var(--dim);font-size:12px;margin:7px 0;line-height:1.45}
+.ds{margin-top:7px;padding-top:7px;border-top:1px solid var(--bdr)}
+.ds h3{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:3px}
+.df{font-family:ui-monospace,monospace;font-size:10.5px;color:#8fd3ff;padding:1.5px 0}.df::before{content:"\2022  ";color:var(--dim)}
+.drw{font-size:11.5px;color:var(--dim);line-height:1.45}
+.dc{font-size:11.5px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)}.dc:last-child{border-bottom:0}
+.dc code{font-family:ui-monospace,monospace;font-size:10.5px;color:#8fd3ff}
+.es{display:grid;grid-template-columns:20px 1fr;gap:7px;margin-bottom:7px;font-size:11.5px;line-height:1.4}
+.en{font-weight:700;color:#4a8fd8}
+[data-b]{cursor:pointer}[data-b] .rf{transition:stroke .15s,stroke-width .15s}
+[data-b]:hover .rf{stroke:rgba(255,255,255,.4)!important;stroke-width:1.5}
+[data-b].sel .rf{stroke:#ffd38a!important;stroke-width:2.5}[data-b].sel{filter:drop-shadow(0 0 7px rgba(255,211,138,.3))}
+.bn{fill:#fff;font:600 9px/1 -apple-system,system-ui,sans-serif;letter-spacing:.04em}
+.bs{fill:rgba(255,255,255,.42);font:8px/1 -apple-system,system-ui,sans-serif}
+.mf .ep{opacity:.07!important;transition:opacity .3s}.mf .ep.ac{opacity:.85!important}
+.mf .pc{opacity:0!important;transition:opacity .3s}.mf .pc.ac{opacity:1!important}
+#vp{opacity:0;animation:fi .8s ease-out .15s forwards}@keyframes fi{to{opacity:1}}
+@media(max-width:1060px){.layout{grid-template-columns:1fr}.sd{max-height:none}}
+</style>
+</head>
+<body>
+<header>
+<div><h1>Magnolia &mdash; System City Map</h1>
+<div class="meta">branch <code>main</code> &middot; <code>343a477</code> &middot; 2026-08-26 &middot; source-cited from <code>architecture.md</code> + <code>cadence.md</code> + <code>invariants.md</code></div></div>
+</header>
+<div class="layout">
+<div class="mw" id="mw">
+<svg id="svg" viewBox="0 0 900 480" role="img" aria-label="Isometric system map of the Magnolia PM-OS engine" tabindex="0">
+<defs><filter id="gl"><feGaussianBlur stdDeviation="2.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<g id="vp"><g id="eg"></g><g id="pg"></g><g id="bg"></g></g>
+</svg>
+<div class="ct"><button id="zo" aria-label="Zoom out">&minus;</button><span class="zv" id="zv">100%</span><button id="zi" aria-label="Zoom in">+</button><button id="zr" title="Reset view" aria-label="Reset">&#8634;</button></div>
+</div>
+<aside class="sd">
+<section class="pn">
+<h2>Legend &mdash; building colors</h2>
+<div class="lr"><span class="ld" style="background:#4a8fd8"></span><span><b>Blue</b> &mdash; human-facing (board, tasks)</span></div>
+<div class="lr"><span class="ld" style="background:#e8843c"></span><span><b>Orange</b> &mdash; agent spine (dispatch, workers, factory)</span></div>
+<div class="lr"><span class="ld" style="background:#4cbe6b"></span><span><b>Green</b> &mdash; safety &amp; governance</span></div>
+<div class="lr"><span class="ld" style="background:#1a9e8f"></span><span><b>Teal</b> &mdash; cadence &amp; standing loops</span></div>
+<div class="lr"><span class="ld" style="background:#e8a33d"></span><span><b>Gold</b> &mdash; foundation (profile, skills)</span></div>
+<div class="lr"><span class="ld" style="background:#9c7cd6"></span><span><b>Purple</b> &mdash; external &amp; observers</span></div>
+<h2 style="margin-top:10px">Flowing paths</h2>
+<div class="lr"><span class="ll" style="border-color:#4a8fd8"></span><span>data read / write</span></div>
+<div class="lr"><span class="ll" style="border-color:#e8843c"></span><span>control / invoke</span></div>
+<div class="lr"><span class="ll" style="border-color:#4cbe6b"></span><span>safety gate</span></div>
+<div class="lr"><span class="ll da" style="border-color:#9c7cd6"></span><span>external (Tier-2 gated)</span></div>
+</section>
+<section class="pn" id="det">
+<h2>Explore &mdash; click a building</h2>
+<div class="de">Click any building to see its function, source files, and live connections. Glowing particles trace real control and data paths through the system in real time.</div>
+</section>
+<section class="pn">
+<h2>How data moves</h2>
+<div class="es"><span class="en">01</span><span>Transcripts arrive at the <b>Input Dock</b> via Granola or Otter sync.</span></div>
+<div class="es"><span class="en">02</span><span>The <b>Board Server</b> (tallest tower) creates task cards in the <b>Task Vault</b> (markdown + YAML on disk).</span></div>
+<div class="es"><span class="en">03</span><span>The <b>Dispatcher</b> matches each task to a scoped <b>Worker</b>, resolves model via <b>Profile</b>, launches headless Claude.</span></div>
+<div class="es"><span class="en">04</span><span>The <b>Judge</b> scores output; the <b>Trust Ladder</b> applies tier policy &mdash; park, revise, or ship.</span></div>
+<div class="es"><span class="en">05</span><span>Only approved work reaches the <b>Outbound Gate</b>. Every external write is Tier-2 gated (invariant&nbsp;#5).</span></div>
+<div class="es"><span class="en" style="color:#1a9e8f">&#8635;</span><span><b>Cadence</b> runs in parallel: sentinels observe, the reconciler computes drift, and proposal cards flow back into the task system.</span></div>
+</section>
+</aside>
+</div>
+
+<script>
+'use strict';
+const NS='http://www.w3.org/2000/svg',HW=36,HH=18,OX=450,OY=60;
+const iso=(gx,gy)=>[OX+(gx-gy)*HW,OY+(gx+gy)*HH];
+const shade=(hex,a)=>{const p=i=>parseInt(hex.slice(i,i+2),16),c=v=>('0'+Math.max(0,Math.min(255,v+a)).toString(16)).slice(-2);return'#'+c(p(1))+c(p(3))+c(p(5))};
+const mk=(t,at)=>{const e=document.createElementNS(NS,t);for(const k in at)e.setAttribute(k,at[k]);return e};
+const pts=a=>a.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+const tc={data:'#4a8fd8',control:'#e8843c',safety:'#4cbe6b',ext:'#9c7cd6'};
+const svgEl=document.getElementById('svg'),vp=document.getElementById('vp');
+const eg=document.getElementById('eg'),pg=document.getElementById('pg'),bg=document.getElementById('bg');
+
+/* ── Building definitions ─────────────────────────────────────────── */
+const B={
+inputs:{gx:0,gy:3,fw:2,fd:1.5,h:48,c:'#20a89c',nm:'INPUT DOCK',sub:'Granola · Otter',
+  desc:'Transcript providers land meeting material locally. The shared post-download path normalizes YAML frontmatter, classifies type, and triggers task extraction into the agent queue.',
+  files:['scripts/granola_sync.py','scripts/otter_sync.py','scripts/transcript_post.py','scripts/task_extract_meetings.py'],
+  rd:'Granola MCP / Otter API → raw transcripts',wr:'datasets/meetings/*.md with YAML frontmatter',inv:'#1'},
+board:{gx:3,gy:3,fw:2.5,fd:2.5,h:95,c:'#4a8fd8',nm:'BOARD SERVER',sub:'HTTP API + UI · :8744',
+  desc:'The central tower. Python HTTP server hosts the board UI, JSON API, and three daemon schedulers (cron, dispatch, cadence). The single seam between human and engine.',
+  files:['scripts/task_server.py','ui/task-board/index.html','ui/task-board/js/app.js','scripts/server_lib.py'],
+  rd:'task files · profile · card registry · cadence payload',wr:'task frontmatter (create / update / dispatch)',inv:'#5 #7'},
+tasks:{gx:3,gy:6,fw:2.5,fd:1.5,h:52,c:'#3a7fc8',nm:'TASK VAULT',sub:'4 queues · markdown',
+  desc:'Four queues — human / agent / collab / waiting — backed by markdown + YAML on disk, git as version history. The system of record for all work.',
+  files:['scripts/task_lib.py','datasets/tasks/','scripts/task.sh','scripts/task_cli.py'],
+  rd:'task frontmatter (status, queue, priority, judge_score)',wr:'TASK-NNNN.md files (create / complete / archive)',inv:'#6 #7'},
+cron:{gx:1,gy:1,fw:1,fd:1,h:32,c:'#e8843c',nm:'CRON',sub:'5 recurring jobs',
+  desc:'Five recurring jobs tick on schedule and create tasks into the normal dispatch pipeline. Atomic counter prevents double-fire.',
+  files:['scripts/cron_lib.py','scripts/cron_scheduler.py','datasets/cron/jobs.json'],
+  rd:'jobs.json + _counter',wr:'new tasks into agent/collab queue',inv:'#1'},
+dispatch:{gx:7,gy:2,fw:2,fd:2,h:78,c:'#e8843c',nm:'DISPATCHER',sub:'worker router',
+  desc:'The command spine. A lockfile-guarded scanner reads queues, LLM-matches each task to exactly one worker, resolves model via profile, and launches the headless Claude child process.',
+  files:['scripts/task_dispatch.py','scripts/dispatch_scheduler.py'],
+  rd:'agent+collab queues · worker catalog · active packs',wr:'logs/dispatch-* · claude_session_id on task',inv:'#1'},
+workers:{gx:7,gy:5,fw:2.5,fd:1,h:48,c:'#d07030',nm:'WORKER POOL',sub:'11 workers',
+  desc:'Declarative worker definitions: allowed tools, named skills, tier, timeout, prompt. The LLM router picks the single best fit; regex fallback if the model call fails.',
+  files:['scripts/workers/_default.md','scripts/workers/researcher.md','scripts/workers/ticket-creator.md','scripts/workers/message-writer.md'],
+  rd:'worker frontmatter (tools, skills, tier, match)',wr:'dispatch prompt (tools + max-turns + body)',inv:'#1'},
+runner:{gx:10,gy:2,fw:1.5,fd:1.5,h:62,c:'#e8843c',nm:'AGENT RUNNER',sub:'claude -p child',
+  desc:'The spawned Claude Code session. Reads task + source transcript, follows a skill, writes the artifact, and self-reports complete/fail/ask via the task CLI.',
+  files:['scripts/task_dispatch.py','scripts/chat_runner.py','scripts/live_runs.py'],
+  rd:'task body · source transcript · skills catalog',wr:'datasets/ artifacts · task frontmatter · session JSONL',inv:'#1'},
+factory:{gx:5,gy:0,fw:2,fd:1.5,h:60,c:'#d07030',nm:'FACTORY',sub:'self-extension',
+  desc:'The engine extends itself: scaffold → capture-to-profile → gate-green → commit → Keep/Undo receipt. Four factories: worker, card-type, adapter, program-type.',
+  files:['scripts/factory_lib.py','.claude/skills/meta-factory-core/SKILL.md','.claude/skills/meta-create-worker/SKILL.md'],
+  rd:'meta-factory-core SKILL.md · existing registries',wr:'new worker .md · registry entries · Keep/Undo receipts',inv:'#3 #5 #9'},
+judge:{gx:10,gy:5,fw:2,fd:2,h:65,c:'#4cbe6b',nm:'JUDGE',sub:'shadow judge',
+  desc:'Scores completed tasks (context / reasoning / evidence / format). The enforcement seam: score + per-type ladder state drives the revise / park / ship policy.',
+  files:['scripts/judge.py','scripts/eval_digest.py'],
+  rd:'completed task frontmatter + agent_output',wr:'judge_score · judge_dimensions · judge_why',inv:'#7'},
+ladder:{gx:10,gy:8,fw:1.5,fd:1.5,h:82,c:'#3ea85a',nm:'TRUST LADDER',sub:'autonomy governor',
+  desc:'Per-task-type trust tier: shadow → supervised → autonomous. Three collapsible gates: judge-gated ship, action/artifact split, Tier-2 composition.',
+  files:['scripts/ladder_lib.py','scripts/enforce_lib.py','scripts/graduation_assess.py'],
+  rd:'judge_score · tier · autonomy_enforcement flag',wr:'tier transitions · demotions (kill switch)',inv:'#5 #7'},
+shipper:{gx:12,gy:5,fw:2,fd:1.5,h:50,c:'#4cbe6b',nm:'OUTBOUND GATE',sub:'shipper + adapters',
+  desc:'One gate for all external writes. The shipper calls adapters.publish() (Jira, M365, Asana); the first write raises NeedsConfirmation for a one-time human confirm.',
+  files:['scripts/shipper.py','scripts/adapters/__init__.py','scripts/adapters/project_management/_contract.py','scripts/adapters/messaging/_contract.py'],
+  rd:'message_body · ticket fields · confirmed flag',wr:'Jira issue · M365 mail/chat · task receipt',inv:'#5 #9'},
+cadence:{gx:1,gy:7,fw:2,fd:2,h:72,c:'#1a9e8f',nm:'CADENCE',sub:'second organ',
+  desc:'The standing-loop subsystem. A CadenceScheduler daemon ticks per program: observe → reconcile → emit → log. Zero external writes; outward actions ride the Tier-2 send path.',
+  files:['scripts/cadence/reconcile.py','scripts/cadence/scheduler.py','scripts/program_lib.py','cadence/programtypes/registry.json'],
+  rd:'program frontmatter · type registry · sentinel observations',wr:'drift verdicts · proposal cards (into task system)',inv:'#5 #9'},
+sentinels:{gx:0,gy:9,fw:1,fd:2.5,h:38,c:'#8c6ad8',nm:'SENTINELS',sub:'read-only eyes',
+  desc:'Observers on the claude -p substrate: movement-watch (transcripts), tracker-truth (Jira), sheet-watch (EOS), program-intake (routing). Return observations, never writes.',
+  files:['scripts/sentinel_runner.py','scripts/sentinel_lib.py','scripts/sentinels/movement-watch.md','scripts/sentinels/tracker-truth.md'],
+  rd:'transcripts · Jira · EOS sheet · program frontmatter',wr:'observation records only (no file writes)',inv:'#1 #6'},
+programs:{gx:2,gy:10,fw:2,fd:1.5,h:42,c:'#1a9e8f',nm:'PROGRAMS',sub:'intent over time',
+  desc:'Markdown under datasets/programs/PROG-NNNN.md. Lifecycle: candidate → active → paused → archived. The reconciler maintains drift verdicts; nothing is ever deleted.',
+  files:['datasets/programs/','cadence/programtypes/registry.json','scripts/program_schema.py'],
+  rd:'type definition · phase/checkpoint state',wr:'observation ledger (append-only) · cycle log',inv:'#6 #9'},
+profile:{gx:5,gy:8,fw:2,fd:1.5,h:52,c:'#e8a33d',nm:'PROFILE',sub:'identity hub',
+  desc:'The one place person + integration identity lives (invariant #1). Every engine component reads identity through profile_lib.py — never a hardcoded literal.',
+  files:['scripts/profile_lib.py','profile/profile.yaml','profile/config.yaml','tests/test_engine_no_jay.py'],
+  rd:'(nothing — it IS the source)',wr:'identity · providers · cost posture · autonomy enforcement',inv:'#1'},
+skills:{gx:8,gy:9,fw:2.5,fd:1,h:34,c:'#d4932e',nm:'SKILLS',sub:'64 skills · 6 packs',
+  desc:'Auto-discovered from .claude/skills/<name>/SKILL.md. Active set per-person via profile config. Skills in no pack stay always-visible; packs gate the dispatch catalog.',
+  files:['.claude/skills/','.claude/packs.yaml','scripts/packs_lib.py'],
+  rd:'catalog (name + description per SKILL.md)',wr:'(none — declarative)',inv:'#1'},
+external:{gx:14,gy:4,fw:1.5,fd:1.5,h:42,c:'#9c7cd6',nm:'EXTERNAL',sub:'Jira · M365 · Pendo',
+  desc:'Live external systems: Jira/Asana (PM), M365/Graph (messaging), Pendo MCP (analytics), Databricks MCP (Gong/Zendesk). Read is free; write is always Tier-2 gated.',
+  files:['scripts/adapters/project_management/jira.py','scripts/adapters/messaging/m365.py','.claude/skills/context-pendo-analytics/SKILL.md'],
+  rd:'issues · messages · analytics · call transcripts',wr:'(gated) Jira issues · Graph mail/chat',inv:'#5'}
+};
+
+/* ── Edges: [from, to, type, payload] ─────────────────────────────── */
+const E=[
+  ['inputs','board','data','transcripts .md'],
+  ['board','tasks','data','task CRUD'],
+  ['tasks','dispatch','control','queue pickup'],
+  ['dispatch','workers','data','match worker'],
+  ['dispatch','runner','control','launch claude -p'],
+  ['runner','judge','control','output → scoring'],
+  ['judge','ladder','safety','score → policy'],
+  ['ladder','shipper','safety','auto-ship path'],
+  ['shipper','external','ext','gated publish'],
+  ['sentinels','cadence','data','observations'],
+  ['cadence','programs','data','reconcile drift'],
+  ['cadence','tasks','control','emit proposals'],
+  ['profile','dispatch','data','model resolution'],
+  ['profile','shipper','data','provider selection'],
+  ['skills','workers','data','skill catalog'],
+  ['cron','tasks','control','recurring tasks'],
+  ['factory','workers','control','scaffold worker'],
+  ['factory','skills','control','scaffold skill'],
+  ['runner','tasks','data','self-report'],
+  ['board','cadence','data','cadence tab'],
+  ['programs','cadence','data','state feedback'],
+  ['board','dispatch','control','trigger dispatch']
+];
+
+/* ── Pre-compute roof centers for edge routing ────────────────────── */
+Object.keys(B).forEach(id=>{const b=B[id];
+  const nw=iso(b.gx,b.gy),ne=iso(b.gx+b.fw,b.gy),se=iso(b.gx+b.fw,b.gy+b.fd),sw=iso(b.gx,b.gy+b.fd);
+  b._c=[(nw[0]+ne[0]+se[0]+sw[0])/4,(nw[1]+ne[1]+se[1]+sw[1])/4-b.h];
+});
+
+/* ── Render an edge as a quadratic bezier ─────────────────────────── */
+function renderEdge(e,i){
+  const a=B[e[0]]._c, b=B[e[1]]._c, col=tc[e[2]];
+  const mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
+  const dx=b[0]-a[0], dy=b[1]-a[1];
+  const bn=(i%2===0?.14:-.14);
+  const cx=mx+(-dy)*bn, cy=my+dx*bn;
+  const d=`M${a[0].toFixed(1)},${a[1].toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${b[0].toFixed(1)},${b[1].toFixed(1)}`;
+  const p=mk('path',{d,fill:'none',stroke:col,'stroke-width':e[2]==='safety'?'2':'1.6',opacity:'.4',class:'ep','data-e':e[0]+'-'+e[1],'data-f':e[0],'data-t':e[1]});
+  if(e[2]==='ext') p.setAttribute('stroke-dasharray','5 4');
+  eg.appendChild(p);
+}
+
+/* ── Render an isometric building ─────────────────────────────────── */
+function renderBld(id,b){
+  const g=mk('g',{'data-b':id,role:'button','aria-label':b.nm});
+  const nw=iso(b.gx,b.gy),ne=iso(b.gx+b.fw,b.gy),se=iso(b.gx+b.fw,b.gy+b.fd),sw=iso(b.gx,b.gy+b.fd);
+  const rnw=[nw[0],nw[1]-b.h],rne=[ne[0],ne[1]-b.h],rse=[se[0],se[1]-b.h],rsw=[sw[0],sw[1]-b.h];
+  // ground shadow
+  g.appendChild(mk('polygon',{points:pts([[nw[0]-5,nw[1]+5],[ne[0]+5,ne[1]+5],[se[0]+5,se[1]+9],[sw[0]-5,sw[1]+5]]),fill:'#000',opacity:'.16'}));
+  // right face (NE-SE wall)
+  g.appendChild(mk('polygon',{points:pts([ne,se,rse,rne]),fill:shade(b.c,-50)}));
+  // left face (SW-SE wall)
+  g.appendChild(mk('polygon',{points:pts([sw,se,rse,rsw]),fill:shade(b.c,-28)}));
+  // floor lines on taller buildings
+  if(b.h>44){
+    const n=Math.floor(b.h/24);
+    for(let i=1;i<=n;i++){const f=i/(n+1);
+      g.appendChild(mk('line',{x1:ne[0],y1:ne[1]-b.h*f,x2:se[0],y2:se[1]-b.h*f,stroke:shade(b.c,-15),'stroke-width':'.5',opacity:'.35'}));
+      g.appendChild(mk('line',{x1:sw[0],y1:sw[1]-b.h*f,x2:se[0],y2:se[1]-b.h*f,stroke:shade(b.c,5),'stroke-width':'.5',opacity:'.25'}));
+    }
+  }
+  // top face (roof)
+  g.appendChild(mk('polygon',{points:pts([rnw,rne,rse,rsw]),fill:shade(b.c,30),class:'rf',stroke:shade(b.c,60),'stroke-width':'.8'}));
+  // labels centered on roof
+  const cx=b._c[0],cy=b._c[1];
+  const t1=mk('text',{x:cx,y:cy-1,'text-anchor':'middle',class:'bn'});t1.textContent=b.nm;g.appendChild(t1);
+  const t2=mk('text',{x:cx,y:cy+9,'text-anchor':'middle',class:'bs'});t2.textContent=b.sub;g.appendChild(t2);
+  // click handler
+  g.addEventListener('click',ev=>{ev.stopPropagation();sel(id)});
+  bg.appendChild(g);
+}
+
+/* ── Particle system ──────────────────────────────────────────────── */
+const particles=[];
+let lt=0;
+
+function spawnParticles(){
+  const paths=[...eg.querySelectorAll('path')];
+  paths.forEach((p,idx)=>{
+    const col=p.getAttribute('stroke'),len=p.getTotalLength(),eid=p.dataset.e;
+    const primary=idx<9;
+    const count=primary?3:2, r=primary?'3':'2.2', op=primary?'.9':'.7';
+    for(let i=0;i<count;i++){
+      const c=mk('circle',{r,fill:col,filter:'url(#gl)',opacity:op,class:'pc','data-e':eid});
+      pg.appendChild(c);
+      particles.push({el:c,path:p,len,pos:(i/count)*len,spd:primary?55+Math.random()*20:35+Math.random()*25});
+    }
+  });
+}
+
+function tick(ts){
+  if(!lt) lt=ts;
+  const dt=Math.min((ts-lt)/1000,.1); lt=ts;
+  for(const p of particles){
+    p.pos=(p.pos+p.spd*dt)%p.len;
+    const pt=p.path.getPointAtLength(p.pos);
+    p.el.setAttribute('cx',pt.x);
+    p.el.setAttribute('cy',pt.y);
+  }
+  requestAnimationFrame(tick);
+}
+
+/* ── Selection / detail panel ─────────────────────────────────────── */
+let selected=null;
+const det=document.getElementById('det'),mw=document.getElementById('mw');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function sel(id){
+  document.querySelectorAll('[data-b]').forEach(g=>g.classList.remove('sel'));
+  if(selected===id){selected=null;mw.classList.remove('mf');
+    det.innerHTML='<h2>Explore — click a building</h2><div class="de">Click any building to see its function, source files, and live connections.</div>';return;}
+  selected=id; const b=B[id];
+  document.querySelector('[data-b="'+id+'"]').classList.add('sel');
+  mw.classList.add('mf');
+  document.querySelectorAll('.ep').forEach(p=>{p.classList.toggle('ac',p.dataset.f===id||p.dataset.t===id)});
+  document.querySelectorAll('.pc').forEach(p=>{const e=p.dataset.e;p.classList.toggle('ac',e&&(e.startsWith(id+'-')||e.endsWith('-'+id)))});
+  const conn=E.filter(e=>e[0]===id||e[1]===id);
+  det.innerHTML=
+    '<h2>'+esc(b.nm)+'<span class="dtag" style="background:'+b.c+'22;color:'+b.c+'">'+esc(b.sub)+'</span></h2>'+
+    '<div class="dd">'+esc(b.desc)+'</div>'+
+    '<div class="ds"><h3>Reads</h3><div class="drw">'+esc(b.rd)+'</div></div>'+
+    '<div class="ds"><h3>Writes</h3><div class="drw">'+esc(b.wr)+'</div></div>'+
+    '<div class="ds"><h3>Source files</h3>'+b.files.map(f=>'<div class="df">'+esc(f)+'</div>').join('')+'</div>'+
+    '<div class="ds"><h3>Connections ('+conn.filter(e=>e[1]===id).length+' in · '+conn.filter(e=>e[0]===id).length+' out)</h3>'+
+    conn.map(e=>{const dir=e[0]===id?'→':'←';const o=e[0]===id?e[1]:e[0];const col=tc[e[2]];
+      return'<div class="dc"><span style="color:'+col+';font-weight:700">'+dir+'</span> <b>'+esc(B[o].nm)+'</b> — <code>'+esc(e[3])+'</code></div>'}).join('')+'</div>'+
+    '<div style="margin-top:8px;font-size:10.5px;color:var(--dim)">Invariant(s) '+esc(b.inv)+'. All file paths are real at HEAD.</div>';
+}
+
+svgEl.addEventListener('click',e=>{if(!e.target.closest('[data-b]')&&selected)sel(selected)});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&selected)sel(selected)});
+
+/* ── Zoom / pan ───────────────────────────────────────────────────── */
+let sc=1,tx=0,ty=0,drag=null;
+const zvEl=document.getElementById('zv');
+function apTr(){vp.setAttribute('transform','translate('+tx+' '+ty+') scale('+sc+')');zvEl.textContent=Math.round(sc*100)+'%'}
+
+svgEl.addEventListener('wheel',e=>{e.preventDefault();
+  const r=svgEl.getBoundingClientRect(),ax=(e.clientX-r.left)/r.width*900,ay=(e.clientY-r.top)/r.height*480;
+  const ns=Math.max(.4,Math.min(3.5,sc*(e.deltaY<0?1.12:.89)));
+  const f=ns/sc;tx=ax-(ax-tx)*f;ty=ay-(ay-ty)*f;sc=ns;apTr()},{passive:false});
+
+svgEl.addEventListener('pointerdown',e=>{if(e.target.closest('[data-b]'))return;
+  drag={x:e.clientX,y:e.clientY,tx,ty};svgEl.setPointerCapture(e.pointerId);svgEl.classList.add('dr')});
+svgEl.addEventListener('pointermove',e=>{if(!drag)return;
+  const r=svgEl.getBoundingClientRect();tx=drag.tx+(e.clientX-drag.x)*900/r.width;ty=drag.ty+(e.clientY-drag.y)*480/r.height;apTr()});
+svgEl.addEventListener('pointerup',()=>{drag=null;svgEl.classList.remove('dr')});
+
+document.getElementById('zi').onclick=()=>{const ns=Math.min(3.5,sc*1.25),f=ns/sc;tx=450-(450-tx)*f;ty=240-(240-ty)*f;sc=ns;apTr()};
+document.getElementById('zo').onclick=()=>{const ns=Math.max(.4,sc*.8),f=ns/sc;tx=450-(450-tx)*f;ty=240-(240-ty)*f;sc=ns;apTr()};
+document.getElementById('zr').onclick=()=>{sc=1;tx=0;ty=0;apTr()};
+
+/* ── Initialize ───────────────────────────────────────────────────── */
+E.forEach((e,i)=>renderEdge(e,i));
+Object.keys(B).sort((a,b)=>{const sa=B[a].gx+B[a].gy,sb=B[b].gx+B[b].gy;return sa-sb||B[a].gx-B[b].gx}).forEach(id=>renderBld(id,B[id]));
+spawnParticles();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

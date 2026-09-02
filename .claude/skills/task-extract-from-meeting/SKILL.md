@@ -58,6 +58,23 @@ These map to existing PM-OS workflows. When creating agent tasks, note the relev
 | Meeting synthesis, context summaries | `meeting-synthesis` (context assembly) |
 | Priority scoring, roadmap sequencing | `priority-scoring` (context assembly) |
 
+### Route to `agent` with `--task-type ticket-creator` when:
+
+- **The meeting surfaces a concrete backlog item** — a bug to fix, a feature to
+  build, a UX improvement, an enhancement — something that should become a Jira
+  ticket on the engineering board
+- The key question: **is the deliverable a document for the operator, or a ticket
+  for the engineering team?** "Research competitor pricing" → document (default
+  worker). "Build category filtering on the feed" → ticket (ticket-creator worker).
+- Customer meetings that surface bugs, feature requests, or buildable improvements
+  almost always produce tickets, not standalone docs — default to `ticket-creator`
+  unless the operator explicitly asks for research, analysis, or a strategy doc
+- Title should name the **change**, not "Draft a brief about the change" — e.g.,
+  "Add resident opt-in category subscriptions to Community Feed", not "Draft feature
+  concept: resident notification opt-in digest"
+- The `--task-type ticket-creator` flag deterministically routes to the ticket-creator
+  worker, which drafts a JIRA_DRAFT block the operator can publish from the task board
+
 ### Route to `collab` when:
 
 - **A decision needs to be made** — the agent gathers context, writes the decision document, and the operator decides. The agent does the legwork; the operator provides judgment.
@@ -181,6 +198,7 @@ For each item that passes the filter, apply the queue logic:
 | Situation | Queue | Example |
 |-----------|-------|---------|
 | The operator needs research, analysis, or a document produced | `agent` | "We need to understand competitor pricing" → agent researches + writes memo |
+| The meeting surfaces a concrete backlog item (bug, feature, enhancement) | `agent` + `--task-type ticket-creator` | Customer flagged a distance bug → ticket-creator drafts a Jira Unit |
 | The operator needs a decision made, with supporting analysis | `collab` | "We need to decide on API versioning" → agent writes tradeoff doc, the operator decides |
 | The operator needs to schedule a meeting | `collab` + `--task-type schedule-meeting` | "I'll set up a sync with Brandon" → agent finds availability, the operator picks a slot |
 | The operator must physically do it (message, access, show up) | `human` | "I'll send a Slack message to the team" |
@@ -211,6 +229,13 @@ For each item that passes the filter, apply the queue logic:
   -q waiting -p high -d ops \
   --waiting-on "Alyssa Caskey" \
   --source-meeting "2026-02-25_HOAi-Vantaca-Product-Outcomes.txt"
+
+# Customer meeting surfaced a buildable item → Jira ticket
+./scripts/task.sh add "Add resident opt-in category subscriptions to Community Feed" \
+  -q agent -p medium -d product \
+  --task-type ticket-creator \
+  --description "Robert Lieberman (Alliant/Bellatera) proposed letting residents opt into feed categories and get notified. Operator agreed this should be a Unit under VNT-42411." \
+  --source-meeting "datasets/meetings/customer/2026-08/..."
 ```
 
 **Title format:** Imperative verb + specific object. For agent tasks, include what the output should be.
@@ -245,6 +270,8 @@ echo "datasets/meetings/<domain>/<YYYY-MM>/<filename>" >> datasets/tasks/_proces
 | Agent task without noting relevant PM-OS skill | Include which workflow/skill the agent should use |
 | Fabricating due dates not stated in transcript | Leave due blank unless a date was spoken |
 | Creating a new task for work that already has an open task | Run `task.sh list --json` first; update existing task with new context instead |
+| Creating a document task ("Draft design brief for X") when the deliverable is a Jira ticket | If the meeting outcome is "build/fix this" (not "research/analyze this"), use `--task-type ticket-creator`. Customer meetings almost always produce tickets, not standalone docs. |
+| Titling the task "Draft design brief for X" instead of "Build X" | Name the change, not the document. "Add category filtering to Community Feed", not "Draft design brief: category filtering". The ticket-creator writes the Jira card. |
 | Losing context by not updating existing task | Always append meeting context to duplicate task via `--comment` |
 
 ## Success Criteria
