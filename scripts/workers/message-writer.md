@@ -117,3 +117,18 @@ Task {task_id}. Follow these steps:
   task description, activity log, or any other task metadata as your draft. If the
   task says "nudge the team about X," your job is to write the actual nudge in the
   operator's voice. A completion with no composed message text is a failure.
+- **No unresolved placeholders.** If you can't find a link, file, or piece of
+  information the message needs, use `agent:ask` to request it from the operator.
+  Never insert `[PASTE LINK HERE]`, `[INSERT ...]`, or any bracket placeholder —
+  a placeholder means the operator still has to do the one thing you were asked to do.
+- **Multi-recipient awareness.** When a task names multiple recipients from
+  different organizations, draft separate per-recipient messages. Use `Hey [Name]!`
+  for each — never a single `Hey all!` to unrelated external contacts, which would
+  leak the customer list. Run `task.sh update` once per recipient, or compose all
+  drafts in a single `--message-body` separated by a `---` divider with each
+  addressed individually.
+- **Pre-completion self-check.** Before `agent:complete`, verify: (1) you called
+  `task.sh update` with a `--message-body` containing composed message text — not
+  task metadata, system notes, or an activity log; (2) the body has no bracket
+  placeholders; (3) the message is addressed to a named person, not a role label.
+  If any check fails, fix it before completing.

@@ -11,6 +11,20 @@ DASHBOARD = SCORECARD / "dashboard.html"
 SHOW_WEEKS = 8
 
 
+_MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def short_date(iso):
+    # Avoid strftime's %-d/%#d day-padding flags — they're platform-specific
+    # (glibc/mac vs. Windows) and this script must run natively on both.
+    y, m, day = iso.split("-")
+    return f"{_MONTH_ABBR[int(m)]} {int(day)}"
+
+
+def short_range(period_start, period_end):
+    return f"{short_date(period_start)}–{short_date(period_end)}"
+
+
 def fmt_val(value, fmt, pct_of_val=None):
     if value is None:
         return "", ""
@@ -143,6 +157,10 @@ def render(values_data, registry):
  .dtoggle{cursor:pointer;color:#5a6675} .defer{color:#5a6675}
  .pof{display:block;color:#8b97a8;font-size:10px}
  td.cell.latest{background:#141c26}
+ td.cell.carried{background:#241f12}
+ td.cell.carried .cval{opacity:.5}
+ .carry-mark{margin-left:5px;color:#f5c451;font-size:12px;font-weight:700}
+ .prange{display:block;font-size:9px;color:#5a6675;font-weight:400;margin-top:2px}
  input.hoai{width:64px;background:#11161d;color:#f5c451;border:1px solid #3a3320;border-radius:5px;
    padding:4px 6px;text-align:right;font:13px inherit}
  tr.defrow{display:none} tr.defrow.show{display:table-row}
@@ -217,7 +235,27 @@ def render(values_data, registry):
             else:
                 disp, extra = fmt_val(v, m["format"], hw_vals.get(w))
                 copy_v = disp
-                h.append(f'<td class="cell{lcls}" data-week="{w}" data-copy="{copy_v}">{disp}{extra}</td>')
+                carried_cls, title_attr = "", ""
+                if m.get("lagged_cadence") and v is not None:
+                    idx = all_weeks.index(w)
+                    if idx > 0:
+                        prev_v = values_data["weeks"].get(all_weeks[idx - 1], {}).get(slug, {}).get("value")
+                        if prev_v == v:
+                            carried_cls = " carried"
+                            title_attr = ' title="Carried forward - the underlying period has not closed since last week"'
+                # data-copy stays score-only (the copy-column feature reads this attribute,
+                # never cell text) — the date range below is display-only, never copied.
+                prange_html = ""
+                if m.get("lagged_cadence"):
+                    raw = entry.get("raw") or {}
+                    ps, pe = raw.get("period_start"), raw.get("period_end")
+                    if ps and pe:
+                        prange_html = f'<span class="prange">{short_range(ps, pe)}</span>'
+                if carried_cls:
+                    h.append(f'<td class="cell{lcls}{carried_cls}" data-week="{w}" data-copy="{copy_v}"{title_attr}>'
+                             f'<span class="cval">{disp}{extra}</span><span class="carry-mark">&#8635;</span>{prange_html}</td>')
+                else:
+                    h.append(f'<td class="cell{lcls}" data-week="{w}" data-copy="{copy_v}">{disp}{extra}{prange_html}</td>')
         h.append('</tr>')
         defn = html_mod.escape(m.get("definition", ""))
         h.append(f'<tr class="defrow" id="def-{slug}"><td colspan="{ncols}">'
@@ -226,7 +264,9 @@ def render(values_data, registry):
     h.append(' </table></div>')
     h.append(' <div class="hint">Click a metric name to see how it&rsquo;s calculated. Click <b>copy &#8595;</b> in any week\n'
              ' header to copy that week&rsquo;s full column, then paste straight down a dated column in your L10 sheets.\n'
-             ' The HOAi cell is editable &mdash; type the number; it&rsquo;s saved in this browser.</div>')
+             ' The HOAi cell is editable &mdash; type the number; it&rsquo;s saved in this browser.\n'
+             ' Cells marked &#8635; are carried forward from the prior week &mdash; the underlying period (e.g. Home QAV&rsquo;s\n'
+             ' bi-weekly window) has not closed yet, not a broken fetch.</div>')
     h.append('</div>')
 
     h.append("""<script>

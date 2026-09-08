@@ -80,7 +80,7 @@ skills:
   - quality-citation-compliance
   - quality-source-integrity
 langfuse_prompt: "worker-product-analyst"
-timeout: 600
+timeout: 3600
 max_turns: 30
 ---
 

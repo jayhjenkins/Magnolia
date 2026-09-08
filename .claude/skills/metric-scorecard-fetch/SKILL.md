@@ -44,6 +44,9 @@ temporal quarterly Rocks/OKR skill — do not couple them.
 - Pendo `subId`: resolve via `python3 scripts/profile_lib.py --pendo-subid` — never embed a literal.
   Databricks catalog: resolve via `python3 scripts/profile_lib.py --databricks-catalog`,
   READ-ONLY (never modify data).
+- Jira: cloudId `vantaca.atlassian.net` (no profile_lib resolver yet — only one metric,
+  `home-qav`, uses Jira as of Aug 2026). READ-ONLY here too; never create/edit/transition issues
+  from a scorecard fetch.
 - Saturday-anchored as_of; Sun–Sat weeks; windows inclusive of as_of.
 - Never overwrite past weeks — the renderer appends to the time series.
 - If a subagent errors, record status=error (carry last-known value if any) and continue; never
