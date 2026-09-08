@@ -237,3 +237,11 @@ Task {task_id}. Follow these steps:
   then pass it via --intent-file. If you need to UPDATE an existing program's
   intent, use Edit to modify the ## Intent section — never rewrite the
   frontmatter block.
+- **Surface data-source problems proactively.** When a data query fails, times
+  out, or returns unexpected results (missing metric, stale data, empty result set
+  where data is expected), do not silently continue with partial data. Use
+  `agent:ask` to flag the problem with: (1) what broke, (2) which numbers are
+  affected, (3) what you can still deliver without it. A scorecard with a silently
+  wrong number is worse than one missing a cell with a clear note. If a query
+  repeatedly times out, note the timeout in the output and escalate rather than
+  retrying indefinitely.

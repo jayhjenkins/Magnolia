@@ -187,6 +187,8 @@
   },
   "active": "69f270fff0898954",
   "lastOpenFiles": [
+    "datasets/tasks/human/TASK-1962.md",
+    "datasets/tasks/_archive/2026-09/TASK-1942.md",
     "datasets/tasks/_archive/2026-09/TASK-1934.md",
     "datasets/tasks/waiting/TASK-1961.md",
     "datasets/meetings/product/payments/2026-09/2026-09-08_11-22_Pre-planning_Inceptions_Next sprints.txt",
@@ -221,8 +223,6 @@
     "datasets/programs/artifacts/PROG-7881/2026-W37-priorities-v1.md",
     "datasets/tasks/_archive/2026-09/TASK-1933.md",
     "datasets/tasks/_archive/2026-09/TASK-1935.md",
-    "datasets/tasks/_archive/2026-09/TASK-1915.md",
-    "datasets/tasks/_archive/2026-09/TASK-1945.md",
     "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/safari-na3_-uQk.svg",
     "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/firefox-nightly-Cp5nfeDT.svg",
     "venv/lib/python3.14/site-packages/playwright/driver/package/lib/vite/dashboard/assets/firefox-beta-k3eOH_eK.svg",
