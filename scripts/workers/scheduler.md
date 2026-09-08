@@ -88,3 +88,16 @@ Task {task_id}. Follow these steps:
 - **Resolve every attendee to an email before calling `find_meeting_times.py`.** If `meeting_attendees` contains a name (no `@`), you MUST follow the skill's Step 3 resolution chain (transcript `participant_emails:`, `email_cache.json`, Outlook search) before proceeding. Never pass a bare name string as `--attendees` -- the script expects email addresses and will produce malformed output.
 - **Enrich the agenda.** Do not copy the task title or description verbatim into the meeting invite body. Rewrite `meeting_description` into 2-3 structured discussion points (bullet points with specific topics and desired outcomes) even if the source task is vague -- follow the skill's Step 1 validation rule.
 - STOP after `agent:complete`, `agent:ask`, or `agent:fail`. Never create the calendar event yourself — the UI handles that when the operator picks a slot.
+- **Honor explicit scheduling constraints.** Before searching for availability,
+  extract every explicit constraint from the task title, description, and source
+  transcript: named days ("Monday or Tuesday"), time windows ("~9:30am", "morning"),
+  one-time vs. recurring, and duration. These are HARD constraints — every proposed
+  slot must satisfy them. If you cannot find any slot within the stated bounds, say
+  so explicitly and offer the closest alternatives with a clear note about which
+  constraint each violates. Never silently return slots on the wrong day or time
+  because those are what Graph happened to return.
+- **Verify slots against constraints before completing.** After finding candidate
+  times, check each proposed slot against the extracted constraints. Drop any slot
+  that violates a hard constraint (wrong day, outside time window, one-time when
+  recurring was requested). If fewer than 3 valid slots remain, widen the window
+  within the constraint bounds (e.g., next week same day/time) or note the shortage.
