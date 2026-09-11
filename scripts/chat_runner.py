@@ -484,6 +484,13 @@ def _touch_last_active(task_id):
         pass
 
 
+def _is_session_expired(event):
+    """True when a result event signals a purged/expired Claude Code session."""
+    if not event.get("is_error"):
+        return False
+    return any("No conversation found" in e for e in (event.get("errors") or []))
+
+
 def run_turn(task_id, message):
     """Run one chat turn for a task: resolve session, run claude, persist, yield.
 
@@ -497,6 +504,10 @@ def run_turn(task_id, message):
         event, persist the session id + session_origin="human_chat" so the next
         turn resumes.
       - resume: send the message as-is against the existing session id.
+
+    If a resumed session has expired (Claude Code purged it), the turn
+    automatically retries once with a fresh session so the user doesn't have to
+    re-send. A notice is yielded so the UI can show what happened.
 
     The user message is persisted FIRST (its original text, not the context
     wrapper), tagged post_run — True once the agent has already had a first pass
@@ -556,6 +567,7 @@ def run_turn(task_id, message):
 
     result_sid = None
     saw_result = False
+    session_expired = False
     exit_holder = {}
     for line in _spawn(cmd, exit_holder):
         if not line or not line.strip():
@@ -583,6 +595,32 @@ def run_turn(task_id, message):
                 result_sid = event.get("session_id") or result_sid
                 if new_session and result_sid:
                     _persist_chat_session(task_id, result_sid)
+
+                # Expired session: flag for automatic retry below.
+                if _is_session_expired(event):
+                    session_expired = True
+                    yield event
+                    continue
+
+                # Non-session error result: surface so the UI doesn't hang.
+                if event.get("is_error"):
+                    errors = event.get("errors") or []
+                    err_text = errors[0] if errors else "The assistant run failed."
+                    error_event = {
+                        "kind": "error",
+                        "role": "error",
+                        "text": err_text,
+                        "run_id": run_id,
+                        "origin": "chat",
+                    }
+                    try:
+                        chat_transcript.append_event(task_id, dict(error_event))
+                    except Exception:
+                        pass
+                    yield error_event
+                    yield event
+                    continue
+
                 # A blocked tool (headless can't prompt for approval) → surface a
                 # human notice BEFORE the result finalizes the turn, and persist
                 # it so a transcript reload shows it (parallels the error path).
@@ -609,11 +647,104 @@ def run_turn(task_id, message):
             chat_transcript.append_event(task_id, event)
             yield event
 
+    # ── Expired-session auto-recovery ────────────────────────────────────
+    # The old session was purged. Clear it, show a notice, and replay the
+    # message on a fresh session — all within the same SSE stream so the user
+    # doesn't have to re-send.
+    if session_expired and not new_session:
+        try:
+            task_lib.update_task(task_id, {"claude_session_id": ""})
+        except Exception:
+            pass
+
+        notice = {
+            "kind": "notice",
+            "role": "notice",
+            "text": "Previous session expired — starting a fresh one.",
+            "run_id": run_id,
+            "origin": "chat",
+        }
+        try:
+            chat_transcript.append_event(task_id, dict(notice))
+        except Exception:
+            pass
+        yield notice
+
+        # Re-read the task (session_id was just cleared).
+        task = task_lib.read_task(task_id)
+        fm = task["frontmatter"] or {}
+        body = task.get("body") or ""
+
+        minted_sid = str(uuid.uuid4())
+        new_session = True
+        sent_message = build_context_prompt(fm, body, message)
+        cmd = build_chat_cmd(
+            session_id=minted_sid,
+            message=sent_message,
+            model=model,
+            new_session=True,
+        )
+
+        result_sid = None
+        saw_result = False
+        exit_holder = {}
+        for line in _spawn(cmd, exit_holder):
+            if not line or not line.strip():
+                continue
+            try:
+                raw = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            for event in normalize(raw):
+                kind = event.get("kind")
+                if kind == "think" and not (event.get("text") or "").strip():
+                    continue
+                if kind == "session_start":
+                    result_sid = event.get("session_id") or result_sid
+                    continue
+                if kind == "result":
+                    saw_result = True
+                    result_sid = event.get("session_id") or result_sid
+                    if result_sid:
+                        _persist_chat_session(task_id, result_sid)
+                    if event.get("is_error"):
+                        errors = event.get("errors") or []
+                        err_text = errors[0] if errors else "The assistant run failed."
+                        error_event = {
+                            "kind": "error", "role": "error", "text": err_text,
+                            "run_id": run_id, "origin": "chat",
+                        }
+                        try:
+                            chat_transcript.append_event(task_id, dict(error_event))
+                        except Exception:
+                            pass
+                        yield error_event
+                    notice_text = _blocked_tool_notice(event.get("permission_denials"))
+                    if notice_text:
+                        n = {
+                            "kind": "notice", "role": "notice", "text": notice_text,
+                            "run_id": run_id, "origin": "chat",
+                        }
+                        try:
+                            chat_transcript.append_event(task_id, dict(n))
+                        except Exception:
+                            pass
+                        yield n
+                    yield event
+                    continue
+                event["run_id"] = run_id
+                event["origin"] = "chat"
+                chat_transcript.append_event(task_id, event)
+                yield event
+
+        if not result_sid:
+            _persist_chat_session(task_id, minted_sid)
+
     # New session: ensure the resumable id is on the task even if the result
     # carried no session_id (fall back to the minted id). This call also stamps
     # chat_last_active in the SAME write (I2), so the new-session path needs no
     # separate _touch_last_active.
-    if new_session and not result_sid:
+    elif new_session and not result_sid:
         _persist_chat_session(task_id, minted_sid)
 
     # I1: a clean run ALWAYS ends with a `result` event. If we never saw one —

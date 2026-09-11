@@ -532,6 +532,13 @@ async function sendChat() {
     // transcript, which does NOT carry the runner's `result` metadata frame.
   }
 
+  // Stream ended with no content events — clear the typing indicator so the
+  // bubble doesn't hang forever (e.g. expired session, immediate failure).
+  if (!typingCleared) {
+    clearTyping();
+    if (!sawText) textBox.textContent = 'Something went wrong. You can retry.';
+  }
+
   chatState.busy = false;
   document.getElementById('chat-send').disabled = false;
   scrollThread();

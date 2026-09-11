@@ -351,6 +351,8 @@ def _claude_normalize(raw_event):
             "usage": raw_event.get("usage", {}),
             "cost": raw_event.get("total_cost_usd"),
             "session_id": raw_event.get("session_id"),
+            "is_error": bool(raw_event.get("is_error")),
+            "errors": raw_event.get("errors") or [],
             "permission_denials": raw_event.get("permission_denials") or [],
         }]
     return []
