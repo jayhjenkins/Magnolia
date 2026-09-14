@@ -80,11 +80,22 @@ If the meeting is one-time (no recurrence signal found), skip this step entirely
 ### 2. Gather Time Preferences (Optional)
 
 If `source_meeting` exists, read the transcript and look for scheduling hints:
+- **Urgency / same-day / next-day:** "this afternoon", "today", "ASAP", "right now", "tomorrow", "tomorrow morning"
 - "next week", "this Thursday", "before Friday"
 - "30 minutes", "an hour"
 - "morning", "afternoon"
 
 Use these to narrow the search window. If no hints, default to **next 5 business days**.
+
+**Same-day and next-day urgency.** When the task or transcript says "today",
+"this afternoon", "ASAP", or "tomorrow", the request is time-critical — the
+operator wants the meeting on THAT day, not next week. Set `--start` to
+**today's date** (or tomorrow's, for "tomorrow") and `--end` to the day after.
+Search the urgent window FIRST. Only widen beyond those 1-2 days if zero slots
+exist, and when you do widen, say so explicitly in the slot notes ("no
+availability today/tomorrow — earliest open slot is ..."). Never silently skip
+the requested day(s) because the default 5-business-day window happens to start
+later.
 
 If the task or transcript mentions alternative days ("Monday or Tuesday", "this week or next"), search ALL mentioned alternatives — do not limit to the first one. When the ask names two consecutive days, set `--start` and `--end` to span both.
 

@@ -2410,5 +2410,113 @@
     "last_sync": "2026-09-08T09:16:27Z",
     "direction": "local->remote",
     "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-08_decision-brief-self-serve-content-agent-authoring-vs-central-build.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-08_decision-brief-self-serve-content-agent-authoring-vs-central-build.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-08_decision-brief-self-serve-content-agent-authoring-vs-central-build.docx",
+    "local_hash": "86b5cb5ec6bad65447f692bf5f5c1016440aa760c380e3fd0147c8857c06a63e",
+    "remote_hash": "8ef49088d20c766ede22a1d648429674d274c0e9755cb644f24ff6ac31f4638a",
+    "last_sync": "2026-09-08T17:51:17Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-08_vision-ftue-journey-mapping-workshop-facilitation-guide.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-08_vision-ftue-journey-mapping-workshop-facilitation-guide.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-08_vision-ftue-journey-mapping-workshop-facilitation-guide.docx",
+    "local_hash": "7827cb83ac39510fce622d6b787b56320c8997e33ed30a17b9aa5d5275ed135b",
+    "remote_hash": "1cf3a37f69287bdeff4d21da4dba3370d929d456c5bfc3c67e856abce4c596a6",
+    "last_sync": "2026-09-08T20:20:25Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-08_vision-build-your-own-content-agent-workshop-plan.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-08_vision-build-your-own-content-agent-workshop-plan.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-08_vision-build-your-own-content-agent-workshop-plan.docx",
+    "local_hash": "a03a50fdb7fc6d91a061f711ddd4d0c41f9f3d37c79e28a8a853b8e7be988747",
+    "remote_hash": "ac15fc86aeac0ffe1a8ddbd9760fa52050955b0924bb17b1066329e564ab18d7",
+    "last_sync": "2026-09-08T20:21:23Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-09_re-l10-charter-and-agenda-restructure.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-09_re-l10-charter-and-agenda-restructure.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-09_re-l10-charter-and-agenda-restructure.docx",
+    "local_hash": "afd7dc0f076af0f901d8532f4cfffa4163f17c92e41aa7d9c14ab6190d9dce74",
+    "remote_hash": "2001fecc94a1f0abeb33985692e9b6966ff407c1d72a46530b91db0800ceb614",
+    "last_sync": "2026-09-09T20:20:27Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-09-elections-gtm-options-and-questions.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-09-elections-gtm-options-and-questions.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-09-elections-gtm-options-and-questions.docx",
+    "local_hash": "4dae78efaef4f1c73a36a58f491cc55652fdb9a2ab9c6dca72d10d21111524c3",
+    "remote_hash": "af957be45724e0ac60eb0beec6fedf52514cf48afaba3845341e856abe97b929",
+    "last_sync": "2026-09-09T20:21:45Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-09_dynamic-forms-reservations-prioritization.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-09_dynamic-forms-reservations-prioritization.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-09_dynamic-forms-reservations-prioritization.docx",
+    "local_hash": "5bdee58be1838b0c14099c2d59df054debf6ea5e8378563a2bf3a350aeed1073",
+    "remote_hash": "099303a5c1c1ad10d70ea2a285fe529b33b8e404b1a97d4aaf4e07df693f63f1",
+    "last_sync": "2026-09-09T20:22:45Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-10_perkspot-early-adopter-rollout-status-briefing.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-10_perkspot-early-adopter-rollout-status-briefing.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-10_perkspot-early-adopter-rollout-status-briefing.docx",
+    "local_hash": "0ab5212ee012ac9a935ef1181320700fa9f07fdf6e6358d09d8781ca3e8d9516",
+    "remote_hash": "784e1e3b021c414751f1e4da5f56f230ac4b54741241e67ed9dc482cd181dd6d",
+    "last_sync": "2026-09-10T18:55:36Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-10_amenity-reservation-api-scan.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-10_amenity-reservation-api-scan.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-10_amenity-reservation-api-scan.docx",
+    "local_hash": "3c4077ceb856bc8803c6ec3b4ec687e9b630e3d20db6c6bc2a592e1790c70cd6",
+    "remote_hash": "1469e837ce51e2baf94d301c30670551ae01e1b3050b6531f43cc88f31d4318e",
+    "last_sync": "2026-09-10T19:23:13Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-11_pmos-plugin-marketplace-distribution-findings.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-11_pmos-plugin-marketplace-distribution-findings.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-11_pmos-plugin-marketplace-distribution-findings.docx",
+    "local_hash": "c4d35bf70bc34a20b56d866a930839410c4ad4d5c775831732ce43876a4c10b2",
+    "remote_hash": "d2f37af50ec579fe09a89b5c1acbfdb0f18b3b36fd3d2ba1f423bceaf4c3eea3",
+    "last_sync": "2026-09-11T14:21:26Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-11_offers-pendo-tag-audit.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-11_offers-pendo-tag-audit.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-11_offers-pendo-tag-audit.docx",
+    "local_hash": "c633c87006938aeb1d4ef251eab650f9102e4b6c07e1912b67ef7754a810f749",
+    "remote_hash": "d6b7bd3941074a966540ec4e5c477490b4eb8d594aeeec46bf0e7116cd7fa44d",
+    "last_sync": "2026-09-11T14:55:00Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-11_wordpress-mcp-server-research.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-11_wordpress-mcp-server-research.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-11_wordpress-mcp-server-research.docx",
+    "local_hash": "541cdfcc4d10a551a64ec3d980315deeab329e2c1d794d84d7f6c6305097f024",
+    "remote_hash": "d17d23979be3eeee821e29015da018e30fa553554d1ef0152951e78f2db25336",
+    "last_sync": "2026-09-11T20:18:58Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-14_doctor-check_TASK-2035.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-14_doctor-check_TASK-2035.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-14_doctor-check_TASK-2035.docx",
+    "local_hash": "388cb14c9b36955cb70e64c9a8c26e09a4c91eae9d010cd57c5b06767ffbc00e",
+    "remote_hash": "0fea6d6fecb6cb8c7c0ce1b6913fd04cfc53e1d2e0272e80fc990b2048ed738b",
+    "last_sync": "2026-09-14T13:04:19Z",
+    "direction": "local->remote",
+    "status": "synced"
   }
 }
