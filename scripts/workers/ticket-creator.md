@@ -113,6 +113,8 @@ Task {task_id}. Follow these steps:
 
    **Acceptance criteria preservation.** Before composing the draft, extract any acceptance criteria, definition-of-done items, or enumerated requirements from the task body (look for headings like "Acceptance Criteria", "ACs", "Requirements", "Done when", or numbered/bulleted condition lists). These MUST appear verbatim in the `### Description` section of the draft — do not summarize, merge, or omit them. If the source specifies 3 ACs, the draft must contain those 3 ACs. Missing ACs force an engineer to ask "what does done look like?" before work can start.
 
+   **Structural rule: everything goes in `### Description`.** The JIRA_DRAFT template has exactly three sections: `### Summary`, `### Description`, and `### Fields`. Do NOT create additional sections like `### Acceptance Criteria`, `### Open Questions`, `### Requirements`, or any other heading inside the JIRA_DRAFT markers. Fold ACs, open questions, and all other structured content INTO `### Description` using bold subheadings within the Description body (e.g., `**Acceptance Criteria**`, `**Open Questions**`) instead of `###`-level headings. The publish script extracts only `### Description` for the Jira issue body; content in non-template sections is silently dropped.
+
    Run: ./scripts/task.sh update {task_id} --description "$(cat <<'DRAFT'
    <original description text>
 
