@@ -87,6 +87,30 @@ Task {task_id}. Follow these steps:
    - Read the source meeting transcript if one exists.
    - Search qmd for related context.
 
+5b. Resolve parent issue:
+   Units almost always belong under a Feature or Epic. Before drafting, actively
+   look for the parent — try these in order and stop at the first hit:
+   1. **Explicit key.** Check if the task title, description, or source meeting
+      names an explicit Jira issue key (e.g., `VNT-46117`). If so, use it as
+      JIRA_PARENT.
+   2. **Cadence program binding.** If the task names a project/feature/area
+      (e.g., "Community Feed", "Board Frustration UX", "Elections"), grep
+      `datasets/programs/*.md` (skip `archive/` and `artifacts/`) for that
+      keyword. For each match, read its frontmatter `bindings:` list for an
+      entry with `role: truth` and `kind: project_management` — that entry's
+      `anchor` is the tracked Jira Feature/Epic key for that program. Confirm
+      the program's `title` and Intent section actually match the task's area
+      before using the anchor as JIRA_PARENT.
+   3. **qmd lookup by feature name.** If no program binding matches, search
+      qmd for recently-created Jira Feature cards matching the name:
+      `query [{type:'lex', query:'<feature name>'}]` in the `tasks` collection,
+      filtering for `task_type: publish-ticket` and `JIRA_TYPE:Feature`. Extract
+      the Jira issue key from `agent_output`.
+   4. **Profile default.** If still no match, check `profile/integrations.yaml`
+      for a `default_parent` under the relevant project/product area.
+   5. Only leave JIRA_PARENT empty as a last resort — and flag it in the draft
+      with a note: "No parent Feature found — operator should wire manually."
+
 6. Pick the issue type:
    - **Bug** — client-reported (Zendesk, customer). Lands on the team's kanban/backlog.
    - **Regression Defect** — internally-found regression (QA, internal test). Lands on the team's kanban/backlog.
@@ -166,9 +190,10 @@ Task {task_id}. Follow these steps:
      `mobile-only`"). When in doubt, omit. The publish script submits labels as-is —
      no auto-prepend.
    - JIRA_RELEASE_NOTES: None, Internal Only, or External (or leave empty)
-   - JIRA_PARENT: parent issue key (e.g., `<PROJECT>-42920`) for Units linking to a
-     Feature or Epic. Leave empty if you don't know the parent — Jira will create
-     the Unit unparented and the human can wire it later.
+   - JIRA_PARENT: parent issue key (e.g., `<PROJECT>-42920`) for Units linking to
+     a Feature or Epic. **You must resolve this in step 5b.** Only leave empty if
+     step 5b found no match — and add a "No parent Feature found" note in the
+     ### Fields section so the operator knows to wire it.
    - For Features (or legacy Epics): fill JIRA_FEATURE_NAME (legacy
      JIRA_EPIC_NAME accepted), optionally JIRA_GTM_DATE (YYYY-MM-DD),
      JIRA_CLIENT_COMMITMENT (CAI, Vision).
@@ -183,6 +208,8 @@ Task {task_id}. Follow these steps:
      - PM-OS task IDs (`TASK-0497`, `TASK-0163`, etc.) or phrases like "Sibling task", "Sibling ticket", "Prior PM-OS task", "Related: TASK-…", "spun out of TASK-…"
      - Local repository paths (anything starting with `datasets/`, `scripts/`, `.claude/`, or referencing the PM-OS workspace)
      - Pointers to the local meeting transcript file (e.g., `datasets/meetings/product/home/.../2026-05-01_…txt`). Reference the meeting by **date, type, and participants** instead — e.g., "Reported during the 2026-05-01 CMGT Resident EAP Feedback session (Brandy Guzzardo, CMGT)."
+     - PM-OS system jargon that means nothing outside this workspace: "cadence", "program", "sentinel", "reconciler", "feedback loop", "trust ladder", "drift status", "eval pass". Write in plain product/engineering language instead.
+     - Process meta-commentary that narrates how a decision was reached rather than stating the decision: "This resolves the open question of…", "Based on the preceding analysis…", "As determined during review…". The Jira description should state what the product needs — cut the preamble and just say what we want built.
 
      Jira-native references are fine and encouraged: `<PROJECT>-12345` parent/sibling keys, Confluence URLs, customer names, verbatim quotes, dates. If the task body contains a "Source" or "Related" block with PM-OS IDs or local paths, **rewrite it** into the Jira description using external-friendly language, or drop it entirely. The PM-OS context lives in the surrounding task body (above the `## Jira Draft` heading) where only the operator can see it — that is the correct place for `TASK-NNNN` cross-links.
 
@@ -242,8 +269,10 @@ Task {task_id}. Follow these steps:
    - The ### Comment section contains the comment body in markdown (omit if action is `edit` only)
    - The ### Description section is optional — include only when replacing the full description
    - The ### Fields section is the human-readable summary of what will change
-   - Description hygiene rules from step 7 apply equally — no PM-OS task IDs, local paths,
-     or internal references in content that will be published to Jira
+   - Description hygiene rules from step 7 apply equally to `### Comment` content — no
+     PM-OS task IDs, local paths, system jargon ("cadence", "program", "sentinel"), or
+     process meta-commentary in anything that will be published to Jira. A Jira comment
+     is read by the same engineers and stakeholders as the description — write for them.
 
 8. After writing the draft, COMPLETE the task:
    Run: ./scripts/task.sh agent:complete {task_id}

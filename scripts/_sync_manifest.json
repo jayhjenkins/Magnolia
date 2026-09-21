@@ -2018,9 +2018,9 @@
   "datasets/product/agent-output/2026-08-20_home-q4-offsite-outcomes-and-roadmap.md": {
     "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-08-20_home-q4-offsite-outcomes-and-roadmap.md",
     "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-08-20_home-q4-offsite-outcomes-and-roadmap.docx",
-    "local_hash": "4f3cd64daccefe089a2f92c7669908bdab8ab790457a54e5754af74ae595fdac",
-    "remote_hash": "bf97b01d23f3fd5bb1593af5972a6d218b4515214d19c8f72d1418d4f7c28fb6",
-    "last_sync": "2026-08-20T14:51:52Z",
+    "local_hash": "45f9717fe11f4ede779265eb73c1b18b856120c638788994c872586007f51ff0",
+    "remote_hash": "7bed881534c2d28dac292f0f4e3a3ba3939f26929dfbc9fe957144673048a5e1",
+    "last_sync": "2026-09-16T16:24:57Z",
     "direction": "local->remote",
     "status": "synced"
   },
@@ -2516,6 +2516,105 @@
     "local_hash": "388cb14c9b36955cb70e64c9a8c26e09a4c91eae9d010cd57c5b06767ffbc00e",
     "remote_hash": "0fea6d6fecb6cb8c7c0ce1b6913fd04cfc53e1d2e0272e80fc990b2048ed738b",
     "last_sync": "2026-09-14T13:04:19Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-14-community-feed-mimic-admin-analytics-investigation.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-14-community-feed-mimic-admin-analytics-investigation.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-14-community-feed-mimic-admin-analytics-investigation.docx",
+    "local_hash": "57e8f020fe304f57b050eb8b06333ceea4ad995edfefb779000b7bf992b43237",
+    "remote_hash": "0bcd1002e4ad1876c43d23aaffdf5240908dd45bc4703fe867696e7c6aef6226",
+    "last_sync": "2026-09-14T17:52:39Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-14-nova-board-voting-quorum-requirements.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-14-nova-board-voting-quorum-requirements.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-14-nova-board-voting-quorum-requirements.docx",
+    "local_hash": "dcf7368c22775bb00caf49f44539d068759eaf6456e9d802d86fd04c8451d52e",
+    "remote_hash": "d0ec435b1a1c798c84e335a297cff2888c0ba31bc2edbcfb13641f80f5d9fc44",
+    "last_sync": "2026-09-14T19:51:24Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/packages/2026/board-communication-hub/PRD_board-to-homeowner-communication.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/packages/2026/board-communication-hub/PRD_board-to-homeowner-communication.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/packages/2026/board-communication-hub/PRD_board-to-homeowner-communication.docx",
+    "local_hash": "d5f0f353aa2584ecd71587035b7b2230c7ce7ee06598c0a5a4e8dcb528d55b47",
+    "remote_hash": "f3dfcecb4c4bc75cd184531fbbb2f132f0e1cd32c094a7988220c1568ea90f57",
+    "last_sync": "2026-09-14T19:56:58Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-15-community-feed-notification-preference-center.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-15-community-feed-notification-preference-center.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-15-community-feed-notification-preference-center.docx",
+    "local_hash": "18bc3ba1189e1b4f3d1ab5298727362cf20293741bc59db451a50ea22b7bf8fd",
+    "remote_hash": "2b0e36576e8727222c9b0e1008d38da218ae0de16c924343d8d9d9a1503bb9c9",
+    "last_sync": "2026-09-15T15:53:00Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-15_viu-hub-insurance-integration-question-prep.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-15_viu-hub-insurance-integration-question-prep.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-15_viu-hub-insurance-integration-question-prep.docx",
+    "local_hash": "f43a58c94d19143b392fb5fc7913eafaf59d792ad877f1832d34f618d23b8fc9",
+    "remote_hash": "39b4ca8da2e9b1d20930b94c7dda6e068d1c56ab5c02f55fc7e9d40793e995e9",
+    "last_sync": "2026-09-15T18:33:54Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-15_keys-board-communication-requirements.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-15_keys-board-communication-requirements.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-15_keys-board-communication-requirements.docx",
+    "local_hash": "9542f0adaac4655fa825b5424293cd33abbc429f5787e1485ef30188e12b91a0",
+    "remote_hash": "deab9f468e1f022e3428164c00d80355f55eabae33d3f7c51e2282abae03cbae",
+    "last_sync": "2026-09-15T18:52:34Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-16_q4-rock-candidates-resident-experience.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-16_q4-rock-candidates-resident-experience.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-16_q4-rock-candidates-resident-experience.docx",
+    "local_hash": "42b9f1a4f968200a3fdccf7d31d3b61781003a0c93ab172650545fda12d08eae",
+    "remote_hash": "32cc0b5758ae2f8402ba0eae5ffdbe043134fda6f7cc0a2f725ea5161bab766c",
+    "last_sync": "2026-09-16T20:57:25Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-18_engineering-risk-event-calendar-alignment.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-18_engineering-risk-event-calendar-alignment.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-18_engineering-risk-event-calendar-alignment.docx",
+    "local_hash": "da3dae9c47094f0286716db76d94ce829a875def43815c8bada0ff27ef296393",
+    "remote_hash": "c28d47c3521f406572fc284a5c1a5e16bbf722ab6c5ceedf3c7845b41f3af5af",
+    "last_sync": "2026-09-18T14:50:21Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-18_self-service-offers-priority-scoring.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-18_self-service-offers-priority-scoring.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-18_self-service-offers-priority-scoring.docx",
+    "local_hash": "9176b0c24e4d24bf1e3a6fca0ae8db905db1bd99fd828e37c851bccf6782c431",
+    "remote_hash": "06e9aa5560f6a39657158702a45efa406c3829ac3e76a511e8b4f023e64a4ba3",
+    "last_sync": "2026-09-18T14:51:36Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-21_doctor-check_TASK-2110.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-21_doctor-check_TASK-2110.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-21_doctor-check_TASK-2110.docx",
+    "local_hash": "2ac9cd855bd41d84fed0ddd82687bc520e51da9444360a3911ceeddb36be78c9",
+    "remote_hash": "ecb5f5e4f8673bd7626598bec38e126b63da41f7104d10c65722993133252f0f",
+    "last_sync": "2026-09-21T10:21:02Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/packages/2026/elections/PRD_elections.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/packages/2026/elections/PRD_elections.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/packages/2026/elections/PRD_elections.docx",
+    "local_hash": "e8749bddb932d7e1b41767b8baa2a713e2000fa2c54dbd9dc838fc6da0b77be2",
+    "remote_hash": "6e71216489bf047f5c79aeed74ddf87922275de2a8db886cef9f5870260b1ccc",
+    "last_sync": "2026-09-21T14:24:06Z",
     "direction": "local->remote",
     "status": "synced"
   }
