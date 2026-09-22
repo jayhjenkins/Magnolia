@@ -112,7 +112,16 @@ Task {task_id}. Follow these steps:
 - **The card is the deliverable.** The message lives in the task's message fields —
   no draft file, no Word document. Don't pass `--output` on complete.
 - **Draft only — never send.** Sending is the operator's manual step from the card.
-- Be concise. A message is not a memo.
+- **Be concise. A message is not a memo.**
+- **Digest / recap messages: lead with the headline, not a compression of the
+  document.** When the message accompanies a longer artifact (priorities digest,
+  review prep, scorecard update, etc.), do NOT compress the full document into the
+  message body. Instead: (1) open with the one or two sharpest signals in the
+  operator's voice ("Board fixes shipped, scorecard confirmation this week"),
+  (2) use their numbered-list style for the top 3–4 items, one line each,
+  (3) close with a pointer to the attached artifact for the full read. The message
+  should make the reader want to open the attachment, not replace it. Keep the body
+  under ~10 lines total.
 - **You MUST compose original message text.** Never echo, copy, or restate the
   task description, activity log, or any other task metadata as your draft. If the
   task says "nudge the team about X," your job is to write the actual nudge in the

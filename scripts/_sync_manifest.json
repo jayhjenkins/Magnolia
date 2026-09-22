@@ -2617,5 +2617,59 @@
     "last_sync": "2026-09-21T14:24:06Z",
     "direction": "local->remote",
     "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-21_gtm-adoption-tracking-proposal.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-21_gtm-adoption-tracking-proposal.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-21_gtm-adoption-tracking-proposal.docx",
+    "local_hash": "93c51dce74e18386cfb3e30d8a012d241fbdd678447e3871cfeb7efdcba960a6",
+    "remote_hash": "39d527ec22e7d99983e2c19b2b2e646b278b3b7dff439ba759ee2b3981e53834",
+    "last_sync": "2026-09-21T20:21:43Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-21_community-feed-content-level-engagement-report.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-21_community-feed-content-level-engagement-report.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-21_community-feed-content-level-engagement-report.docx",
+    "local_hash": "6d83b5c5d2d0b510c707675ff4ca2070287a2c1d5b2d688ae5ce51b14a9c0a9a",
+    "remote_hash": "28f0e1d2867e147ebb63ba4032ed39e79c7599888a038105fd948ceeb03177b7",
+    "last_sync": "2026-09-21T20:24:09Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-21_consumer-app-navigation-patterns-research.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-21_consumer-app-navigation-patterns-research.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-21_consumer-app-navigation-patterns-research.docx",
+    "local_hash": "96bb05ef8557fe5c40bbaa165912508503d41f550229d6f181b4bbba9b66e308",
+    "remote_hash": "5bd444e62f23c30f820359e8eee3816e435481cb19aaffb4ccfce5070e4bae8b",
+    "last_sync": "2026-09-21T20:24:46Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/packages/2026/community-feed-content-generation/business-case-swag.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/packages/2026/community-feed-content-generation/business-case-swag.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/packages/2026/community-feed-content-generation/business-case-swag.docx",
+    "local_hash": "c06fa1a04b7b966a84446016f342159bdabf8faf59fdcf29b83907232c8a1ac0",
+    "remote_hash": "7d4112476695f6e65e08e10fe1421502af4737491b97dcb3401f01018180f3a0",
+    "last_sync": "2026-09-21T20:25:02Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-22_community-feed-product-review-rundown.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-22_community-feed-product-review-rundown.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-22_community-feed-product-review-rundown.docx",
+    "local_hash": "af4209b46a71f958b411791546d3dddea9fd39a91bf69fe6dbb08bdfac49f2b6",
+    "remote_hash": "57fabe258d32fa5e4b5b8c1d5e1b185c92ed55e61272314649a2085539cdc7aa",
+    "last_sync": "2026-09-22T14:20:24Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-22-newsletter-build-approach-tradeoff-brief.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-22-newsletter-build-approach-tradeoff-brief.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-22-newsletter-build-approach-tradeoff-brief.docx",
+    "local_hash": "43aa73dc4b2d5d8786368c35861f3e082cb5f63e46bd55604bdb8ed61c655a54",
+    "remote_hash": "5f128d1d67cf1dea02af6285d9a03ef43ab67b4102b5fe4ac005961423cb5493",
+    "last_sync": "2026-09-22T14:52:04Z",
+    "direction": "local->remote",
+    "status": "synced"
   }
 }
