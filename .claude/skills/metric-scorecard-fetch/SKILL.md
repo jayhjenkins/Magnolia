@@ -37,10 +37,22 @@ temporal quarterly Rocks/OKR skill — do not couple them.
    `/tmp/scorecard_results_<as_of>.json`, then record + render:
    `python3 scripts/build_scorecard_dashboard.py --week <as_of> --record /tmp/scorecard_results_<as_of>.json`
 
-7. **Report** the dashboard path and a one-line summary per metric (value + status). Flag any
+7. **Drift check (before recording, at step 6):** for each `auto` metric compare against the prior
+   week in values.json. If a value moved >2x (or <0.5x), or a `raw.scope` / `raw.pages` key present last
+   week is missing or different, do NOT record it as a normal move — re-read that metric's file, fix the
+   method, and only record a genuine methodology change with a `METHODOLOGY CHANGE:` note. (Origin: the
+   2026-09-26 board-rage-click run used all pages, 171 vs the true 74, because the spec was stale.)
+   When a methodology changes, update the metric file AND registry definition in the same commit.
+
+8. **Report** the dashboard path and a one-line summary per metric (value + status). Flag any
    `error`/`stale` metric and any value outside its file's stated Sanity range.
 
 ## Conventions
+- Metric files describe Pendo calls in legacy `activityQuery` terms. With the current Pendo MCP use:
+  `appUsageTimeSeries` (weekly buckets: `totalNumVisitors`, `totalRageClickCount`) for WAU series;
+  `appUsage` (limit=1, read `summary.totalNumVisitors` / `summary.totalRageClickCount`) for window
+  uniques and app-wide rage; `aggregateEntityUsage` (entityType="page") for per-page rage. Segments go
+  in `segmentPipeline='{"id":"<segmentId>"}'`. A JQL/SQL string must be passed raw (no HTML escaping).
 - Pendo `subId`: resolve via `python3 scripts/profile_lib.py --pendo-subid` — never embed a literal.
   Databricks catalog: resolve via `python3 scripts/profile_lib.py --databricks-catalog`,
   READ-ONLY (never modify data).

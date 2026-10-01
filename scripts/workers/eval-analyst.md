@@ -30,7 +30,7 @@ skills:
   - context-search
   - task-create
 langfuse_prompt: "worker-eval-analyst"
-timeout: 900
+timeout: 7200
 max_turns: 25
 ---
 

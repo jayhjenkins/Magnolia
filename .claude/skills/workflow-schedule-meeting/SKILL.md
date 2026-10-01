@@ -112,6 +112,10 @@ If any attendee entry looks like a name (no `@`), attempt to resolve it in this 
    ```
    Then STOP. Do not continue.
 
+**Every attendee must be an email before Step 4.** Never pass a bare name (e.g. `Joshua`) to `find_meeting_times.py`, and never silently drop one. A name you cannot resolve through steps 1-3 is the hard blocker above: `agent:ask` and STOP.
+
+**Group references and inferred attendees.** If the task or transcript invites a group ("the team", "Joshua and others", "everyone from standup"), expand it from the source transcript's `participants:` / `participant_emails:` frontmatter. If the group still can't be fully named, or an attendee was inferred from an `Unknown` speaker label, propose slots for the attendees you have AND add an `**Attendees to confirm:**` line under the slot list naming who is missing or unconfirmed and why. Repeat that in the `agent:complete` comment. Do not present an inferred list as final.
+
 **Organizer as attendee.** Always include the operator (jay.jenkins@vantaca.com) as an explicit attendee in the `--attendees` list so they appear on the invite — do not assume the calendar provider adds the organizer automatically.
 
 **Optional attendees.** If the task mentions someone with hedging language ("possibly", "maybe", "if available"), note them in the `## Suggested Times` output as "Optional: {name} ({email})" beneath the slot list. Do not block on their availability when finding slots, but do not silently drop them — they should appear on the calendar invite as optional.
@@ -152,9 +156,12 @@ If the result has zero slots (`"slots": []`) OR `empty_reason` indicates `Attend
 Write a `## Suggested Times` section into the task description. Each slot MUST include an HTML comment with machine-parseable data followed by a human-readable line.
 
 **Slot quality rules:**
+0. **No past or imminent slots.** Check the current time (`date -u`) before formatting. Discard any slot that starts less than 60 minutes from now. A slot that has already passed must never appear as an option.
 1. **No weekends or out-of-hours.** Every proposed slot must fall within Monday–Friday, 9:30 AM – 5:00 PM ET. Discard any Graph-returned slot outside this window.
 2. **Prefer conflict-free for required attendees.** Rank slots where ALL required (non-operator) attendees are free above slots with attendee conflicts. If 3+ conflict-free slots exist, do not include conflicted ones. If fewer than 3 are conflict-free, fill to 4 total with conflicted slots ranked LAST and prefix the availability note with a warning (e.g., "Dennis has a conflict — Trisha free").
 3. **Operator soft conflicts are fine.** The operator's own tentative/soft conflicts may be noted inline but do not deprioritize the slot.
+4. **The Thursday 1:00-3:00 PM 1:1 block is for 1:1s.** Only a 1:1 (exactly one non-operator attendee AND framed as a 1:1 / check-in) may be ranked first inside it. Any other meeting (team debriefs, reviews, sign-offs, demos, group syncs) goes in the block only when no clean slot exists in the requested window: rank it below clean slots and note "inside your 1:1 block, protected for 1:1s". Never describe a block slot as "good" for a non-1:1 meeting.
+5. **Describe the window accurately.** If the ask was "today or tomorrow" and only some options fall in that window, say exactly which ones in the slot notes and in the completion comment (e.g. "Options 1-2 are Thursday, inside the ask; 3-4 are Friday, one day late"). Do not summarize the set as covering days it does not cover.
 
 **For each slot, cross-reference the ET time against the Operator's Calendar Structure Reference (below) and append a short contextual note** after the availability info. The note should help the operator evaluate soft tradeoffs at a glance. Keep each note to 1 short sentence max.
 
@@ -178,7 +185,7 @@ Context notes should cover whichever of these is most relevant to that slot:
 **Option 3:** Thursday, March 27 at 11:00 AM - 11:30 AM ET _(all attendees free)_ — open slot, no adjacency issues
 
 <!-- SLOT:4|2026-03-27T18:00:00Z|2026-03-27T18:30:00Z -->
-**Option 4:** Thursday, March 27 at 2:00 PM - 2:30 PM ET _(all attendees free)_ — inside your 1:1 block (good for recurring 1:1s)
+**Option 4:** Thursday, March 27 at 2:00 PM - 2:30 PM ET _(all attendees free)_ — inside your 1:1 block, protected for 1:1s (ranked last)
 ```
 
 **Critical format requirements:**
@@ -258,7 +265,8 @@ Use this reference when annotating suggested time slots in Step 5.
 
 ## Success Criteria
 
-- Task updated with 2-4 selectable time slots
+- Task updated with 2-4 selectable time slots, none in the past
+- Every attendee is an email; missing or inferred attendees are named under **Attendees to confirm**
 - HTML comments in exact `<!-- SLOT:N|start|end -->` format
 - Display times in ET with day-of-week
 - Agent status set to `complete`

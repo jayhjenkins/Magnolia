@@ -3353,6 +3353,11 @@ def handle_run_cron_job(handler, job_id):
         return
     try:
         task_id, _ = cron_lib.execute_job(job)
+        if job.get("auto_dispatch", True):
+            try:
+                _spawn_task_dispatch(task_id)
+            except Exception as de:
+                sys.stderr.write(f"[cron] Failed to auto-dispatch {task_id}: {de}\n")
         _json_response(handler, {"status": "ok", "task_id": task_id, "job_id": job_id})
     except Exception as e:
         _error_response(handler, f"Execution failed: {e}", status=500)

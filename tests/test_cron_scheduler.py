@@ -222,3 +222,32 @@ def test_startup_tick_skips_very_overdue_jobs(tmp_path, monkeypatch):
     scheduler.tick(startup=True)
 
     assert len(dispatch_calls) == 0
+
+
+def test_tick_spawns_exactly_one_dispatcher(tmp_path, monkeypatch):
+    """Regression: execute_job must not dispatch on its own — the scheduler's
+    dispatch_fn is the only spawn. Both used to fire, so every cron task ran
+    two agents."""
+    import subprocess
+    job = _make_job()
+    jobs_file = _write_jobs(tmp_path, [job])
+    monkeypatch.setattr(cron_lib, "JOBS_FILE", jobs_file)
+    monkeypatch.setattr(cron_lib, "COUNTER_FILE",
+                        str(tmp_path / "cron" / "_counter"))
+
+    tasks_dir = tmp_path / "tasks"
+    (tasks_dir / "agent").mkdir(parents=True)
+    (tasks_dir / "_counter").write_text("9000")
+    import task_lib
+    monkeypatch.setattr(task_lib, "TASKS_DIR", str(tasks_dir))
+
+    popen_calls = []
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda *a, **k: popen_calls.append(a))
+
+    dispatch_calls = []
+    scheduler = CronScheduler(dispatch_fn=lambda tid: dispatch_calls.append(tid))
+    scheduler.tick()
+
+    assert len(dispatch_calls) == 1
+    assert popen_calls == [], "execute_job spawned its own dispatcher"

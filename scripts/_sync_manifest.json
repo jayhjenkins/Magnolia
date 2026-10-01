@@ -2671,5 +2671,140 @@
     "last_sync": "2026-09-22T14:52:04Z",
     "direction": "local->remote",
     "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-22_community-feed-gtm-voice-of-customer.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-22_community-feed-gtm-voice-of-customer.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-22_community-feed-gtm-voice-of-customer.docx",
+    "local_hash": "e7fd76b9f201b4423c557a82a46944e60fe4892c20f6426fb069d242286270bd",
+    "remote_hash": "bc27f8449df8c00ac47cad8cef71755dc85d743f2aaeb7dbb94984c9215ec3b9",
+    "last_sync": "2026-09-22T20:22:39Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-23_getquorum-friday-sync-open-questions.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-23_getquorum-friday-sync-open-questions.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-23_getquorum-friday-sync-open-questions.docx",
+    "local_hash": "4bb6a482e326fe3fb8fae8fb551ced8e45764bcaba68e06833df76d9c6976289",
+    "remote_hash": "26291c2fcc1d702fa4cac43f2f811d7412b3a05ddb0bcbc558adc2de912b5cc3",
+    "last_sync": "2026-09-23T19:19:49Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-23_vision-spotlight-cab-fleet-home-ea-overlap.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-23_vision-spotlight-cab-fleet-home-ea-overlap.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-23_vision-spotlight-cab-fleet-home-ea-overlap.docx",
+    "local_hash": "a19dda94328a890cc54ab8da0664ae27961ea481faf336a118a0485fcf5847ed",
+    "remote_hash": "2fffdc451124d1b024a3b3e94e32fa483805431514d14cba800fcbd82fb141b1",
+    "last_sync": "2026-09-23T20:22:01Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-24_board-member-desktop-vs-mobile-split.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-24_board-member-desktop-vs-mobile-split.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-24_board-member-desktop-vs-mobile-split.docx",
+    "local_hash": "94838eaa4d3f80c9cf0159b6f3b977cd7e4c8e3b0db938d0e085c7c9e6a5a5e9",
+    "remote_hash": "0864b49f3dc991674a594a6aa0f9c16d38d34d559a07438904c2e6e9f505b470",
+    "last_sync": "2026-09-24T14:19:28Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-25_partner-news-feed-api-research.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-25_partner-news-feed-api-research.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-25_partner-news-feed-api-research.docx",
+    "local_hash": "a49db10c02351782066c55283fdc5255f454cb66c07242626ea9606356c69715",
+    "remote_hash": "83bc1a74dd53b09d0eae5960f7648170ed81e1d1a9b3865bfec82eccf4b3f656",
+    "last_sync": "2026-09-25T15:59:56Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-28_pendo-feedback-review.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-28_pendo-feedback-review.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-28_pendo-feedback-review.docx",
+    "local_hash": "82ec7e6786b16b5aa1d4094f4c2dde512801bb843f75134afaef3fc8e26605b3",
+    "remote_hash": "b480a3f9e5510dfa566224bc33922221891567bbc17f3e33e3e7254f8b66e1d7",
+    "last_sync": "2026-09-30T20:13:27Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/packages/2026/mimic-mode-security/context-brief.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/packages/2026/mimic-mode-security/context-brief.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/packages/2026/mimic-mode-security/context-brief.docx",
+    "local_hash": "661335c45a09b3a8a95a17aff6898b6fba6d749a2853f350a18f449a4831e7b9",
+    "remote_hash": "5d501d6882bbfbe1210b802fbbfc411aa1407b63e8dd166434ae2aa8e9600a65",
+    "last_sync": "2026-09-30T20:13:29Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-30_community-feed-vision-demo-scope.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-30_community-feed-vision-demo-scope.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-30_community-feed-vision-demo-scope.docx",
+    "local_hash": "2bf56bb78852f9325ae5fd295a1102c5d5658aedc513e42e90442543627961a5",
+    "remote_hash": "f0ddc4f7fe64c1ca5b10a6ec20e421f7f81f47d42c2cf47f4925711210c2824c",
+    "last_sync": "2026-09-30T20:56:11Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-30_q4-focus-and-staffing-options.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-30_q4-focus-and-staffing-options.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-30_q4-focus-and-staffing-options.docx",
+    "local_hash": "b537bf4eb0e0aa84823e5abd1c78c8785e88e8952a5e943ef755b5802202b018",
+    "remote_hash": "81c817a9030f771476ee39fbcb74c1a8f19d988a7016adaf15594813310d7a52",
+    "last_sync": "2026-09-30T20:56:58Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-30_cadence-elections-missing-roadmap-program-diagnosis.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-30_cadence-elections-missing-roadmap-program-diagnosis.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-30_cadence-elections-missing-roadmap-program-diagnosis.docx",
+    "local_hash": "78a750a8ee0eca91d27fe90802f56ebe2548722132fc92de2c5740b0dc980d60",
+    "remote_hash": "c4af95978b67dbe7ba6cc1febb260d6c123307ee40c8fad2453c3f8c25ee81e8",
+    "last_sync": "2026-09-30T20:57:27Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-30_resident-experience-2027-storyboard-and-primary-modality.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-30_resident-experience-2027-storyboard-and-primary-modality.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-30_resident-experience-2027-storyboard-and-primary-modality.docx",
+    "local_hash": "e9c452f43568e360727ded4b39b916a2c93196f6268a5fc8b72b230c694d46c8",
+    "remote_hash": "db55ac47f93c656821471b742b1c81c665c6daa4a953e7358ededc04454bf782",
+    "last_sync": "2026-09-30T20:57:47Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-09-30_messaging-system-requirements-and-options.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-09-30_messaging-system-requirements-and-options.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-09-30_messaging-system-requirements-and-options.docx",
+    "local_hash": "1701ea54513443f1119bb17a3cd457c3d1da3159c9232157ec7a43a5d4caaff3",
+    "remote_hash": "a930aed978fcfc56ed8a1db8a64562dae1d872695560878fc9cc8e84cb245dbc",
+    "last_sync": "2026-09-30T20:58:16Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-10-01_community-feed-agent-cost-and-model-options-v1.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-10-01_community-feed-agent-cost-and-model-options-v1.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-10-01_community-feed-agent-cost-and-model-options-v1.docx",
+    "local_hash": "616292e4f97af6513021254fa4ecd7a55e09018221b3745446e091a953935e34",
+    "remote_hash": "06ff6fe1d897219a83dff8419ef724c44ff31196175181159983ba67c656b68a",
+    "last_sync": "2026-10-01T14:20:13Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-10-01_board-comm-hub-primitives-and-email-architecture-decision.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-10-01_board-comm-hub-primitives-and-email-architecture-decision.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-10-01_board-comm-hub-primitives-and-email-architecture-decision.docx",
+    "local_hash": "8208739333458b6d89be8ab858bddd2c4a6fb854531fcc33b14859c7fc558457",
+    "remote_hash": "661c21599858e906ea912356eeb5cb4736135dccb295665b725eeef58a428d85",
+    "last_sync": "2026-10-01T18:50:12Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/strategies/2026/strategy_mobile-app-2027/strategy_mobile-app-2027.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/strategies/2026/strategy_mobile-app-2027/strategy_mobile-app-2027.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/strategies/2026/strategy_mobile-app-2027/strategy_mobile-app-2027.docx",
+    "local_hash": "c7e6777a1fee1a8ec0729c029178040ae5fa40ddc3fe58283a6522c5bd531f44",
+    "remote_hash": "4a251d833a2764da3b0bd1f55411d41dd95e0b9f1770de19dbf05e6fd8d52ba8",
+    "last_sync": "2026-10-01T19:13:28Z",
+    "direction": "local->remote",
+    "status": "synced"
   }
 }

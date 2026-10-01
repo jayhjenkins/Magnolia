@@ -9,7 +9,6 @@ optionally auto-dispatches it.
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
 
@@ -330,28 +329,6 @@ def execute_job(job):
             break
     _save_jobs(jobs)
 
-    # Auto-dispatch if enabled
-    if job.get("auto_dispatch", True):
-        _auto_dispatch(task_id)
-
+    # Dispatch is the caller's job (CronScheduler.dispatch_fn, or the run-now
+    # route). Dispatching here too spawned two dispatchers per cron task.
     return task_id, task_path
-
-
-def _auto_dispatch(task_id):
-    """Fire task_dispatch.py --task {task_id} in background."""
-    dispatch_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "task_dispatch.py")
-
-    # Strip Claude env vars + keep claude on PATH, cross-platform
-    env = platform_lib.headless_claude_env()
-
-    try:
-        subprocess.Popen(
-            [sys.executable, dispatch_script, "--task", task_id],
-            cwd=PM_OS_DIR,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **platform_lib.process_group_kwargs(),
-        )
-    except Exception as e:
-        sys.stderr.write(f"[cron] Failed to auto-dispatch {task_id}: {e}\n")
