@@ -124,7 +124,7 @@ If any attendee entry looks like a name (no `@`), attempt to resolve it in this 
 
 **Group references and inferred attendees.** If the task or transcript invites a group ("the team", "Joshua and others", "everyone from standup"), expand it from the source transcript's `participants:` / `participant_emails:` frontmatter. If the group still can't be fully named, or an attendee was inferred from an `Unknown` speaker label, propose slots for the attendees you have AND add an `**Attendees to confirm:**` line under the slot list naming who is missing or unconfirmed and why. Repeat that in the `agent:complete` comment. Do not present an inferred list as final.
 
-**Organizer as attendee.** Always include the operator (jay.jenkins@vantaca.com) as an explicit attendee in the `--attendees` list so they appear on the invite — do not assume the calendar provider adds the organizer automatically.
+**Organizer as attendee.** Always include the operator (their email from `python3 -c "import sys; sys.path.insert(0,'scripts'); import profile_lib; print(profile_lib.email())"`) as an explicit attendee in the `--attendees` list so they appear on the invite — do not assume the calendar provider adds the organizer automatically.
 
 **Optional attendees.** If the task mentions someone with hedging language ("possibly", "maybe", "if available"), note them in the `## Suggested Times` output as "Optional: {name} ({email})" beneath the slot list. Do not block on their availability when finding slots, but do not silently drop them — they should appear on the calendar invite as optional.
 

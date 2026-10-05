@@ -3,7 +3,7 @@
 Deterministic assertions over scripts/workers/portfolio-rollup.md and the dispatch
 matcher. We assert FRONTMATTER shape + MATCH selection + that the prose carries the
 load-bearing instructions (read the WHOLE portfolio, name drifts, versioned write via
-the CLI, ladder check, send-message-as-card seam with the attachment). We NEVER assert
+the CLI, the doc is the deliverable - no drafted send-message card). We NEVER assert
 on claude output -- the worker is prose.
 """
 import os
@@ -68,18 +68,18 @@ def test_body_names_drifts(parsed):
     assert "drift" in low and "broken" in low
 
 
-def test_body_versioned_artifact_and_attachment_send(parsed):
+def test_body_versioned_artifact_is_the_deliverable(parsed):
     _, body = parsed
     assert "program_lib.py write-artifact" in body
-    assert "send-message" in body
-    assert "--attachments" in body           # the rollup rides as a document (slice 9)
+    assert "agent:complete" in body and "--output" in body
 
 
-def test_body_checks_ladder_tier(parsed):
+def test_body_does_not_draft_a_message(parsed):
     _, body = parsed
-    assert "tier_of" in body and "portfolio-rollup" in body
-    low = body.lower()
-    assert "shadow" in low and "proposal" in low
+    # The doc is the deliverable; the operator writes their own message.
+    for token in ("send-message", "--message-channel", "--message-to",
+                  "--attachments", "tier_of"):
+        assert token not in body, f"worker still drafts a send: {token!r}"
 
 
 def test_body_is_ascii_safe(parsed):

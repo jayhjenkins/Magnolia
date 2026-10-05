@@ -2,8 +2,8 @@
 
 Deterministic assertions over scripts/workers/priority-digest.md and the dispatch
 matcher. We assert FRONTMATTER shape + MATCH selection + that the prose carries the
-load-bearing instructions (versioned write via the CLI, explicit slips, ladder check,
-send-message-as-card seam). We NEVER assert on claude output -- the worker is prose.
+load-bearing instructions (versioned write via the CLI, explicit slips, the doc is the
+deliverable - no drafted send-message card). We NEVER assert on claude output -- the worker is prose.
 """
 import os
 import sys
@@ -68,18 +68,17 @@ def test_body_flags_slips_explicitly(parsed):
     assert "slip" in low, "the prose must instruct flagging slips explicitly"
 
 
-def test_body_checks_ladder_tier(parsed):
+def test_body_does_not_draft_a_message(parsed):
     _, body = parsed
-    assert "tier_of" in body and "priority-digest" in body
-    low = body.lower()
-    assert "shadow" in low and "proposal" in low
+    # The doc is the deliverable; the operator writes their own message. No
+    # send-message card, no ladder-gated draft banner.
+    for token in ("send-message", "--message-channel", "--message-to", "tier_of"):
+        assert token not in body, f"worker still drafts a send: {token!r}"
 
 
-def test_body_creates_send_message_card(parsed):
+def test_body_completes_with_the_doc(parsed):
     _, body = parsed
-    # The send is a send-message collab card carrying the digest; the worker never sends.
-    assert "send-message" in body
-    assert "--message-channel" in body and "--message-to" in body
+    assert "agent:complete" in body and "--output" in body
 
 
 def test_body_is_ascii_safe(parsed):
