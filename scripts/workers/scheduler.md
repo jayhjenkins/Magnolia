@@ -2,7 +2,7 @@
 name: scheduler
 description: Meeting scheduling tasks — finds availability and creates calendar events
 priority: 20
-tier: light
+tier: standard
 match:
   task_type:
     - schedule-meeting

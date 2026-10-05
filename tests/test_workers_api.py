@@ -25,9 +25,12 @@ def test_workers_payload_model_tracks_posture():
     # deep worker: low -> sonnet, high -> opus (clamped)
     assert low["researcher"]["model"] == "sonnet"
     assert high["researcher"]["model"] == "opus"
-    # light worker (scheduler): low -> haiku, high -> sonnet
+    # standard worker (scheduler): low -> haiku, high -> opus
     assert low["scheduler"]["model"] == "haiku"
-    assert high["scheduler"]["model"] == "sonnet"
+    assert high["scheduler"]["model"] == "opus"
+    # light worker (grad-assessor): low -> haiku (clamped), high -> sonnet
+    assert low["grad-assessor"]["model"] == "haiku"
+    assert high["grad-assessor"]["model"] == "sonnet"
 
 
 def test_worker_packs_empty_when_no_manifest(tmp_path):

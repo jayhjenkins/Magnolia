@@ -1,7 +1,7 @@
 import os, re
 WORKERS = os.path.join(os.path.dirname(__file__), "..", "scripts", "workers")
 EXPECTED = {
-    "grad-assessor": "light", "scheduler": "light",
+    "grad-assessor": "light", "scheduler": "standard",
     "_default": "standard", "message-writer": "standard", "ticket-creator": "standard",
     "eval-analyst": "deep", "researcher": "deep", "product-analyst": "deep",
 }
