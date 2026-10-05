@@ -54,6 +54,12 @@ Examples of rewrites:
 | "During standup the operator said they'd set up time with Brandon to align on HOAi rollout" | "Align on HOAi rollout plan, timeline, and next steps" |
 | "Zach suggested standardizing a recurring touch base to stay aligned on Pay" | "Recurring sync to stay aligned on Pay priorities and surface blockers early" |
 
+**Working sessions, reviews, and sign-offs need an outcome and prep.** If the meeting is a working session, review, sign-off, or reconcile/decide session (not a recurring sync or 1:1), the description must also:
+- Name what the session should produce or decide (e.g. "Output: a JTBD map for the five admin flows and a list of UX inconsistencies", "Decide which PRs must land before the demo").
+- List the concrete items in scope when the ask names them as a set ("the five flows", "everyone's hypotheses") — spell them out from the source transcript rather than referring to them by count.
+- Point at any pre-read that exists (survey data, PRD, doc path or link from the transcript or task). If none is known, omit the line; do not invent one.
+Keep it to 2-4 short lines total.
+
 ### 1b. Detect Recurring Series
 
 Check the task title, description, and source meeting transcript for signals that this is a **recurring** meeting rather than a one-off:
@@ -114,6 +120,8 @@ If any attendee entry looks like a name (no `@`), attempt to resolve it in this 
 
 **Every attendee must be an email before Step 4.** Never pass a bare name (e.g. `Joshua`) to `find_meeting_times.py`, and never silently drop one. A name you cannot resolve through steps 1-3 is the hard blocker above: `agent:ask` and STOP.
 
+**Write resolved emails back.** Once a name resolves, replace it in the `meeting_attendees` frontmatter with the email, so the invite created from the slot picker reaches them. An email guessed from a naming pattern (e.g. `first.last@`) is NOT resolved: treat it as unresolved and list it under **Attendees to confirm**.
+
 **Group references and inferred attendees.** If the task or transcript invites a group ("the team", "Joshua and others", "everyone from standup"), expand it from the source transcript's `participants:` / `participant_emails:` frontmatter. If the group still can't be fully named, or an attendee was inferred from an `Unknown` speaker label, propose slots for the attendees you have AND add an `**Attendees to confirm:**` line under the slot list naming who is missing or unconfirmed and why. Repeat that in the `agent:complete` comment. Do not present an inferred list as final.
 
 **Organizer as attendee.** Always include the operator (jay.jenkins@vantaca.com) as an explicit attendee in the `--attendees` list so they appear on the invite — do not assume the calendar provider adds the organizer automatically.
@@ -162,6 +170,9 @@ Write a `## Suggested Times` section into the task description. Each slot MUST i
 3. **Operator soft conflicts are fine.** The operator's own tentative/soft conflicts may be noted inline but do not deprioritize the slot.
 4. **The Thursday 1:00-3:00 PM 1:1 block is for 1:1s.** Only a 1:1 (exactly one non-operator attendee AND framed as a 1:1 / check-in) may be ranked first inside it. Any other meeting (team debriefs, reviews, sign-offs, demos, group syncs) goes in the block only when no clean slot exists in the requested window: rank it below clean slots and note "inside your 1:1 block, protected for 1:1s". Never describe a block slot as "good" for a non-1:1 meeting.
 5. **Describe the window accurately.** If the ask was "today or tomorrow" and only some options fall in that window, say exactly which ones in the slot notes and in the completion comment (e.g. "Options 1-2 are Thursday, inside the ask; 3-4 are Friday, one day late"). Do not summarize the set as covering days it does not cover.
+6. **Protected blocks are exclusions, not soft conflicts.** Graph often reports the operator as free during holds, so check every slot against the Calendar Structure Reference yourself. Drop any slot that overlaps a Focus Time block, the Friday 2:00-5:00 PM protected block, the Lunch Hold, or the 9:00-9:30 AM drop-off buffer. Rule 3 does not apply to these. Use one only if Rule 8's widened search still leaves fewer than 3 slots: rank it last and note "gives up your protected {block}".
+7. **Overlapping a fixed meeting is a conflict.** If a slot's time range intersects any meeting listed in the Calendar Structure Reference (Daily Anchors or Day Characters, e.g. Wed 2:00-3:00 PM vs Home L10 at 2:30), drop it or label it "overlaps {meeting}" and rank it with conflicted slots. "Right before" / "tight transition" is only for a slot that ends at or before the next meeting starts.
+8. **Widen before padding.** A clean slot = all required attendees free, no protected block (Rule 6), no fixed-meeting overlap (Rule 7). If the window has fewer than 3 clean slots, run the Step 4 expansion once (add 5 business days, or for same-day/next-day asks, the next 1-2 business days) before filling with compromised slots. Say in the completion comment how many clean slots were found and why any compromised ones remain.
 
 **For each slot, cross-reference the ET time against the Operator's Calendar Structure Reference (below) and append a short contextual note** after the availability info. The note should help the operator evaluate soft tradeoffs at a glance. Keep each note to 1 short sentence max.
 
@@ -207,6 +218,8 @@ Append the suggested times to the task description:
 Also update the description body to include the `## Suggested Times` section. Use `task_lib.update_task_description()` or write the updated body directly.
 
 ### 7. Complete Agent Work
+
+**Gate before completing.** Re-read the task frontmatter. If any `meeting_attendees` entry has no `@`, go back to Step 3 (resolve it or `agent:ask` and STOP). If any slot violates Slot quality rules 0, 6, or 7 without the required note, fix the slot list first.
 
 ```bash
 ./scripts/task.sh agent:complete {TASK_ID}
@@ -267,6 +280,8 @@ Use this reference when annotating suggested time slots in Step 5.
 
 - Task updated with 2-4 selectable time slots, none in the past
 - Every attendee is an email; missing or inferred attendees are named under **Attendees to confirm**
+- No slot sits in a protected block or overlaps a fixed meeting unless it is ranked last with that stated
+- Working sessions, reviews, and sign-offs name the expected output or decision in `meeting_description`
 - HTML comments in exact `<!-- SLOT:N|start|end -->` format
 - Display times in ET with day-of-week
 - Agent status set to `complete`

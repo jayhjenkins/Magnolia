@@ -2806,5 +2806,32 @@
     "last_sync": "2026-10-01T19:13:28Z",
     "direction": "local->remote",
     "status": "synced"
+  },
+  "datasets/product/agent-output/2026-10-02_home-mobile-resident-and-board-surveys-draft.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-10-02_home-mobile-resident-and-board-surveys-draft.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-10-02_home-mobile-resident-and-board-surveys-draft.docx",
+    "local_hash": "1d62b6500ce18aa8663de47e0fba710204b5eb4d93aba6d414a5e345f5fd0d01",
+    "remote_hash": "553a38995d73fe7a223c7ef756e56913f5331cb8ca50161e85acb71ca826af4d",
+    "last_sync": "2026-10-02T19:49:35Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/agent-output/2026-10-02_home-mobile-pendo-in-moment-surveys.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/agent-output/2026-10-02_home-mobile-pendo-in-moment-surveys.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/agent-output/2026-10-02_home-mobile-pendo-in-moment-surveys.docx",
+    "local_hash": "0d0bd359af5b11959146b6c24072d4d0761a90353f147dc7ba685a734ac03cc5",
+    "remote_hash": "dd13ac2dc9745bd84feb6586434091119ebafccecda972c663e415e5ba3b7200",
+    "last_sync": "2026-10-02T19:51:03Z",
+    "direction": "local->remote",
+    "status": "synced"
+  },
+  "datasets/product/strategies/2026/strategy_home-services-program-q4/strategy_home-services-program-q4.md": {
+    "local_path": "/Users/jayjenkins/Magnolia/datasets/product/strategies/2026/strategy_home-services-program-q4/strategy_home-services-program-q4.md",
+    "remote_path": "/Users/jayjenkins/Library/CloudStorage/OneDrive-Vantaca,LLC/PM-OS/product/strategies/2026/strategy_home-services-program-q4/strategy_home-services-program-q4.docx",
+    "local_hash": "7ba229c10e4977bdd327313575192625f2610c780f518d1385f934df1cd6aec3",
+    "remote_hash": "6907573b50480b5ce22b9c6c8cac736379f11bee4af5de9823209ae426684cf6",
+    "last_sync": "2026-10-05T14:56:32Z",
+    "direction": "local->remote",
+    "status": "synced"
   }
 }
