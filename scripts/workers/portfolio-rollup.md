@@ -106,6 +106,8 @@ Task {task_id}. Follow these steps:
   synthesis is why this rollup exists.
 - Write the rollup ONLY through `program_lib.py write-artifact` (versioned, invariant #6).
 - The document is the deliverable. Never create a message card and never send.
+- No "draft for review" banner and no note about what was or was not sent - open
+  straight into the rollup.
 - ASCII only. No em dashes anywhere (use a hyphen, comma, or parentheses).
 - Identity comes from the profile, never hardcoded names.
 </content>

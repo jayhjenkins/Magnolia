@@ -104,5 +104,7 @@ Task {task_id}. Follow these steps:
 - Read the whole portfolio (other active programs' drift), not just this one program.
 - Write the digest ONLY through `program_lib.py write-artifact` (versioned, invariant #6).
 - The document is the deliverable. Never create a message card and never send.
+- No "draft for review" banner and no note about what was or was not sent - open
+  straight into the digest.
 - ASCII only. No em dashes anywhere (use a hyphen, comma, or parentheses).
 - Identity comes from the profile, never hardcoded names.

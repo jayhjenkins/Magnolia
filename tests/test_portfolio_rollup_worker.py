@@ -86,3 +86,8 @@ def test_body_is_ascii_safe(parsed):
     _, body = parsed
     for bad in ("—", "–", "‘", "’", "“", "”"):
         assert bad not in body, f"non-ASCII char {bad!r} found in worker body"
+
+
+def test_body_forbids_draft_banner(parsed):
+    _, body = parsed
+    assert 'no "draft for review" banner' in body.lower()
