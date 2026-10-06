@@ -141,7 +141,9 @@ def voice_path(channel, root=None):
 
 
 def voice_text(channel=None, root=None):
-    """Return voice guidance. channel='teams'|'email', or None for both concatenated."""
+    """Return voice guidance for one channel: 'teams', 'email', or 'html' (the
+    Visual style guidance for HTML artifacts). channel=None returns the MESSAGE
+    voice only - teams + email concatenated; html is never included."""
     channels = [channel] if channel else ["teams", "email"]
     chunks = []
     for ch in channels:

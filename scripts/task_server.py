@@ -579,6 +579,7 @@ def build_profile(root=None):
     voice = {
         "teams": profile_lib.voice_text("teams", root),
         "email": profile_lib.voice_text("email", root),
+        "html": profile_lib.voice_text("html", root),
     }
 
     packs = {
@@ -652,7 +653,7 @@ def workers_payload(posture=None):
 # They own validation (path-traversal guards against the un-sanitizing profile_lib
 # setters) BEFORE persisting. The thin handle_* wrappers read the body and emit.
 
-_VOICE_CHANNELS = {"teams", "email"}
+_VOICE_CHANNELS = {"teams", "email", "html"}
 _INTEGRATION_CATEGORIES = set(_INTEGRATION_SOURCE_KEY)   # transcripts/project_management/calendar
 _MODEL_POSTURE_LEVELS = {"low", "balanced", "high"}
 
@@ -671,8 +672,9 @@ def apply_profile_identity(payload, root=None):
 
 
 def apply_profile_voice(payload, root=None):
-    """Write voice channel file(s). Channel keys validated against {teams, email}
-    BEFORE any write (path-traversal guard); reject unknown -> 400, write nothing."""
+    """Write voice channel file(s). Channel keys validated against {teams, email,
+    html} BEFORE any write (path-traversal guard); reject unknown -> 400, write
+    nothing. 'html' is the Visual style channel (design guidance for HTML artifacts)."""
     channels = payload
     if not channels:
         return 400, {"error": "No voice channels provided"}
@@ -755,7 +757,7 @@ def handle_profile_identity(handler):
 
 
 def handle_profile_voice(handler):
-    """PUT /api/profile/voice — body {teams?, email?}."""
+    """PUT /api/profile/voice — body {teams?, email?, html?} (html = Visual style)."""
     try:
         body = _read_request_body(handler)
     except (json.JSONDecodeError, ValueError) as e:
