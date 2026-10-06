@@ -29,6 +29,7 @@
   let saveTimer = null;
   let saving = false;
   let saveGen = 0;         // bumps when a PUT starts; polls begun earlier are discarded
+  let knownDisk = null;    // {taskId, content} last known on disk (outlives the viewer)
 
   function q(sel) { return document.querySelector('.dt-htmlview ' + sel); }
   function artifactSrc(taskId) {
@@ -109,8 +110,14 @@
   async function openHtmlViewer(taskId) {
     const taskPane = document.querySelector('#split-modal .task-pane');
     if (!taskPane || !taskId) return;
-    // Re-entrant-safe: drop any previous viewer (and its poll) before building.
-    if (viewTaskId || document.querySelector('.dt-htmlview')) destroyViewer();
+    // Re-entrant-safe: snapshot any unsaved source edit, drop the previous
+    // viewer (and its poll), then persist the snapshot before we fetch.
+    let pending = null;
+    if (viewTaskId || document.querySelector('.dt-htmlview')) {
+      const snap = snapshot();
+      destroyViewer();
+      pending = persistSnapshot(snap);
+    }
     const gen = ++viewGen;
     viewTaskId = taskId;
     mode = 'preview';
@@ -122,6 +129,9 @@
     taskPane.classList.add('has-editor');
     void ov.offsetWidth; // commit hidden baseline
     requestAnimationFrame(() => { if (gen === viewGen) ov.classList.add('is-open'); });
+
+    if (pending) await pending;
+    if (gen !== viewGen) return;
 
     let data = null, ok = false;
     try {
@@ -138,7 +148,7 @@
     if (data.exists === false) { showMessage(body, "This page hasn't been written yet."); return; }
 
     pageExists = true;
-    lastContent = data.content || '';
+    setKnown(taskId, data.content || '');
     mountBody(body, taskId);
     ov.querySelector('.dth-toggle').disabled = false;
     startPoll(gen);
@@ -179,25 +189,45 @@
     }
   }
 
+  // Last content known to be on disk for a task (fetched, polled or saved).
+  // Outlives the viewer so a close-time snapshot can tell if it still differs.
+  function setKnown(taskId, content) {
+    knownDisk = { taskId, content };
+    if (viewTaskId === taskId) lastContent = content;
+  }
+
+  // {taskId, content} of the source textarea, or null when not editing source.
+  function snapshot() {
+    const ta = q('.dth-source');
+    if (!viewTaskId || !ta || mode !== 'source') return null;
+    return { taskId: viewTaskId, content: ta.value };
+  }
+
   function scheduleSave() {
     setSaveState('editing');
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
   }
 
-  // true = persisted (or nothing to save), false = failed / no viewer,
-  // null = a PUT is already in flight (caller waits and retries).
-  async function flushSave() {
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-    const taskId = viewTaskId;
-    const ta = q('.dth-source');
-    if (!taskId || !ta || mode !== 'source') return !!taskId;
-    if (saving) return null;
-    const content = ta.value;
-    if (content === lastContent) { setSaveState('saved'); return true; }
-    setSaveState('saving');
+  function waitIdle() {
+    return new Promise(resolve => {
+      let i = 0;
+      (function tick() {
+        if (!saving) return resolve(true);
+        if (++i > 200) return resolve(false);   // ~10s
+        setTimeout(tick, 50);
+      })();
+    });
+  }
+
+  // The one PUT. Caller guarantees no save is in flight. Takes explicit
+  // (taskId, content) so it is safe after the viewer is torn down.
+  async function putContent(taskId, content) {
+    const live = () => viewTaskId === taskId;
+    if (live()) setSaveState('saving');
     saving = true;
     saveGen++;
+    let ok = false;
     try {
       const res = await fetch(`${API}/tasks/${encodeURIComponent(taskId)}/output`, {
         method: 'PUT',
@@ -205,27 +235,60 @@
         body: JSON.stringify({ content }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (viewTaskId === taskId) lastContent = content;
-      setSaveState('saved');
+      setKnown(taskId, content);
+      ok = true;
       return true;
     } catch (e) {
-      setSaveState('error');
+      if (live()) setSaveState('error');
       if (typeof toast === 'function') toast('Couldn\'t save your latest edit - please try again.');
       return false;
     } finally {
       saving = false;
       saveGen++;
+      if (ok && live()) {
+        // Edits typed while this PUT was in flight: queue another save.
+        const ta = q('.dth-source');
+        if (mode === 'source' && ta && ta.value !== lastContent) scheduleSave();
+        else if (!saveTimer) setSaveState('saved');
+      }
     }
   }
 
+  // Debounced save from the live textarea. true = persisted (or nothing to
+  // save), false = failed / no viewer, null = a PUT is in flight (the in-flight
+  // PUT reschedules on completion, see putContent's finally).
+  async function flushSave() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    const snap = snapshot();
+    if (!snap) return !!viewTaskId;
+    if (saving) return null;
+    if (snap.content === lastContent) { setSaveState('saved'); return true; }
+    return putContent(snap.taskId, snap.content);
+  }
+
+  // Wait out any in-flight PUT, then persist the live textarea.
   async function settleSave() {
-    for (let i = 0; i < 100; i++) {
-      if (saving) { await new Promise(r => setTimeout(r, 50)); continue; }
-      const saved = await flushSave();
-      if (saved === null) continue;
-      return saved;
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (!(await waitIdle())) {
+      if (typeof toast === 'function') toast('Couldn\'t save - still editing source');
+      return false;
     }
-    return false;
+    const snap = snapshot();
+    if (!snap) return false;
+    if (snap.content === lastContent) { setSaveState('saved'); return true; }
+    return putContent(snap.taskId, snap.content);
+  }
+
+  // Persist a snapshot taken before teardown: wait out any in-flight PUT,
+  // then PUT the snapshot if it still differs from what's known on disk.
+  async function persistSnapshot(snap) {
+    if (!snap) return true;
+    if (!(await waitIdle())) {
+      if (typeof toast === 'function') toast('Couldn\'t save your latest edit - please try again.');
+      return false;
+    }
+    if (knownDisk && knownDisk.taskId === snap.taskId && knownDisk.content === snap.content) return true;
+    return putContent(snap.taskId, snap.content);
   }
 
   // -- Live reload (chat edits the file in place) --
@@ -235,7 +298,7 @@
   }
 
   async function pollOnce(gen) {
-    if (gen !== viewGen || !viewTaskId || pollBusy || saving) return;
+    if (gen !== viewGen || !viewTaskId || pollBusy || saving || document.hidden) return;
     const taskId = viewTaskId;
     const startSaveGen = saveGen;
     pollBusy = true;
@@ -249,7 +312,7 @@
       if (!data || data.exists === false || typeof data.content !== 'string') return;
       if (data.content === lastContent) return;
       const prev = lastContent;
-      lastContent = data.content;
+      setKnown(taskId, data.content);
       if (mode === 'preview') {
         reloadFrame();
       } else {
@@ -265,14 +328,24 @@
   }
 
   // -- Copy path --
+  // toast() only surfaces errors, so success flips the button label briefly.
+  let copiedTimer = null;
   function copyPath() {
     const p = docPath;
+    const btn = q('.dth-copy');
     if (!p) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(p)
-        .then(() => { if (typeof toast === 'function') toast('Path copied', 'success'); })
-        .catch(() => { if (typeof toast === 'function') toast('Couldn\'t copy the path.'); });
+    if (!(navigator.clipboard && navigator.clipboard.writeText)) {
+      if (typeof toast === 'function') toast('Couldn\'t copy the path - clipboard unavailable.');
+      return;
     }
+    navigator.clipboard.writeText(p)
+      .then(() => {
+        if (!btn || !btn.isConnected) return;
+        btn.textContent = 'Copied';
+        if (copiedTimer) clearTimeout(copiedTimer);
+        copiedTimer = setTimeout(() => { btn.textContent = 'Copy path'; copiedTimer = null; }, 1200);
+      })
+      .catch(() => { if (typeof toast === 'function') toast('Couldn\'t copy the path.'); });
   }
 
   // -- Close / teardown --
@@ -294,9 +367,13 @@
   function closeHtmlViewer() {
     const ov = document.querySelector('.dt-htmlview');
     if (!ov || ov.classList.contains('is-closing')) return;
-    // Persist a pending source edit before tearing down (fire and forget;
-    // flushSave captures the task id and content up front).
-    if (mode === 'source') flushSave();
+    // Snapshot the source edit now, then persist it independently of the
+    // teardown (waits out any in-flight PUT first, so nothing is dropped).
+    const snap = snapshot();
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    const ta = q('.dth-source');
+    if (ta) ta.readOnly = true;
+    persistSnapshot(snap);
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     const gen = viewGen;
     const done = () => { if (gen === viewGen) destroyViewer(); };
@@ -316,19 +393,23 @@
   const _origCloseModal = window.closeModal;
   window.closeModal = function () {
     if (document.querySelector('.dt-htmlview')) {
-      if (mode === 'source') flushSave();
+      const snap = snapshot();
       destroyViewer();
+      persistSnapshot(snap);
     }
     if (typeof _origCloseModal === 'function') return _origCloseModal.apply(this, arguments);
   };
 
   // Esc closes the viewer first (one layer at a time). Registered on WINDOW in
   // the capture phase so it runs before markdown-editor.js's document-capture
-  // handler (whose `.dt-editor.is-open` selector would also match this overlay)
-  // and before app.js's closeModal handler. Only acts when the viewer is open,
-  // so Esc with the markdown editor open still reaches that editor.
+  // handler and app.js's closeModal handler. Only acts when the viewer is open,
+  // so Esc with the markdown editor open still reaches that editor, and steps
+  // aside while a confirm dialog or quick-add is on top. Note: while the
+  // sandboxed iframe has focus its key events stay inside the frame, so Esc
+  // doesn't reach this handler - the back button is the way out then.
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if (document.querySelector('.confirm-overlay.active, .qa-overlay.active')) return;
     const ov = document.querySelector('.dt-htmlview.is-open');
     if (ov) { e.stopImmediatePropagation(); e.stopPropagation(); closeHtmlViewer(); }
   }, true);

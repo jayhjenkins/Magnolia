@@ -57,7 +57,7 @@
 
   // ── Build the takeover overlay inside the left task pane ─────────────
   function buildOverlay(taskPane) {
-    let ov = taskPane.querySelector('.dt-editor');
+    let ov = taskPane.querySelector('.dt-editor:not(.dt-htmlview)');
     if (ov) return ov;
     ov = document.createElement('div');
     ov.className = 'dt-editor';
@@ -196,7 +196,7 @@
   }
 
   function setSaveState(state) {
-    const el = document.querySelector('.dt-editor .dte-save');
+    const el = document.querySelector('.dt-editor:not(.dt-htmlview) .dte-save');
     if (!el) return;
     el.dataset.state = state;
     const text = { saved: 'Saved', saving: 'Saving…', editing: 'Editing…', error: 'Save failed' }[state] || 'Saved';
@@ -435,14 +435,14 @@
     editorTaskId = null;
     wordState = null;
     wordBusy = false;
-    const ov = document.querySelector('.dt-editor');
+    const ov = document.querySelector('.dt-editor:not(.dt-htmlview)');
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     const taskPane = document.querySelector('#split-modal .task-pane');
     if (taskPane) taskPane.classList.remove('has-editor');
   }
 
   function closeOutputEditor() {
-    const ov = document.querySelector('.dt-editor');
+    const ov = document.querySelector('.dt-editor:not(.dt-htmlview)');
     if (!ov) return;
     // Persist any pending edit before tearing down.
     flushSave();
@@ -472,7 +472,7 @@
   // Close the editor first when the whole modal closes (so it doesn't linger).
   const _origCloseModal = window.closeModal;
   window.closeModal = function () {
-    if (document.querySelector('.dt-editor')) destroyEditor();
+    if (document.querySelector('.dt-editor:not(.dt-htmlview)')) destroyEditor();
     if (typeof _origCloseModal === 'function') return _origCloseModal.apply(this, arguments);
   };
 
@@ -481,7 +481,7 @@
   // closeModal Esc handler, so one Esc closes one layer at a time (coupling).
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      const ov = document.querySelector('.dt-editor.is-open');
+      const ov = document.querySelector('.dt-editor.is-open:not(.dt-htmlview)');
       if (ov) { e.stopImmediatePropagation(); closeOutputEditor(); }
     }
   }, true);
