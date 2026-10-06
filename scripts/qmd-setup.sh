@@ -15,7 +15,7 @@ echo "Setting up QMD collections for PM-OS..."
 echo
 
 # Remove existing collections (safe to ignore errors)
-for name in meetings_product meetings_leadership meetings_general meetings_strategy meetings_recruiting meetings_customer research product_artifacts tasks; do
+for name in meetings_product meetings_leadership meetings_general meetings_strategy meetings_recruiting meetings_customer research product_artifacts html_artifacts tasks; do
   $QMD collection remove "$name" 2>/dev/null && echo "Removed existing: $name" || true
 done
 
@@ -30,6 +30,7 @@ $QMD collection add "$PMDIR/datasets/meetings/recruiting" --mask "**/*.txt" --na
 $QMD collection add "$PMDIR/datasets/meetings/customer"   --mask "**/*.txt" --name meetings_customer
 $QMD collection add "$PMDIR/datasets/research/sources"    --mask "**/*.md"  --name research
 $QMD collection add "$PMDIR/datasets/product"             --mask "**/*.md"  --name product_artifacts
+$QMD collection add "$PMDIR/datasets/.qmd-html"           --mask "**/*.md"  --name html_artifacts
 $QMD collection add "$PMDIR/datasets/tasks"               --mask "**/*.md"  --name tasks
 
 echo
@@ -43,6 +44,7 @@ $QMD context add qmd://meetings_recruiting/ "Recruiting and hiring meeting trans
 $QMD context add qmd://meetings_customer/   "Customer-facing meeting transcripts (Customer Advisory Board sessions, customer 1:1s, customer demos, monthly product reviews with customers, training sessions). Use for: customer feedback, voice-of-customer signals, advisory board input, demo reactions, customer pain points."
 $QMD context add qmd://research/            "Strategic research library by topic: competitive-analysis, pricing-strategy, market-positioning, product-strategy, customer-segmentation, growth-strategy. Files have YAML frontmatter with expiry_date — check it for staleness."
 $QMD context add qmd://product_artifacts/   "PM artifacts: PRDs, epics, backlog, roadmaps, strategies, customer briefs. PRDs have status flags (Drafting, Actionable, Closed, Abandoned). Use for: existing product decisions, feature specs, prioritization context."
+$QMD context add qmd://html_artifacts/      "Plain-text copies of HTML artifacts (roadmaps, pre-reads, infographics, dashboards). The source field points at the real .html file - cite and open that."
 $QMD context add qmd://tasks/               "Active task queues across human, agent, collab, and waiting queues. Each has YAML frontmatter: status, priority, domain, queue. Use for: current work-in-progress, pending decisions, open action items."
 
 echo

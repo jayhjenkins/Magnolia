@@ -101,6 +101,7 @@ For each hit in the JSON response:
 | `qmd://meetings_recruiting/` | Recruiting Meetings |
 | `qmd://research/` | Research Library |
 | `qmd://product_artifacts/` | Product Artifacts |
+| `qmd://html_artifacts/` | HTML Artifacts (plain-text mirror - cite and open the `source:` .html path) |
 | `qmd://tasks/` | Tasks |
 
 **If `--research` flag is set, skip Steps 3-4 and go to Research Mode below.**
@@ -287,7 +288,7 @@ system-level access for backend operations. No resolution — flagged for platfo
 - `qmd query` is hybrid (BM25 + reranking) but requires LLM models (downloaded on first use).
 - `qmd search` is pure BM25 — always available, no model download needed.
 - `qmd vsearch` requires vector embeddings to be built (`qmd embed`).
-- Collection names: `meetings_product`, `meetings_leadership`, `meetings_general`, `meetings_strategy`, `meetings_recruiting`, `research`, `product_artifacts`, `tasks`
+- Collection names: `meetings_product`, `meetings_leadership`, `meetings_general`, `meetings_strategy`, `meetings_recruiting`, `research`, `product_artifacts`, `html_artifacts`, `tasks`
 
 ---
 
