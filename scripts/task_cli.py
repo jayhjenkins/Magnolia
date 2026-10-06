@@ -95,6 +95,7 @@ def cmd_add(args):
         attachments=[a.strip() for a in (args.attachments or "").split(",") if a.strip()] or None,
         card_type=args.card_type,
         patch_path=args.patch_path,
+        output_format=args.output_format,
     )
     print(f"Created {task_id} in {args.queue} queue")
     print(f"  File: {os.path.relpath(filepath, os.path.dirname(task_lib.TASKS_DIR))}")
@@ -473,6 +474,8 @@ def main():
                        help="Card type for the board renderer (recommendation|graduation|receipt)")
     p_add.add_argument("--patch-path", default=None,
                        help="Path to a .patch file (recommendation cards)")
+    p_add.add_argument("--format", dest="output_format", choices=["md", "html"],
+                       default=None, help="Output artifact format (default md)")
     p_add.set_defaults(func=cmd_add)
 
     # ─── list ────────────────────────────────────────────────────────────

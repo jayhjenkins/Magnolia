@@ -30,6 +30,7 @@ import packs_lib
 import profile_lib
 import harness_lib
 import adaptations_lib
+import html_artifact_lib
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -756,6 +757,24 @@ def _persist_session_id(task_id, claude_session_id):
         log(f"WARN: could not persist session id for {task_id}", task_id=task_id)
 
 
+def apply_output_format(prompt, task_fm, worker):
+    """Append the HTML contract pointer when the task resolves to html."""
+    if html_artifact_lib.resolve_output_format(task_fm, worker) == "html":
+        return prompt + html_artifact_lib.dispatch_block()
+    return prompt
+
+
+def _task_frontmatter(task):
+    """Full on-disk frontmatter for a task; the dispatch dict is only a projection."""
+    try:
+        fm = task_lib.read_task(task.get("id"))["frontmatter"]
+        if isinstance(fm, dict):
+            return {**task, **fm}
+    except Exception:
+        pass
+    return task
+
+
 def dispatch_task(task, dry_run=False, rerun=False, workers=None):
     """Invoke claude in interactive mode for a single task.
 
@@ -809,11 +828,14 @@ def dispatch_task(task, dry_run=False, rerun=False, workers=None):
 
     # ─── Build prompt and tool list from worker ──────────────────────
     if worker and worker.get("prompt_body"):
-        prompt = build_prompt_for_worker(task_id, worker, rerun=rerun)
+        prompt = apply_output_format(
+            build_prompt_for_worker(task_id, worker, rerun=rerun),
+            _task_frontmatter(task), worker)
         tools_str = ",".join(worker.get("allowed_tools", []))
         max_turns = str(worker.get("max_turns", 30))
     else:
-        prompt = build_prompt(task_id, rerun=rerun)
+        prompt = apply_output_format(build_prompt(task_id, rerun=rerun),
+                                     _task_frontmatter(task), worker)
         tools_str = "Bash(*),Read(*),Write(*),Edit(*),WebFetch(*),WebSearch(*),Agent(*),mcp__*"
         max_turns = "30"
 
