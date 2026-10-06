@@ -54,3 +54,20 @@ registry) — there is no per-type hardcoded UI.
 - **Rules:** token-only and ASCII-safe like the rest of the UI; never add an action
   that writes externally here. The subsystem map is
   [`docs/reference/cadence.md`](../../docs/reference/cadence.md).
+
+## HTML artifacts
+
+A task whose `agent_output` is an `.html`/`.htm` file under `datasets/` gets an
+"HTML page / Preview" tile instead of the markdown "Review & edit" tile.
+
+- **Preview:** `js/html-viewer.js` slides an overlay over the left task pane
+  (same takeover slot and chrome as `markdown-editor.js`; chat stays on the right)
+  holding a sandboxed `<iframe>` of `/artifact/<id>`. A 2s poll reloads it when
+  the file changes on disk (chat edits). "Source" swaps in a plain textarea that
+  autosaves through `PUT /api/tasks/<id>/output`. "Open full" opens the page in
+  a new tab.
+- **Isolation:** `/artifact/<id>` is served with `html_artifact_lib.CSP` - a
+  sandbox without `allow-same-origin` and `connect-src 'none'`, so page script
+  can never reach `/api/*`. Never add `allow-same-origin` to the iframe.
+- **Selectors:** the markdown editor's selectors are scoped to
+  `.dt-editor:not(.dt-htmlview)` so the two overlays never touch each other.

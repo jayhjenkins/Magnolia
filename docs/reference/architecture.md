@@ -70,7 +70,9 @@ Recurring jobs live in `datasets/cron/jobs.json` with an atomic counter at `data
 
 A unified task system with four queues. Route work by who acts and whether approval is needed: **human** (decisions, meetings, approvals), **agent** (autonomous research, drafting, analysis), **collab** (an agent acts on an external system but needs human approval first), **waiting** (owed by another person or team). CLI: `./scripts/task.sh add|list|show|update|done|inbox`. Agent-queue subcommands: `agent:start`, `agent:complete --output`, `agent:fail --error`, `agent:ask`. Web UI: `python3 scripts/task_server.py`.
 
-**Canonical source:** `scripts/task.sh`.
+**Output artifacts** are markdown by default. A task can declare `output_format: html` (set with `task add --format html`, or by a human ask that says "as HTML" / "as a page"; a worker may declare a default). HTML tasks get the `context-html-artifact` contract plus the operator's `profile/voice/html.md` visual style at dispatch, render in a sandboxed preview and a full tab at `/artifact/<id>`, are edited in place (chat or source), and are searchable via the `html_artifacts` qmd mirror. All HTML rules live in `scripts/html_artifact_lib.py`.
+
+**Canonical source:** `scripts/task.sh`; `scripts/html_artifact_lib.py` for HTML artifacts.
 
 ## 10. Cadence — the second organ
 
