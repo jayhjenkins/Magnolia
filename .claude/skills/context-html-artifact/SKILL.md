@@ -14,8 +14,12 @@ the page working inside Magnolia.
 ## Must
 - One self-contained `.html` file. All CSS inline in a `<style>` block. Images as
   `data:` URIs or https URLs.
-- External hosts only: fonts.googleapis.com, fonts.gstatic.com, cdn.jsdelivr.net,
-  cdnjs.cloudflare.com, and https images. Anything else is blocked by the viewer.
+- External hosts, by type (this matches the viewer's CSP):
+  - Scripts: cdn.jsdelivr.net, cdnjs.cloudflare.com.
+  - Stylesheets: fonts.googleapis.com only (everything else inline).
+  - Fonts: fonts.gstatic.com or `data:`.
+  - Images: https or `data:`.
+  - Anything else is blocked by the viewer.
 - No network calls from script (fetch, XHR, websockets) - they are blocked.
 - Full-width design that still reads at 640px wide: fluid widths, a
   `@media (max-width: 720px)` pass, no fixed-width canvases.

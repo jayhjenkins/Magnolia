@@ -1,6 +1,6 @@
 ---
 name: context-search
-description: Unified semantic + keyword search across all PM-OS datasets (meetings, research, product artifacts, tasks). Use when you need to find relevant context across collections without knowing which dataset contains it.
+description: Unified semantic + keyword search across all PM-OS datasets (meetings, research, product artifacts, HTML pages such as roadmaps and pre-reads, tasks). Use when you need to find relevant context across collections without knowing which dataset contains it.
 allowed-tools: Bash, Read, mcp__qmd__query, mcp__qmd__get, mcp__qmd__multi_get
 ---
 
