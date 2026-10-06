@@ -63,9 +63,12 @@ A task whose `agent_output` is an `.html`/`.htm` file under `datasets/` gets an
 - **Preview:** `js/html-viewer.js` slides an overlay over the left task pane
   (same takeover slot and chrome as `markdown-editor.js`; chat stays on the right)
   holding a sandboxed `<iframe>` of `/artifact/<id>`. A 2s poll reloads it when
-  the file changes on disk (chat edits). "Source" swaps in a plain textarea that
-  autosaves through `PUT /api/tasks/<id>/output`. "Open full" opens the page in
-  a new tab.
+  the file changes on disk (chat edits). The bar works with the file itself:
+  "Open folder" reveals it selected in Finder/Explorer (`POST
+  /api/tasks/<id>/output/reveal`, ready to drag into Teams or email), "Open full"
+  opens it from disk in the default browser (`.../output/open`), and "Copy link"
+  copies its `file://` URL (`file_url` on `GET .../output`). Edits happen through
+  the chat or the operator's own editor - there is no in-board source editor.
 - **Isolation:** `/artifact/<id>` is served with `html_artifact_lib.CSP` - a
   sandbox without `allow-same-origin` and `connect-src 'none'`, so page script
   can never reach `/api/*`. Never add `allow-same-origin` to the iframe.

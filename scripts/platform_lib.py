@@ -183,6 +183,19 @@ def open_file_cmd(path):
     return ["xdg-open", path]
 
 
+def reveal_file_cmd(path):
+    """OS-correct argv to show a file selected in the file manager.
+
+    macOS and Windows select the file itself; Linux has no portable "select",
+    so it opens the containing folder."""
+    kind = os_kind()
+    if kind == "darwin":
+        return ["open", "-R", path]
+    if kind == "windows":
+        return ["explorer", f"/select,{path}"]
+    return ["xdg-open", os.path.dirname(path)]
+
+
 def process_group_kwargs():
     """Popen kwargs giving the child its own killable process group."""
     if os_kind() == "windows":

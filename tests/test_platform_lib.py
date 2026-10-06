@@ -255,3 +255,20 @@ def test_headless_harness_env_codex(monkeypatch):
     # Delegates to headless_codex_env -> strips CODEX vars
     assert "CODEX_X" not in env
     assert env["FOO"] == "keep"
+
+
+# --- reveal_file_cmd: show a file selected in the OS file manager ---
+
+def test_reveal_file_cmd_darwin(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "darwin")
+    assert platform_lib.reveal_file_cmd("/x/y.html") == ["open", "-R", "/x/y.html"]
+
+
+def test_reveal_file_cmd_windows(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    assert platform_lib.reveal_file_cmd("C:\\x\\y.html") == ["explorer", "/select,C:\\x\\y.html"]
+
+
+def test_reveal_file_cmd_linux_opens_parent(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "linux")
+    assert platform_lib.reveal_file_cmd("/x/y.html") == ["xdg-open", "/x"]
