@@ -285,3 +285,17 @@ def test_model_posture_workers_include_resolved_model(profile_root, monkeypatch)
     w = p["model_posture"]["workers"][0]
     assert w["tier"] == "deep"
     assert w["model"] == "opus"   # deep @ balanced
+
+
+def test_apply_voice_accepts_html_channel(profile_root):
+    import task_server, profile_lib
+    st, _ = task_server.apply_profile_voice({"html": "no pills"}, root=profile_root)
+    assert st == 200
+    assert profile_lib.voice_text("html", root=profile_root) == "no pills"
+    assert "no pills" not in profile_lib.voice_text(root=profile_root)   # messages voice unaffected
+
+
+def test_build_profile_exposes_html_voice(profile_root):
+    import task_server, profile_lib
+    profile_lib.write_voice("html", "palette", root=profile_root)
+    assert task_server.build_profile(profile_root)["voice"]["html"] == "palette"

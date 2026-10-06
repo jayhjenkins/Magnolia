@@ -190,8 +190,9 @@ async function pfSaveJiraCreds() {
 }
 
 /* ── 3 · Voice ────────────────────────────────────────────────────────── */
-// Two stacked editors — Teams voice, then Email voice — each with the big-field
-// real estate. Saves both together as {teams, email}. Mirrors the split that
+// Three stacked editors — Teams voice, Email voice, then Visual style (the
+// design guidance for HTML artifacts) — each with the big-field real estate.
+// Saves all three together as {teams, email, html}. Mirrors the split that
 // the backend and the onboarding flow keep.
 function _pfVoice(voice) {
   return `<section class="pf-section">
@@ -205,16 +206,24 @@ function _pfVoice(voice) {
     <p class="pf-voice-intro">Magnolia writes your email as you. Edit this like a note to a new assistant; the more you tell it, the more every draft sounds like you on the first pass.</p>
     <textarea class="pf-textarea pf-voice-text" id="pf-voice-email">${escapeHtml(voice.email || '')}</textarea>
     <div class="pf-actions"><button class="btn btn-primary" onclick="pfSaveVoice()">Save voice</button><button class="pf-regen" onclick="pfRegen('email')">${svgIcon('cron')}Regenerate from history</button><span class="pf-saved" id="pf-saved-voice-email">Saved</span></div>
+  </section>
+  <section class="pf-section">
+    <div class="pf-section-head"><span class="pf-section-title">Visual style</span><span class="pf-section-hint">How your HTML pages look</span></div>
+    <p class="pf-voice-intro">Magnolia builds HTML pages to this. Palette, layout, components, and what never to do.</p>
+    <textarea class="pf-textarea pf-voice-text" id="pf-voice-html">${escapeHtml(voice.html || '')}</textarea>
+    <div class="pf-actions"><button class="btn btn-primary" onclick="pfSaveVoice()">Save voice</button><span class="pf-saved" id="pf-saved-voice-html">Saved</span></div>
   </section>`;
 }
 
 async function pfSaveVoice() {
   const teams = document.getElementById('pf-voice-teams').value;
   const email = document.getElementById('pf-voice-email').value;
-  await fetch(`${API}/profile/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ teams, email }) });
-  _profile.voice = { teams, email };
+  const html = document.getElementById('pf-voice-html').value;
+  await fetch(`${API}/profile/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ teams, email, html }) });
+  _profile.voice = { teams, email, html };
   _flashSaved('pf-saved-voice-teams');
   _flashSaved('pf-saved-voice-email');
+  _flashSaved('pf-saved-voice-html');
 }
 
 function pfRegen(which) {

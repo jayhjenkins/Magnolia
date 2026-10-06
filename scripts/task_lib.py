@@ -19,6 +19,7 @@ from ruamel.yaml import YAML
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import platform_lib  # cross-platform file locking (replaces Unix-only fcntl)
+import html_artifact_lib
 
 # ─── Load LangFuse env vars if not already set ───────────────────────────────
 _PM_OS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -195,7 +196,8 @@ def create_task(title, queue="human", priority="medium", domain=None,
                 meeting_description=None, message_channel=None,
                 message_to=None, message_subject=None, message_body=None,
                 attachments=None,
-                card_type=None, patch_path=None, proposal=None):
+                card_type=None, patch_path=None, proposal=None,
+                output_format=None):
     """Create a new task file in the appropriate queue directory.
 
     Returns (task_id, filepath).
@@ -209,6 +211,9 @@ def create_task(title, queue="human", priority="medium", domain=None,
         raise ValueError(f"Priority must be one of: {PRIORITIES}")
     if domain and domain not in DOMAINS:
         raise ValueError(f"Domain must be one of: {DOMAINS}")
+    output_format = output_format or None  # "" means unset
+    if output_format not in (None,) + html_artifact_lib.FORMATS:
+        raise ValueError(f"output_format must be one of: {html_artifact_lib.FORMATS}")
 
     task_id = _next_id()
     now = _now_iso()
@@ -253,6 +258,14 @@ def create_task(title, queue="human", priority="medium", domain=None,
         # A structured mutation spec carried on a recommendation card; the accept
         # handler (cadence-propose-update) reads fm["proposal"] to apply it.
         frontmatter["proposal"] = proposal
+    # Absent means md. An explicit value always wins; phrase detection ("as HTML")
+    # only applies when creator == "human" (the CLI default and board quick-add);
+    # tasks created with creator="agent" or "cadence" never auto-detect.
+    fmt = output_format
+    if fmt is None and creator == "human":
+        fmt = html_artifact_lib.detect_output_format(title, description)
+    if fmt:
+        frontmatter["output_format"] = fmt
 
     # Add waiting metadata if applicable
     if queue == "waiting":

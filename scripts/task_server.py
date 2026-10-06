@@ -40,6 +40,7 @@ import ladder_lib
 import cron_lib
 import program_lib
 import jira_publish
+import html_artifact_lib
 import profile_lib
 import packs_lib
 import platform_lib
@@ -216,19 +217,26 @@ def _discard_request_body(handler):
         handler.close_connection = True
 
 
-def _resolve_output_path(rel):
-    """Resolve a task's agent_output to an absolute .md path inside PM_OS_DIR.
+def _resolve_output_path(rel, allow_html=False):
+    """Resolve a task's agent_output to an absolute path inside PM_OS_DIR.
 
-    Returns the absolute path, or None when there is no path, it is not a .md
-    file, or it would escape PM_OS_DIR (path-traversal guard). Mirrors
-    handle_open_file's PM_OS_DIR resolution, plus the containment check.
+    Accepts .md paths always, and .html/.htm paths only when allow_html=True
+    (the inline editor and the /artifact page; Word stays markdown-only).
+    HTML is further confined to PM_OS_DIR/datasets/ so an agent_output can
+    never point the editor or /artifact at the board's own UI files.
+    Returns the absolute path, or None when there is no path, it is not an
+    accepted file type, or it would escape PM_OS_DIR (path-traversal guard).
+    Mirrors handle_open_file's PM_OS_DIR resolution, plus the containment check.
     """
     rel = (rel or "").strip()
-    if not rel or not rel.endswith(".md"):
+    is_html = allow_html and html_artifact_lib.is_html_path(rel)
+    if not rel or not (rel.endswith(".md") or is_html):
         return None
     base = os.path.realpath(PM_OS_DIR)
     candidate = os.path.realpath(rel if os.path.isabs(rel) else os.path.join(base, rel))
     if candidate != base and not candidate.startswith(base + os.sep):
+        return None
+    if is_html and not _under_datasets(candidate):
         return None
     return candidate
 
@@ -575,6 +583,7 @@ def build_profile(root=None):
     voice = {
         "teams": profile_lib.voice_text("teams", root),
         "email": profile_lib.voice_text("email", root),
+        "html": profile_lib.voice_text("html", root),
     }
 
     packs = {
@@ -648,7 +657,7 @@ def workers_payload(posture=None):
 # They own validation (path-traversal guards against the un-sanitizing profile_lib
 # setters) BEFORE persisting. The thin handle_* wrappers read the body and emit.
 
-_VOICE_CHANNELS = {"teams", "email"}
+_VOICE_CHANNELS = {"teams", "email", "html"}
 _INTEGRATION_CATEGORIES = set(_INTEGRATION_SOURCE_KEY)   # transcripts/project_management/calendar
 _MODEL_POSTURE_LEVELS = {"low", "balanced", "high"}
 
@@ -667,8 +676,9 @@ def apply_profile_identity(payload, root=None):
 
 
 def apply_profile_voice(payload, root=None):
-    """Write voice channel file(s). Channel keys validated against {teams, email}
-    BEFORE any write (path-traversal guard); reject unknown -> 400, write nothing."""
+    """Write voice channel file(s). Channel keys validated against {teams, email,
+    html} BEFORE any write (path-traversal guard); reject unknown -> 400, write
+    nothing. 'html' is the Visual style channel (design guidance for HTML artifacts)."""
     channels = payload
     if not channels:
         return 400, {"error": "No voice channels provided"}
@@ -751,7 +761,7 @@ def handle_profile_identity(handler):
 
 
 def handle_profile_voice(handler):
-    """PUT /api/profile/voice — body {teams?, email?}."""
+    """PUT /api/profile/voice — body {teams?, email?, html?} (html = Visual style)."""
     try:
         body = _read_request_body(handler)
     except (json.JSONDecodeError, ValueError) as e:
@@ -860,7 +870,11 @@ def handle_get_task(handler, task_id):
 
 
 def handle_get_output(handler, task_id):
-    """GET /api/tasks/{id}/output — return the task's .md artifact for inline editing."""
+    """GET /api/tasks/{id}/output - return the task's .md or .html artifact for inline editing.
+
+    `format` is "html" for .html/.htm outputs, else "markdown". `word` (Word
+    publish status) is attached only for markdown outputs under datasets/.
+    """
     try:
         task_data = task_lib.read_task(task_id)
     except FileNotFoundError:
@@ -871,10 +885,11 @@ def handle_get_output(handler, task_id):
         return
 
     rel = str(task_data["frontmatter"].get("agent_output") or "")
-    filepath = _resolve_output_path(rel)
+    filepath = _resolve_output_path(rel, allow_html=True)
     if filepath is None:
-        _error_response(handler, "Task has no editable markdown output", status=404)
+        _error_response(handler, "Task has no editable output", status=404)
         return
+    fmt = "html" if html_artifact_lib.is_html_path(rel) else "markdown"
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
@@ -883,18 +898,53 @@ def handle_get_output(handler, task_id):
         # yet (e.g. an agent stamped agent_output without producing the file).
         # Return the path so the client can title the doc and show an honest
         # "not found" state, rather than 404ing into a silent blank editor.
-        resp = {"path": rel.strip(), "format": "markdown", "content": "", "exists": False}
-        if _under_datasets(filepath):
+        resp = {"path": rel.strip(), "format": fmt, "content": "", "exists": False}
+        if fmt == "markdown" and _under_datasets(filepath):
             resp["word"] = doc_sync.word_status(filepath)
         _json_response(handler, resp)
         return
     except Exception as e:
         _error_response(handler, f"Failed to read output: {e}", status=500)
         return
-    resp = {"path": rel.strip(), "format": "markdown", "content": content, "exists": True}
-    if _under_datasets(filepath):  # only datasets/ outputs are publishable to Word
+    resp = {"path": rel.strip(), "format": fmt, "content": content, "exists": True}
+    if fmt == "markdown" and _under_datasets(filepath):  # only datasets/ markdown publishes to Word
         resp["word"] = doc_sync.word_status(filepath)
     _json_response(handler, resp)
+
+
+def handle_artifact_page(handler, task_id):
+    """GET /artifact/<id> - the task's .html output as a standalone page.
+
+    Only .html/.htm under datasets/. Sent with a sandbox CSP (html_artifact_lib.CSP)
+    so the page gets an opaque origin and no network access to the board API."""
+    try:
+        task_data = task_lib.read_task(task_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Failed to read task: {e}", status=500)
+        return
+    rel = str(task_data["frontmatter"].get("agent_output") or "")
+    filepath = _resolve_output_path(rel, allow_html=True)
+    # _resolve_output_path confines HTML to datasets/; .md is refused here.
+    if (filepath is None or not html_artifact_lib.is_html_path(rel)
+            or not os.path.isfile(filepath)):
+        _error_response(handler, "Task has no HTML page", status=404)
+        return
+    try:
+        with open(filepath, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        _error_response(handler, f"Failed to read page: {e}", status=500)
+        return
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("Content-Security-Policy", html_artifact_lib.CSP)
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(data)
 
 
 WORD_CONFIRM_MESSAGE = (
@@ -1047,7 +1097,7 @@ def _utc_now_iso():
 
 
 def handle_save_output(handler, task_id):
-    """PUT /api/tasks/{id}/output — persist edited markdown back to the artifact file."""
+    """PUT /api/tasks/{id}/output - persist edited markdown or HTML back to the artifact file."""
     try:
         task_data = task_lib.read_task(task_id)
     except FileNotFoundError:
@@ -1058,9 +1108,9 @@ def handle_save_output(handler, task_id):
         return
 
     rel = str(task_data["frontmatter"].get("agent_output") or "")
-    filepath = _resolve_output_path(rel)
+    filepath = _resolve_output_path(rel, allow_html=True)
     if filepath is None:
-        _error_response(handler, "Task has no editable markdown output", status=404)
+        _error_response(handler, "Task has no editable output", status=404)
         return
     try:
         body = _read_request_body(handler)
@@ -3684,6 +3734,18 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/onboarding/run" and method == "POST":
             handle_onboarding_run(self)
+            return True
+
+        # ─── HTML artifact page ────────────────────────────────────────
+        # GET /artifact/<id> - a task's .html output, sandboxed (own CSP).
+        # `path` is already query-stripped, so /artifact/<id>?t=... matches.
+        match = re.match(r"^/artifact/([^/?]+)$", path)
+        if match and method == "GET":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_artifact_page(self, task_id)
             return True
 
         # ─── Task trace routes ─────────────────────────────────────────

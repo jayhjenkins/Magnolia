@@ -1,0 +1,55 @@
+/* html-viewer.css - inline preview for HTML page outputs.
+   Token-only (tracks every Mood, invariant #3). The overlay itself, its bar,
+   back button, doc name and save indicator all come from markdown-editor.css
+   (.dt-editor / .dte-*); this file only adds the bar buttons, the iframe /
+   source body, and the honest empty state. */
+
+/* Body: the sandboxed page, or the raw source while editing. */
+.dt-htmlview .dth-body {
+  flex: 1; min-height: 0; display: flex; position: relative;
+}
+.dt-htmlview .dth-frame {
+  flex: 1; width: 100%; height: 100%; border: 0; display: block;
+  /* The page paints its own background; this only shows before it loads. */
+  background: var(--surface);
+}
+.dt-htmlview .dth-source {
+  flex: 1; width: 100%; height: 100%; box-sizing: border-box;
+  resize: none; border: 0; outline: none; padding: 16px;
+  font-size: 12.5px; line-height: 1.55;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--text); background: var(--surface);
+  tab-size: 2;
+}
+.dt-htmlview .dth-frame[hidden],
+.dt-htmlview .dth-source[hidden],
+.dt-htmlview .dte-save[hidden] { display: none; }
+
+/* Honest message when the page can't be shown. */
+.dt-htmlview .dth-empty {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 0 32px; text-align: center;
+  font-size: 13.5px; color: var(--text-muted); font-style: italic;
+}
+
+/* Bar actions - Source toggle, Open full, Copy path. Same quiet vocabulary
+   as the editor's tool buttons. */
+.dt-htmlview .dth-actions {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+}
+.dt-htmlview .dth-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 28px; padding: 0 10px; box-sizing: border-box;
+  background: transparent; border: 1px solid var(--border-soft); border-radius: var(--r-btn);
+  color: var(--text-muted); cursor: pointer; font-family: inherit;
+  font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap;
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+}
+.dt-htmlview .dth-btn:hover { background: var(--surface-hover); color: var(--text); }
+.dt-htmlview .dth-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dt-htmlview .dth-btn[aria-pressed="true"] {
+  background: var(--accent-soft); color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+}
+.dt-htmlview .dth-btn:disabled { cursor: default; opacity: .5; }
+.dt-htmlview .dth-btn:disabled:hover { background: transparent; color: var(--text-muted); }

@@ -12,6 +12,9 @@ logs/*
 # Keep folder structure but ignore content files in datasets
 # This allows team members to clone the skeleton without your specific data
 
+# qmd's plain-text mirror of HTML artifacts (rebuilt nightly by html_text_mirror.py)
+datasets/.qmd-html/
+
 # Product folder: keep structure and templates, ignore everything else
 datasets/product/*
 !datasets/product/.gitkeep

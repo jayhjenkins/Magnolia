@@ -13,13 +13,14 @@ class _FakeHandler:
         self.headers = {"Content-Length": str(len(self._body))}
         self.status = None
         self._chunks = []
+        self.headers_out = []  # list of (name, value): duplicates stay visible
 
     @property
     def rfile(self):
         return io.BytesIO(self._body)
 
     def send_response(self, s): self.status = s
-    def send_header(self, *a): pass
+    def send_header(self, k, v): self.headers_out.append((k, v))
     def end_headers(self): pass
     @property
     def wfile(self): return self
@@ -159,3 +160,68 @@ def test_output_routes_registered_before_generic_get():
     out_idx = src.index('/api/tasks/([^/]+)/output$')
     generic_idx = src.index('^/api/tasks/([^/]+)$')
     assert out_idx < generic_idx, "output route must be matched before the generic task GET"
+
+
+def test_resolve_output_path_html_opt_in(srv):
+    assert srv._resolve_output_path("datasets/product/x.html") is None          # default md-only
+    got = srv._resolve_output_path("datasets/product/x.html", allow_html=True)
+    assert got is not None and got.endswith("x.html")
+    assert srv._resolve_output_path("../../etc/x.html", allow_html=True) is None
+
+
+def test_get_output_html_returns_format_html(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    h = _FakeHandler()
+    srv.handle_get_output(h, tid)
+    body = h.json()
+    assert h.status == 200 and body["format"] == "html" and body["content"] == "<h1>Hi</h1>"
+    assert "word" not in body
+
+
+def test_put_output_html_saves_in_place(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    srv.handle_save_output(_FakeHandler({"content": "<h1>Bye</h1>"}), tid)
+    with open(os.path.join(tasks_root, "datasets/product/p.html"), encoding="utf-8") as f:
+        assert f.read() == "<h1>Bye</h1>"
+
+
+def test_publish_word_still_rejects_html(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    h = _FakeHandler({"confirm": False})
+    srv.handle_publish_word(h, tid)
+    assert h.status == 404
+
+
+def test_resolve_output_path_html_confined_to_datasets(srv):
+    assert srv._resolve_output_path("scratch/x.html", allow_html=True) is None
+    assert srv._resolve_output_path("ui/task-board/index.html", allow_html=True) is None
+    # Markdown keeps its existing reach (Word/editor behaviour unchanged).
+    assert srv._resolve_output_path("scratch/x.md") is not None
+
+
+def test_get_output_html_outside_datasets_404(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "ui/task-board/x.html", "<h1>board</h1>")
+    h = _FakeHandler()
+    srv.handle_get_output(h, tid)
+    assert h.status == 404
+
+
+def test_put_output_html_outside_datasets_404_file_untouched(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "ui/task-board/x.html", "<h1>board</h1>")
+    h = _FakeHandler({"content": "<script>pwn()</script>"})
+    srv.handle_save_output(h, tid)
+    assert h.status == 404
+    with open(os.path.join(tasks_root, "ui/task-board/x.html"), encoding="utf-8") as f:
+        assert f.read() == "<h1>board</h1>"
+
+
+def test_get_output_html_missing_file_exists_false(srv, tasks_root):
+    import task_lib
+    tid, _ = task_lib.create_task("Ghost page", queue="agent")
+    task_lib.update_task(tid, changes={"agent_output": "datasets/product/ghost.html"})
+    h = _FakeHandler()
+    srv.handle_get_output(h, tid)
+    assert h.status == 200
+    body = h.json()
+    assert body["exists"] is False and body["format"] == "html" and body["content"] == ""
+    assert "word" not in body
