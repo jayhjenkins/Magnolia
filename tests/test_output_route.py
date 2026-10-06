@@ -225,3 +225,46 @@ def test_get_output_html_missing_file_exists_false(srv, tasks_root):
     body = h.json()
     assert body["exists"] is False and body["format"] == "html" and body["content"] == ""
     assert "word" not in body
+
+
+# --- file_url + reveal/open for HTML pages ---
+
+def test_get_output_html_includes_file_url(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    h = _FakeHandler()
+    srv.handle_get_output(h, tid)
+    url = h.json()["file_url"]
+    assert url.startswith("file:///") and url.endswith("datasets/product/p.html")
+
+
+def test_get_output_markdown_has_no_file_url(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/n.md", "# x")
+    h = _FakeHandler()
+    srv.handle_get_output(h, tid)
+    assert "file_url" not in h.json()
+
+
+@pytest.mark.parametrize("action,builder", [("reveal", "reveal_file_cmd"), ("open", "open_file_cmd")])
+def test_output_file_action_runs_os_command(srv, tasks_root, monkeypatch, action, builder):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    calls = []
+    monkeypatch.setattr(srv.platform_lib, builder, lambda p: ["CMD", p])
+    monkeypatch.setattr(srv.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    h = _FakeHandler()
+    srv.handle_output_file_action(h, tid, action)
+    assert h.status == 204
+    assert calls and calls[0][0] == "CMD" and calls[0][1].endswith("datasets/product/p.html")
+
+
+def test_output_file_action_refuses_missing_or_outside(srv, tasks_root, monkeypatch):
+    calls = []
+    monkeypatch.setattr(srv.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    out = _seed_task_with_output(tasks_root, "scratch/p.html", "<h1>x</h1>")
+    import task_lib
+    missing, _ = task_lib.create_task("x", queue="agent")
+    task_lib.update_task(missing, changes={"agent_output": "datasets/product/none.html"})
+    for tid in (out, missing):
+        h = _FakeHandler()
+        srv.handle_output_file_action(h, tid, "reveal")
+        assert h.status == 404
+    assert calls == []

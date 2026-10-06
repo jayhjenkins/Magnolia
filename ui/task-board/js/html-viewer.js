@@ -1,12 +1,16 @@
-// html-viewer.js - inline preview (and light source edit) for HTML page outputs.
+// html-viewer.js - inline preview for HTML page outputs.
 //
 // The HTML sibling of markdown-editor.js. When a task's output is an .html page,
 // the "Preview" tile in the task detail pane slides this overlay in over the
 // LEFT pane of the split workspace (chat stays on the right). The page renders
 // in a sandboxed iframe served by GET /artifact/<id> (opaque origin, no network).
-// A "Source" toggle swaps in a plain textarea that autosaves (debounced) through
-// PUT /api/tasks/:id/output. While open, a light poll picks up edits the chat
-// makes to the file on disk and reloads the preview.
+// While open, a light poll picks up edits the chat makes to the file on disk and
+// reloads the preview.
+//
+// The bar works with the file itself, for sharing: "Open folder" reveals it in
+// the OS file manager (selected, ready to drag into Teams or an email), "Open
+// full" opens it in the default browser straight from disk, and "Copy link"
+// copies its file:// URL.
 //
 // It reuses the markdown editor's overlay chrome (.dt-editor / .dte-* classes,
 // is-open / is-closing, has-editor on the pane) so both read as one system.
@@ -16,21 +20,13 @@
 
 (function () {
   const POLL_MS = 2000;
-  const SAVE_DEBOUNCE_MS = 750;
 
   let viewTaskId = null;   // task whose page is open
   let viewGen = 0;         // bumps on every open/teardown; stale async work checks it
-  let lastContent = '';    // last known on-disk content (fetched or saved)
-  let docPath = '';
-  let mode = 'preview';    // 'preview' | 'source'
-  let pageExists = false;
+  let lastContent = '';    // last known on-disk content
+  let fileUrl = '';        // file:// URL of the page on disk
   let pollTimer = null;
   let pollBusy = false;
-  let saveTimer = null;
-  let saving = false;
-  let saveGen = 0;         // bumps when a PUT starts; polls begun earlier are discarded
-  let lastPersist = null;  // promise of the latest close-time snapshot save
-  let knownDisk = null;    // {taskId, content} last known on disk (outlives the viewer)
 
   function q(sel) { return document.querySelector('.dt-htmlview ' + sel); }
   function artifactSrc(taskId) {
@@ -38,10 +34,9 @@
   }
 
   // -- Overlay --
-  function buildOverlay(taskPane, taskId) {
+  function buildOverlay(taskPane) {
     const ov = document.createElement('div');
     ov.className = 'dt-editor dt-htmlview';
-    const href = '/artifact/' + encodeURIComponent(taskId);
     ov.innerHTML = `
       <div class="dte-bar">
         <button class="dte-back" type="button" aria-label="Back to task">
@@ -53,14 +48,10 @@
           <span class="dte-doc-name"></span>
         </div>
         <div class="dte-spacer"></div>
-        <span class="dte-save" data-state="saved" hidden>
-          <span class="dte-save-dot"></span>
-          <span class="dte-save-text">Saved</span>
-        </span>
         <div class="dth-actions">
-          <button class="dth-btn dth-toggle" type="button" aria-pressed="false" disabled>Source</button>
-          <a class="dth-btn dth-full" target="_blank" rel="noopener" href="${escapeHtml(href)}">Open full</a>
-          <button class="dth-btn dth-copy" type="button">Copy link</button>
+          <button class="dth-btn dth-folder" type="button" disabled>Open folder</button>
+          <button class="dth-btn dth-full" type="button" disabled>Open full</button>
+          <button class="dth-btn dth-copy" type="button" disabled>Copy link</button>
         </div>
       </div>
       <div class="dth-body">
@@ -68,38 +59,24 @@
       </div>`;
     taskPane.appendChild(ov);
     ov.querySelector('.dte-back').addEventListener('click', closeHtmlViewer);
-    ov.querySelector('.dth-toggle').addEventListener('click', toggleMode);
+    ov.querySelector('.dth-folder').addEventListener('click', () => fileAction('reveal'));
+    ov.querySelector('.dth-full').addEventListener('click', () => fileAction('open'));
     ov.querySelector('.dth-copy').addEventListener('click', copyLink);
     return ov;
-  }
-
-  function setSaveState(state) {
-    const el = q('.dte-save');
-    if (!el) return;
-    el.dataset.state = state;
-    const text = { saved: 'Saved', saving: 'Saving...', editing: 'Editing...', error: 'Save failed' }[state] || 'Saved';
-    el.querySelector('.dte-save-text').textContent = text;
   }
 
   function showMessage(body, msg) {
     body.innerHTML = `<div class="dth-empty">${escapeHtml(msg)}</div>`;
   }
 
-  function mountBody(body, taskId) {
+  function mountFrame(body, taskId) {
     body.innerHTML = '';
     const frame = document.createElement('iframe');
     frame.className = 'dth-frame';
     frame.title = 'HTML page preview';
     frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
     frame.src = artifactSrc(taskId);
-    const ta = document.createElement('textarea');
-    ta.className = 'dth-source';
-    ta.spellcheck = false;
-    ta.hidden = true;
-    ta.setAttribute('aria-label', 'HTML source');
-    ta.addEventListener('input', scheduleSave);
     body.appendChild(frame);
-    body.appendChild(ta);
   }
 
   function reloadFrame() {
@@ -111,31 +88,16 @@
   async function openHtmlViewer(taskId) {
     const taskPane = document.querySelector('#split-modal .task-pane');
     if (!taskPane || !taskId) return;
-    // Re-entrant-safe: snapshot any unsaved source edit, drop the previous
-    // viewer (and its poll), then persist the snapshot before we fetch.
-    let pending = null;
-    if (viewTaskId || document.querySelector('.dt-htmlview')) {
-      const snap = snapshot();
-      destroyViewer();
-      pending = persistSnapshot(snap);
-    } else if (lastPersist) {
-      // A just-closed viewer may still be saving - wait so we never fetch stale.
-      pending = lastPersist;
-    }
+    if (viewTaskId || document.querySelector('.dt-htmlview')) destroyViewer();
     const gen = ++viewGen;
     viewTaskId = taskId;
-    mode = 'preview';
-    pageExists = false;
     lastContent = '';
-    docPath = '';
+    fileUrl = '';
 
-    const ov = buildOverlay(taskPane, taskId);
+    const ov = buildOverlay(taskPane);
     taskPane.classList.add('has-editor');
     void ov.offsetWidth; // commit hidden baseline
     requestAnimationFrame(() => { if (gen === viewGen) ov.classList.add('is-open'); });
-
-    if (pending) await pending;
-    if (gen !== viewGen) return;
 
     let data = null, ok = false;
     try {
@@ -144,222 +106,46 @@
     } catch (_) {}
     if (gen !== viewGen) return;
 
-    docPath = (data && data.path) || '';
+    const docPath = (data && data.path) || '';
     ov.querySelector('.dte-doc-name').textContent = docPath ? docPath.split('/').pop() : 'page.html';
     const body = ov.querySelector('.dth-body');
 
     if (!ok || !data || data.format !== 'html') { showMessage(body, "Couldn't open this page."); return; }
     if (data.exists === false) { showMessage(body, "This page hasn't been written yet."); return; }
 
-    pageExists = true;
-    setKnown(taskId, data.content || '');
-    mountBody(body, taskId);
-    ov.querySelector('.dth-toggle').disabled = false;
+    lastContent = data.content || '';
+    fileUrl = data.file_url || '';
+    ov.querySelectorAll('.dth-btn').forEach(b => { b.disabled = false; });
+    if (!fileUrl) ov.querySelector('.dth-copy').disabled = true;
+    mountFrame(body, taskId);
     startPoll(gen);
   }
 
-  // -- Source mode + autosave --
-  async function toggleMode() {
-    if (!viewTaskId || !pageExists) return;
-    const frame = q('.dth-frame');
-    const ta = q('.dth-source');
-    const btn = q('.dth-toggle');
-    const save = q('.dte-save');
-    if (!frame || !ta || !btn) return;
-    if (mode === 'preview') {
-      mode = 'source';
-      ta.value = lastContent;
-      frame.hidden = true;
-      ta.hidden = false;
-      if (save) { save.hidden = false; setSaveState('saved'); }
-      btn.textContent = 'Preview';
-      btn.setAttribute('aria-pressed', 'true');
-      ta.focus();
-    } else {
-      const gen = viewGen;
-      btn.disabled = true;
-      ta.readOnly = true;   // freeze input while we persist
-      let saved = await settleSave();
-      if (gen !== viewGen) return;
-      if (saved) {
-        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-        // Anything that landed after the snapshot gets one more save.
-        if (ta.value !== lastContent) {
-          saved = await settleSave();
-          if (gen !== viewGen) return;
-        }
-      }
-      btn.disabled = false;
-      ta.readOnly = false;
-      // Save failed (already toasted): stay in source so the edit isn't lost.
-      if (!saved) return;
-      mode = 'preview';
-      ta.hidden = true;
-      frame.hidden = false;
-      if (save) save.hidden = true;
-      btn.textContent = 'Source';
-      btn.setAttribute('aria-pressed', 'false');
-      reloadFrame();
-    }
-  }
-
-  // Last content known to be on disk for a task (fetched, polled or saved).
-  // Outlives the viewer so a close-time snapshot can tell if it still differs.
-  function setKnown(taskId, content) {
-    knownDisk = { taskId, content };
-    if (viewTaskId === taskId) lastContent = content;
-  }
-
-  // {taskId, content} of the source textarea, or null when not editing source.
-  function snapshot() {
-    const ta = q('.dth-source');
-    if (!viewTaskId || !ta || mode !== 'source') return null;
-    return { taskId: viewTaskId, content: ta.value };
-  }
-
-  function scheduleSave() {
-    setSaveState('editing');
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
-  }
-
-  function waitIdle() {
-    return new Promise(resolve => {
-      let i = 0;
-      (function tick() {
-        if (!saving) return resolve(true);
-        if (++i > 200) return resolve(false);   // ~10s
-        setTimeout(tick, 50);
-      })();
-    });
-  }
-
-  // The one PUT. Caller guarantees no save is in flight. Takes explicit
-  // (taskId, content) so it is safe after the viewer is torn down.
-  async function putContent(taskId, content) {
-    const live = () => viewTaskId === taskId;
-    if (live()) setSaveState('saving');
-    saving = true;
-    saveGen++;
-    let ok = false;
+  // -- File actions: reveal in the file manager / open in the default browser --
+  async function fileAction(action) {
+    if (!viewTaskId) return;
     try {
-      const res = await fetch(`${API}/tasks/${encodeURIComponent(taskId)}/output`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      });
+      const res = await fetch(`${API}/tasks/${encodeURIComponent(viewTaskId)}/output/${action}`, { method: 'POST' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setKnown(taskId, content);
-      ok = true;
-      return true;
-    } catch (e) {
-      if (live()) setSaveState('error');
-      if (typeof toast === 'function') toast('Couldn\'t save your latest edit - please try again.');
-      return false;
-    } finally {
-      saving = false;
-      saveGen++;
-      if (ok && live()) {
-        // Edits typed while this PUT was in flight: queue another save.
-        const ta = q('.dth-source');
-        if (mode === 'source' && ta && ta.value !== lastContent) scheduleSave();
-        else if (!saveTimer) setSaveState('saved');
-      }
-    }
-  }
-
-  // Debounced save from the live textarea. true = persisted (or nothing to
-  // save), false = failed / no viewer, null = a PUT is in flight (the in-flight
-  // PUT reschedules on completion, see putContent's finally).
-  async function flushSave() {
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-    const snap = snapshot();
-    if (!snap) return !!viewTaskId;
-    if (saving) return null;
-    if (snap.content === lastContent) { setSaveState('saved'); return true; }
-    return putContent(snap.taskId, snap.content);
-  }
-
-  // Wait out any in-flight PUT, then persist the live textarea.
-  async function settleSave() {
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-    if (!(await waitIdle())) {
-      if (typeof toast === 'function') toast('Couldn\'t save - still editing source');
-      return false;
-    }
-    const snap = snapshot();
-    if (!snap) return false;
-    if (snap.content === lastContent) { setSaveState('saved'); return true; }
-    return putContent(snap.taskId, snap.content);
-  }
-
-  function trackPersist(p) {
-    const tracked = p.catch(() => false).finally(() => { if (lastPersist === tracked) lastPersist = null; });
-    lastPersist = tracked;
-    return tracked;
-  }
-
-  // Persist a snapshot taken before teardown: wait out any in-flight PUT,
-  // then PUT the snapshot if it still differs from what's known on disk.
-  async function persistSnapshot(snap) {
-    if (!snap) return true;
-    if (!(await waitIdle())) {
-      if (typeof toast === 'function') toast('Couldn\'t save your latest edit - please try again.');
-      return false;
-    }
-    if (knownDisk && knownDisk.taskId === snap.taskId && knownDisk.content === snap.content) return true;
-    return putContent(snap.taskId, snap.content);
-  }
-
-  // -- Live reload (chat edits the file in place) --
-  function startPoll(gen) {
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => pollOnce(gen), POLL_MS);
-  }
-
-  async function pollOnce(gen) {
-    if (gen !== viewGen || !viewTaskId || pollBusy || saving || document.hidden) return;
-    const taskId = viewTaskId;
-    const startSaveGen = saveGen;
-    pollBusy = true;
-    try {
-      const res = await fetch(`${API}/tasks/${encodeURIComponent(taskId)}/output`);
-      if (!res.ok) return;
-      const data = await res.json();
-      // Discard if the viewer moved on or a save started/finished meanwhile
-      // (the response may predate our own write).
-      if (gen !== viewGen || saving || saveGen !== startSaveGen) return;
-      if (!data || data.exists === false || typeof data.content !== 'string') return;
-      if (data.content === lastContent) return;
-      const prev = lastContent;
-      setKnown(taskId, data.content);
-      if (mode === 'preview') {
-        reloadFrame();
-      } else {
-        const ta = q('.dth-source');
-        // Local wins: only replace the textarea when it holds no unsaved edits.
-        if (ta && ta.value === prev && !saveTimer) ta.value = lastContent;
-      }
     } catch (_) {
-      // transient - next tick retries
-    } finally {
-      pollBusy = false;
+      if (typeof toast === 'function') {
+        toast(action === 'reveal' ? 'Couldn\'t open the folder.' : 'Couldn\'t open the page.');
+      }
     }
   }
 
   // -- Copy link --
-  // Copies the page's /artifact URL so it opens straight in a browser tab.
+  // Copies the page's file:// URL so it opens straight from disk in a browser.
   // toast() only surfaces errors, so success flips the button label briefly.
   let copiedTimer = null;
   function copyLink() {
-    const p = viewTaskId ? `${location.origin}/artifact/${encodeURIComponent(viewTaskId)}` : '';
     const btn = q('.dth-copy');
-    if (!p) return;
+    if (!fileUrl) return;
     if (!(navigator.clipboard && navigator.clipboard.writeText)) {
       if (typeof toast === 'function') toast('Couldn\'t copy the link - clipboard unavailable.');
       return;
     }
-    navigator.clipboard.writeText(p)
+    navigator.clipboard.writeText(fileUrl)
       .then(() => {
         if (!btn || !btn.isConnected) return;
         btn.textContent = 'Copied';
@@ -369,16 +155,40 @@
       .catch(() => { if (typeof toast === 'function') toast('Couldn\'t copy the link.'); });
   }
 
+  // -- Live reload (chat edits the file in place) --
+  function startPoll(gen) {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => pollOnce(gen), POLL_MS);
+  }
+
+  async function pollOnce(gen) {
+    if (gen !== viewGen || !viewTaskId || pollBusy || document.hidden) return;
+    const taskId = viewTaskId;
+    pollBusy = true;
+    try {
+      const res = await fetch(`${API}/tasks/${encodeURIComponent(taskId)}/output`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (gen !== viewGen) return;
+      if (!data || data.exists === false || typeof data.content !== 'string') return;
+      if (data.content === lastContent) return;
+      lastContent = data.content;
+      reloadFrame();
+    } catch (_) {
+      // transient - next tick retries
+    } finally {
+      pollBusy = false;
+    }
+  }
+
   // -- Close / teardown --
   // The one place state is released: closeHtmlViewer's transition end, the
   // closeModal wrap, and openHtmlViewer's re-entrancy guard all land here.
   function destroyViewer() {
     viewGen++;
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
     viewTaskId = null;
-    pageExists = false;
-    mode = 'preview';
+    fileUrl = '';
     const ov = document.querySelector('.dt-htmlview');
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     const taskPane = document.querySelector('#split-modal .task-pane');
@@ -388,13 +198,6 @@
   function closeHtmlViewer() {
     const ov = document.querySelector('.dt-htmlview');
     if (!ov || ov.classList.contains('is-closing')) return;
-    // Snapshot the source edit now, then persist it independently of the
-    // teardown (waits out any in-flight PUT first, so nothing is dropped).
-    const snap = snapshot();
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-    const ta = q('.dth-source');
-    if (ta) ta.readOnly = true;
-    trackPersist(persistSnapshot(snap));
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     const gen = viewGen;
     const done = () => { if (gen === viewGen) destroyViewer(); };
@@ -413,11 +216,7 @@
   // markdown editor's wrapper (loaded earlier) - both run.
   const _origCloseModal = window.closeModal;
   window.closeModal = function () {
-    if (document.querySelector('.dt-htmlview')) {
-      const snap = snapshot();
-      destroyViewer();
-      trackPersist(persistSnapshot(snap));
-    }
+    if (document.querySelector('.dt-htmlview')) destroyViewer();
     if (typeof _origCloseModal === 'function') return _origCloseModal.apply(this, arguments);
   };
 

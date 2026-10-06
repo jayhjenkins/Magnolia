@@ -17,6 +17,7 @@ import os
 import re
 import socket
 import shlex
+import pathlib
 import subprocess
 import sys
 import threading
@@ -909,7 +910,42 @@ def handle_get_output(handler, task_id):
     resp = {"path": rel.strip(), "format": fmt, "content": content, "exists": True}
     if fmt == "markdown" and _under_datasets(filepath):  # only datasets/ markdown publishes to Word
         resp["word"] = doc_sync.word_status(filepath)
+    if fmt == "html":  # the file itself, openable straight from disk (Copy link)
+        resp["file_url"] = pathlib.Path(filepath).as_uri()
     _json_response(handler, resp)
+
+
+_OUTPUT_FILE_ACTIONS = {
+    "reveal": "reveal_file_cmd",   # file manager, file selected
+    "open": "open_file_cmd",       # default app (browser for .html)
+}
+
+
+def handle_output_file_action(handler, task_id, action):
+    """POST /api/tasks/{id}/output/{reveal|open} - show the task's HTML page in the
+    OS file manager, or open it in the default app. Local only; HTML under datasets/."""
+    try:
+        task_data = task_lib.read_task(task_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Failed to read task: {e}", status=500)
+        return
+    rel = str(task_data["frontmatter"].get("agent_output") or "")
+    filepath = _resolve_output_path(rel, allow_html=True)
+    if (filepath is None or not html_artifact_lib.is_html_path(rel)
+            or not os.path.isfile(filepath)):
+        _error_response(handler, "Task has no HTML page", status=404)
+        return
+    cmd = getattr(platform_lib, _OUTPUT_FILE_ACTIONS[action])(filepath)
+    try:
+        subprocess.Popen(cmd, **platform_lib.process_group_kwargs())
+    except OSError as e:
+        _error_response(handler, f"Failed to {action} the page: {e}", status=500)
+        return
+    handler.send_response(204)
+    handler.end_headers()
 
 
 def handle_artifact_page(handler, task_id):
@@ -4008,6 +4044,18 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
                 _error_response(self, "Invalid task ID format", status=400)
             else:
                 handle_publish_word(self, task_id)
+            return True
+
+        # Match /api/tasks/{id}/output/{reveal|open} - POST shows the HTML page in
+        # the file manager or opens it in the default app.
+        match = re.match(r"^/api/tasks/([^/]+)/output/(reveal|open)$", path)
+        if match and method == "POST":
+            _discard_request_body(self)
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_output_file_action(self, task_id, match.group(2))
             return True
 
         # Match /api/tasks/{id}/output — GET reads, PUT writes the .md artifact.
