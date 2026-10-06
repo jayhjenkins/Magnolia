@@ -41,6 +41,7 @@ ENV_FILE = os.path.join(PM_OS_DIR, ".env.langfuse")
 
 sys.path.insert(0, SCRIPT_DIR)
 import harness_lib  # noqa: E402
+import html_artifact_lib  # noqa: E402
 import platform_lib  # noqa: E402
 import profile_lib  # noqa: E402
 import task_lib  # noqa: E402
@@ -233,6 +234,9 @@ def read_artifact(output_path):
             text = f.read()
     except OSError:
         return None, candidate
+    if html_artifact_lib.is_html_path(candidate):
+        # Pages are mostly CSS; judge the visible text, not the markup.
+        text = html_artifact_lib.html_to_text(text)
     if len(text) > ARTIFACT_CHAR_LIMIT:
         text = text[:ARTIFACT_CHAR_LIMIT] + "\n…[truncated]"
     return text, candidate
