@@ -222,17 +222,21 @@ def _resolve_output_path(rel, allow_html=False):
 
     Accepts .md paths always, and .html/.htm paths only when allow_html=True
     (the inline editor and the /artifact page; Word stays markdown-only).
+    HTML is further confined to PM_OS_DIR/datasets/ so an agent_output can
+    never point the editor or /artifact at the board's own UI files.
     Returns the absolute path, or None when there is no path, it is not an
     accepted file type, or it would escape PM_OS_DIR (path-traversal guard).
     Mirrors handle_open_file's PM_OS_DIR resolution, plus the containment check.
     """
     rel = (rel or "").strip()
-    if not rel or not (rel.endswith(".md")
-                       or (allow_html and html_artifact_lib.is_html_path(rel))):
+    is_html = allow_html and html_artifact_lib.is_html_path(rel)
+    if not rel or not (rel.endswith(".md") or is_html):
         return None
     base = os.path.realpath(PM_OS_DIR)
     candidate = os.path.realpath(rel if os.path.isabs(rel) else os.path.join(base, rel))
     if candidate != base and not candidate.startswith(base + os.sep):
+        return None
+    if is_html and not _under_datasets(candidate):
         return None
     return candidate
 
@@ -911,7 +915,7 @@ def handle_get_output(handler, task_id):
 def handle_artifact_page(handler, task_id):
     """GET /artifact/<id> - the task's .html output as a standalone page.
 
-    Only .html under datasets/. Sent with a sandbox CSP (html_artifact_lib.CSP)
+    Only .html/.htm under datasets/. Sent with a sandbox CSP (html_artifact_lib.CSP)
     so the page gets an opaque origin and no network access to the board API."""
     try:
         task_data = task_lib.read_task(task_id)
@@ -923,8 +927,9 @@ def handle_artifact_page(handler, task_id):
         return
     rel = str(task_data["frontmatter"].get("agent_output") or "")
     filepath = _resolve_output_path(rel, allow_html=True)
+    # _resolve_output_path confines HTML to datasets/; .md is refused here.
     if (filepath is None or not html_artifact_lib.is_html_path(rel)
-            or not _under_datasets(filepath) or not os.path.isfile(filepath)):
+            or not os.path.isfile(filepath)):
         _error_response(handler, "Task has no HTML page", status=404)
         return
     try:

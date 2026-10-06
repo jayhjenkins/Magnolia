@@ -39,10 +39,15 @@ def _seed_task_with_output(tasks_root, rel_path, content):
 
 
 class _HeaderHandler(_FakeHandler):
+    """Records headers as a list of (name, value) so a duplicate is caught."""
     def __init__(self):
         super().__init__()
-        self.headers_out = {}
-    def send_header(self, k, v): self.headers_out[k] = v
+        self.headers_out = []
+    def send_header(self, k, v): self.headers_out.append((k, v))
+    def header(self, name):
+        vals = [v for k, v in self.headers_out if k.lower() == name.lower()]
+        assert len(vals) == 1, f"{name} sent {len(vals)} times: {vals}"
+        return vals[0]
 
 
 @pytest.fixture
@@ -57,9 +62,9 @@ def test_serves_html_with_csp(srv, tasks_root):
     h = _HeaderHandler()
     srv.handle_artifact_page(h, tid)
     assert h.status == 200
-    assert h.headers_out["Content-Type"].startswith("text/html")
-    assert h.headers_out["Content-Security-Policy"] == srv.html_artifact_lib.CSP
-    assert h.headers_out["Cache-Control"] == "no-store"
+    assert h.header("Content-Type").startswith("text/html")
+    assert h.header("Content-Security-Policy") == srv.html_artifact_lib.CSP
+    assert h.header("Cache-Control") == "no-store"
     assert b"".join(h._chunks) == b"<h1>Hi</h1>"
 
 
@@ -96,3 +101,35 @@ def test_router_artifact_invalid_id_400(srv):
     h.path = "/artifact/not-a-task"
     assert srv.TaskServerHandler._route_request(h, "GET") is True
     assert h.status == 400
+
+
+def test_serves_uppercase_htm(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/P.HTM", "<p>upper</p>")
+    h = _HeaderHandler()
+    srv.handle_artifact_page(h, tid)
+    assert h.status == 200
+    assert h.header("Content-Security-Policy") == srv.html_artifact_lib.CSP
+    assert b"".join(h._chunks) == b"<p>upper</p>"
+
+
+def test_real_handler_sends_cache_control_and_csp_once(srv, tasks_root):
+    """Drive the real TaskServerHandler (its end_headers override included) and
+    parse the raw response, so a header duplicated by end_headers is caught."""
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    h = object.__new__(srv.TaskServerHandler)
+    h.path = f"/artifact/{tid}?t=1"
+    h.command = "GET"
+    h.request_version = "HTTP/1.1"
+    h.requestline = f"GET {h.path} HTTP/1.1"
+    h.client_address = ("127.0.0.1", 0)
+    h.close_connection = False
+    h.wfile = io.BytesIO()
+    h.log_message = lambda *a, **k: None
+    assert h._route_request("GET") is True
+    head, _, body = h.wfile.getvalue().partition(b"\r\n\r\n")
+    lines = head.decode("latin-1").split("\r\n")
+    assert lines[0].startswith("HTTP/1.1 200")
+    names = [ln.split(":", 1)[0].lower() for ln in lines[1:]]
+    assert names.count("cache-control") == 1
+    assert names.count("content-security-policy") == 1
+    assert body == b"<h1>Hi</h1>"
