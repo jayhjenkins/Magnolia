@@ -906,6 +906,40 @@ def handle_get_output(handler, task_id):
     _json_response(handler, resp)
 
 
+def handle_artifact_page(handler, task_id):
+    """GET /artifact/<id> - the task's .html output as a standalone page.
+
+    Only .html under datasets/. Sent with a sandbox CSP (html_artifact_lib.CSP)
+    so the page gets an opaque origin and no network access to the board API."""
+    try:
+        task_data = task_lib.read_task(task_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Failed to read task: {e}", status=500)
+        return
+    rel = str(task_data["frontmatter"].get("agent_output") or "")
+    filepath = _resolve_output_path(rel, allow_html=True)
+    if (filepath is None or not html_artifact_lib.is_html_path(rel)
+            or not _under_datasets(filepath) or not os.path.isfile(filepath)):
+        _error_response(handler, "Task has no HTML page", status=404)
+        return
+    try:
+        with open(filepath, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        _error_response(handler, f"Failed to read page: {e}", status=500)
+        return
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("Content-Security-Policy", html_artifact_lib.CSP)
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
 WORD_CONFIRM_MESSAGE = (
     "Publishing creates a Word copy of this document in your OneDrive, "
     "where others with access can see it. Continue?"
@@ -3693,6 +3727,18 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/onboarding/run" and method == "POST":
             handle_onboarding_run(self)
+            return True
+
+        # ─── HTML artifact page ────────────────────────────────────────
+        # GET /artifact/<id> - a task's .html output, sandboxed (own CSP).
+        # `path` is already query-stripped, so /artifact/<id>?t=... matches.
+        match = re.match(r"^/artifact/([^/?]+)$", path)
+        if match and method == "GET":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_artifact_page(self, task_id)
             return True
 
         # ─── Task trace routes ─────────────────────────────────────────
