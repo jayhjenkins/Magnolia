@@ -60,7 +60,7 @@
         <div class="dth-actions">
           <button class="dth-btn dth-toggle" type="button" aria-pressed="false" disabled>Source</button>
           <a class="dth-btn dth-full" target="_blank" rel="noopener" href="${escapeHtml(href)}">Open full</a>
-          <button class="dth-btn dth-copy" type="button">Copy path</button>
+          <button class="dth-btn dth-copy" type="button">Copy link</button>
         </div>
       </div>
       <div class="dth-body">
@@ -69,7 +69,7 @@
     taskPane.appendChild(ov);
     ov.querySelector('.dte-back').addEventListener('click', closeHtmlViewer);
     ov.querySelector('.dth-toggle').addEventListener('click', toggleMode);
-    ov.querySelector('.dth-copy').addEventListener('click', copyPath);
+    ov.querySelector('.dth-copy').addEventListener('click', copyLink);
     return ov;
   }
 
@@ -347,15 +347,16 @@
     }
   }
 
-  // -- Copy path --
+  // -- Copy link --
+  // Copies the page's /artifact URL so it opens straight in a browser tab.
   // toast() only surfaces errors, so success flips the button label briefly.
   let copiedTimer = null;
-  function copyPath() {
-    const p = docPath;
+  function copyLink() {
+    const p = viewTaskId ? `${location.origin}/artifact/${encodeURIComponent(viewTaskId)}` : '';
     const btn = q('.dth-copy');
     if (!p) return;
     if (!(navigator.clipboard && navigator.clipboard.writeText)) {
-      if (typeof toast === 'function') toast('Couldn\'t copy the path - clipboard unavailable.');
+      if (typeof toast === 'function') toast('Couldn\'t copy the link - clipboard unavailable.');
       return;
     }
     navigator.clipboard.writeText(p)
@@ -363,9 +364,9 @@
         if (!btn || !btn.isConnected) return;
         btn.textContent = 'Copied';
         if (copiedTimer) clearTimeout(copiedTimer);
-        copiedTimer = setTimeout(() => { btn.textContent = 'Copy path'; copiedTimer = null; }, 1200);
+        copiedTimer = setTimeout(() => { btn.textContent = 'Copy link'; copiedTimer = null; }, 1200);
       })
-      .catch(() => { if (typeof toast === 'function') toast('Couldn\'t copy the path.'); });
+      .catch(() => { if (typeof toast === 'function') toast('Couldn\'t copy the link.'); });
   }
 
   // -- Close / teardown --
