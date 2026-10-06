@@ -23,7 +23,7 @@ CSP = (
     "connect-src 'none'"
 )
 
-_HTML_ASK = re.compile(r"\bas\s+(?:an?\s+)?(?:html(?:\s+page)?|page|web\s*page)\b(?!\s+(?:break|\d|entit))", re.I)
+_HTML_ASK = re.compile(r"\bas\s+(?:an?\s+)?(?:html(?:\s+page)?|page|web\s*page)\b(?!-|\s+(?:break|\d|entit|e-?mail|in\b|on\b))", re.I)
 
 
 def is_html_path(path):

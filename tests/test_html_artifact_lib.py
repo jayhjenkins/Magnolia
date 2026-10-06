@@ -20,6 +20,12 @@ def test_detect_output_format_phrases():
     assert h.detect_output_format("Fix layout", "use it as a page break") is None
     assert h.detect_output_format("Fix layout", "save as page 2") is None
     assert h.detect_output_format("Escape", "treat as html entities") is None
+    assert h.detect_output_format("Fix the filter as a page-level setting", "") is None
+    assert h.detect_output_format("Post it as a page in Confluence", "") is None
+    assert h.detect_output_format("Publish it as a page on the wiki", "") is None
+    assert h.detect_output_format("Newsletter", "render as HTML email") is None
+    assert h.detect_output_format("Pre-read", "Build it as HTML.") == "html"
+    assert h.detect_output_format("Pre-read", "Ship it as a page, please") == "html"
 
 
 def test_resolve_output_format_precedence():

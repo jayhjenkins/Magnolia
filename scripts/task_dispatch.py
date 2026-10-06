@@ -770,8 +770,9 @@ def _task_frontmatter(task):
         fm = task_lib.read_task(task.get("id"))["frontmatter"]
         if isinstance(fm, dict):
             return {**task, **fm}
-    except Exception:
-        pass
+    except Exception as e:
+        log(f"WARN: could not read frontmatter for output_format ({e}); using dispatch dict",
+            task_id=task.get("id"))
     return task
 
 

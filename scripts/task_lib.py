@@ -211,6 +211,7 @@ def create_task(title, queue="human", priority="medium", domain=None,
         raise ValueError(f"Priority must be one of: {PRIORITIES}")
     if domain and domain not in DOMAINS:
         raise ValueError(f"Domain must be one of: {DOMAINS}")
+    output_format = output_format or None  # "" means unset
     if output_format not in (None,) + html_artifact_lib.FORMATS:
         raise ValueError(f"output_format must be one of: {html_artifact_lib.FORMATS}")
 
@@ -257,8 +258,11 @@ def create_task(title, queue="human", priority="medium", domain=None,
         # A structured mutation spec carried on a recommendation card; the accept
         # handler (cadence-propose-update) reads fm["proposal"] to apply it.
         frontmatter["proposal"] = proposal
-    # Absent means md. An explicit value wins over phrase detection ("as HTML").
-    fmt = output_format or html_artifact_lib.detect_output_format(title, description)
+    # Absent means md. An explicit value always wins; phrase detection ("as HTML")
+    # only applies to human-created tasks, never agent/meeting-extracted ones.
+    fmt = output_format
+    if fmt is None and creator == "human":
+        fmt = html_artifact_lib.detect_output_format(title, description)
     if fmt:
         frontmatter["output_format"] = fmt
 

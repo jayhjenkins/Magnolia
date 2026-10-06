@@ -321,6 +321,10 @@ def build_resume_prompt(task, user_message, *, first_interactive=False, body=Non
       them inline means the model reads live state for free instead of spending
       a tool call to re-fetch metadata we already hold.
 
+    Both shapes re-inject the HTML edit-in-place hint (``_html_hint``) when the
+    output is an .html page -- deliberately on every steady-state turn too, so
+    the "edit in place, never regenerate" rule can't drift out of a long session.
+
     Identity via profile_lib only (invariant #1).
     """
     name = profile_lib.display_name()

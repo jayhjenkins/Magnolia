@@ -1,4 +1,5 @@
 """output_format: task field, phrase detection, worker default, dispatch injection."""
+import re
 import sys
 
 import pytest
@@ -20,6 +21,23 @@ def test_create_task_explicit_md_overrides_phrase(tasks_root):
     tid, _ = task_lib.create_task("Pre-read", queue="agent",
                                   description="Build it as HTML", output_format="md")
     assert task_lib.read_task(tid)["frontmatter"]["output_format"] == "md"
+
+
+def test_create_task_agent_creator_skips_detection(tasks_root):
+    tid, _ = task_lib.create_task("Pre-read", queue="agent", creator="agent",
+                                  description="Build it as HTML")
+    assert "output_format" not in task_lib.read_task(tid)["frontmatter"]
+
+
+def test_create_task_agent_creator_explicit_format_honored(tasks_root):
+    tid, _ = task_lib.create_task("Pre-read", queue="agent", creator="agent",
+                                  output_format="html")
+    assert task_lib.read_task(tid)["frontmatter"]["output_format"] == "html"
+
+
+def test_create_task_empty_format_is_none(tasks_root):
+    tid, _ = task_lib.create_task("Strategy memo", queue="agent", output_format="")
+    assert "output_format" not in task_lib.read_task(tid)["frontmatter"]
 
 
 def test_create_task_defaults_absent(tasks_root):
@@ -53,13 +71,72 @@ def test_cli_add_format_lands_in_frontmatter(tasks_root, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["task", "add", "Swim lanes", "-q", "agent",
                                       "--format", "html"])
     task_cli.main()
-    tid = capsys.readouterr().out.split()[1]
+    tid = re.search(r"TASK-\d+", capsys.readouterr().out).group(0)
     assert task_lib.read_task(tid)["frontmatter"]["output_format"] == "html"
 
 
-def test_task_frontmatter_reads_disk_over_projection(tasks_root):
+def test_task_frontmatter_reads_disk_over_projection(tasks_root, monkeypatch):
     import task_dispatch
+    monkeypatch.setattr(task_dispatch, "log", lambda *a, **k: None)
     tid, _ = task_lib.create_task("Swim lanes", queue="agent", output_format="html")
     fm = task_dispatch._task_frontmatter({"id": tid, "title": "Swim lanes"})
     assert fm["output_format"] == "html"
     assert task_dispatch._task_frontmatter({"id": "TASK-9999"}) == {"id": "TASK-9999"}
+
+
+# --- dispatch_task call sites: capture the prompt handed to the harness ---
+
+class _Launched(Exception):
+    pass
+
+
+def _capture_dispatch(monkeypatch, task, worker):
+    import task_dispatch
+    seen = {}
+
+    def fake_cmd(prompt, *a, **k):
+        seen["prompt"] = prompt
+        raise _Launched()
+
+    monkeypatch.setattr(task_dispatch, "log", lambda *a, **k: None)
+    monkeypatch.setattr(task_dispatch, "build_claude_cmd", fake_cmd)
+    monkeypatch.setattr(task_dispatch, "build_prompt_for_worker",
+                        lambda tid, w, rerun=False: "WORKER PROMPT")
+    monkeypatch.setattr(task_dispatch, "build_prompt",
+                        lambda tid, rerun=False: "LEGACY PROMPT")
+    workers = None
+    if worker is not None:
+        workers = [worker]
+        monkeypatch.setattr(task_dispatch, "match_worker",
+                            lambda t, ws: (worker, 1, ["test"]))
+    with pytest.raises(_Launched):
+        task_dispatch.dispatch_task(task, workers=workers)
+    return seen["prompt"]
+
+
+_WORKER = {"name": "w", "prompt_body": "do it", "allowed_tools": ["Read"], "max_turns": 5}
+
+
+@pytest.mark.parametrize("worker,base", [(_WORKER, "WORKER PROMPT"), (None, "LEGACY PROMPT")])
+def test_dispatch_call_site_html(tasks_root, monkeypatch, worker, base):
+    import html_artifact_lib
+    tid, _ = task_lib.create_task("Swim lanes", queue="agent", output_format="html")
+    # Projection like `task list --json`: no output_format key.
+    p = _capture_dispatch(monkeypatch, {"id": tid, "title": "Swim lanes"}, worker)
+    assert p == base + html_artifact_lib.dispatch_block()
+    assert p.endswith(html_artifact_lib.dispatch_block())
+
+
+@pytest.mark.parametrize("worker,base", [(_WORKER, "WORKER PROMPT"), (None, "LEGACY PROMPT")])
+def test_dispatch_call_site_md(tasks_root, monkeypatch, worker, base):
+    tid, _ = task_lib.create_task("Strategy memo", queue="agent")
+    p = _capture_dispatch(monkeypatch, {"id": tid, "title": "Strategy memo"}, worker)
+    assert p == base
+
+
+def test_task_frontmatter_fallback_logs_warn(monkeypatch):
+    import task_dispatch
+    lines = []
+    monkeypatch.setattr(task_dispatch, "log", lambda msg, **k: lines.append(msg))
+    task_dispatch._task_frontmatter({"id": "TASK-9999"})
+    assert any(l.startswith("WARN") for l in lines)
