@@ -230,13 +230,8 @@ def cmd_agent_complete(args):
     }
     if args.output:
         changes["agent_output"] = args.output
-        # Compute SharePoint path and URL so Word link appears on task card
-        sp = task_lib._sharepoint_path(args.output)
-        if sp:
-            changes["sharepoint_path"] = sp
-        sp_url = task_lib._sharepoint_url(args.output)
-        if sp_url:
-            changes["sharepoint_url"] = sp_url
+        # No Word push / sharepoint stamping: Word publishing happens only from
+        # the board editor's menu (POST /api/tasks/{id}/output/word).
 
     # Stamp the canonical action task_type for a Jira draft so the trust ladder,
     # judge, and Quality tab all key on 'publish-ticket' (the draft is otherwise
@@ -257,9 +252,6 @@ def cmd_agent_complete(args):
 
     task_lib.update_task(args.task_id, changes=changes,
                          comment=comment, actor="agent")
-    # Trigger doc sync for the output file (still gated on --output).
-    if args.output and changes.get("sharepoint_path"):
-        task_lib._trigger_doc_sync(args.output)
     print(f"Agent completed {args.task_id} — awaiting human review")
     if args.output:
         print(f"  Output: {args.output}")

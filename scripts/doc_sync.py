@@ -5,10 +5,16 @@ doc_sync.py — Bidirectional Markdown <-> Word document sync engine.
 Converts local markdown files to .docx (via pandoc) for SharePoint/OneDrive
 collaboration, and syncs Word edits back to local markdown.
 
+Word is a tertiary surface: the system only pushes a .docx when the operator
+picks Publish/Sync to Word in the board editor's menu (POST
+/api/tasks/{id}/output/word). The push subcommands below are operator-run
+maintenance tools; `urls` and word_status() are read-only lookups.
+
 Usage:
   python3 scripts/doc_sync.py sync-one <md_path>      # Convert one md -> docx
   python3 scripts/doc_sync.py sync-back <docx_path>    # Convert one docx -> md
   python3 scripts/doc_sync.py sync-folder <dir> [--json] # Convert all md in dir -> docx
+  python3 scripts/doc_sync.py urls <dir> [--json]      # Read-only: Word URLs for md whose docx exists
   python3 scripts/doc_sync.py sync-all                 # Sync all tracked files
   python3 scripts/doc_sync.py status                   # Show sync state
   python3 scripts/doc_sync.py resolve <md_path>        # Clear conflict state
@@ -27,7 +33,7 @@ from pathlib import Path
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
-SCRIPT_DIR = Path(__file__).parent
+SCRIPT_DIR = Path(__file__).resolve().parent
 PM_OS_DIR = SCRIPT_DIR.parent
 CONFIG_PATH = SCRIPT_DIR / "sync_config.yaml"
 MANIFEST_PATH = SCRIPT_DIR / "_sync_manifest.json"
@@ -51,14 +57,19 @@ def _profile_doc_sync():
         return {}
 
 
-def load_config():
-    """Load sync configuration.
+class _ConfigError(Exception):
+    """doc_sync is not configured; args[0] is the CLI-facing message lines."""
+
+
+def _read_config():
+    """Build the sync configuration, raising _ConfigError when unconfigured.
 
     Precedence: when the profile's integrations.yaml has a populated doc_sync
     block (enabled: true), its onedrive_root/sharepoint_site override the
     legacy sync_config.yaml values. The legacy sync_config.yaml remains the
     source for fields the profile doesn't carry (tenant URL, doc root,
     sync_paths, etc.) and the sole source when the profile isn't enabled.
+    Never prints, never exits.
     """
     prof = _profile_doc_sync()
     prof_enabled = bool(prof.get("enabled"))
@@ -69,12 +80,11 @@ def load_config():
         if prof_enabled:
             resolved_root = os.path.expanduser(prof.get("onedrive_root", ""))
             if not resolved_root:
-                print(
-                    "Error: doc_sync is enabled but onedrive_root is not set — "
+                raise _ConfigError([
+                    "Error: doc_sync is enabled but onedrive_root is not set - "
                     "run the Doctor to detect your OneDrive root, or set "
                     "doc_sync.onedrive_root in profile/integrations.yaml"
-                )
-                sys.exit(1)
+                ])
             return {
                 "onedrive_root": resolved_root,
                 "sharepoint_site": prof.get("sharepoint_site", "PM-OS"),
@@ -84,9 +94,10 @@ def load_config():
                 "sync_paths": [],
                 "sync_exclude": [],
             }
-        print(f"Error: Config not found at {CONFIG_PATH}")
-        print("Run scripts/setup_doc_sync.sh to initialize.")
-        sys.exit(1)
+        raise _ConfigError([
+            f"Error: Config not found at {CONFIG_PATH}",
+            "Run scripts/setup_doc_sync.sh to initialize.",
+        ])
 
     # Simple YAML parsing for our flat config (avoids ruamel dependency)
     config = {
@@ -134,6 +145,26 @@ def load_config():
             config["sharepoint_site"] = prof["sharepoint_site"]
 
     return config
+
+
+def _try_load_config():
+    """Quiet config load for read-only lookups: the config dict, or None when
+    doc_sync is unconfigured or unreadable. Never prints, never exits."""
+    try:
+        return _read_config()
+    except Exception:
+        return None
+
+
+def load_config():
+    """Load sync configuration for the CLI: prints the problem and exits(1)
+    when doc_sync is unconfigured. Library callers use _try_load_config()."""
+    try:
+        return _read_config()
+    except _ConfigError as e:
+        for line in e.args[0]:
+            print(line)
+        sys.exit(1)
 
 
 def onedrive_dir(config):
@@ -657,6 +688,80 @@ def sharepoint_url_from_docx_path(docx_path):
     return _build_sharepoint_url(config, rel)
 
 
+def is_configured():
+    """True when doc_sync has a usable config. Never raises, prints, or writes."""
+    config = _try_load_config()
+    return bool(config and config.get("onedrive_root"))
+
+
+def word_status(md_path, config=None):
+    """Read-only Word status for a local markdown file.
+
+    Returns {"exists": bool, "url": str|None, "docx_path": str|None}. "exists"
+    means the mapped .docx (md_to_docx_path) is a file on disk - the manifest is
+    NOT consulted (it carries stale paths). url/docx_path are only set when the
+    .docx exists. Pass a preloaded `config` (from _try_load_config) to avoid
+    re-reading the config per file. Never raises, prints, or writes: an
+    unconfigured doc_sync or an unmappable path yields exists=False.
+    """
+    empty = {"exists": False, "url": None, "docx_path": None}
+    try:
+        if config is None:
+            config = _try_load_config()
+        if not config or not config.get("onedrive_root"):
+            return empty
+        docx_path = md_to_docx_path(Path(md_path).resolve(), config)
+        if not docx_path.is_file():
+            return empty
+        url = None
+        try:
+            rel = docx_path.relative_to(Path(config["onedrive_root"]).expanduser())
+            url = _build_sharepoint_url(config, rel.as_posix())
+        except ValueError:
+            url = None
+        return {"exists": True, "url": url, "docx_path": str(docx_path)}
+    except (Exception, SystemExit):
+        return empty
+
+
+def folder_urls(dir_path, json_output=False):
+    """Read-only: list Word URLs for .md files in a directory whose .docx exists.
+
+    Same JSON shape as sync_folder(json_output=True), but never converts or
+    writes anything; files without a Word copy are omitted.
+    """
+    dir_path = Path(dir_path).resolve()
+    if not dir_path.is_dir():
+        print(f"Error: Not a directory: {dir_path}")
+        return False
+
+    results = []
+    config = _try_load_config()
+    for md_file in sorted(dir_path.glob("*.md")):
+        st = word_status(str(md_file), config=config)
+        if not st["exists"]:
+            continue
+        results.append({
+            "file": md_file.name,
+            "docx_path": st["docx_path"],
+            "url": st["url"] or "(URL not configured)",
+            "status": "published",
+        })
+
+    if json_output:
+        print(json.dumps({"folder": str(dir_path), "files": results}, indent=2))
+    else:
+        if not results:
+            print(f"No Word copies found for .md files in {dir_path}")
+            return True
+        print(f"\n{'File':<45} {'Word Online URL'}")
+        print("-" * 120)
+        for r in results:
+            print(f"{r['file']:<45} {r['url']}")
+        print(f"\n{len(results)} file(s) have a Word copy.")
+    return True
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -692,6 +797,17 @@ def main():
             path = PM_OS_DIR / path
         json_flag = "--json" in sys.argv[3:]
         success = sync_folder(str(path), json_output=json_flag)
+        sys.exit(0 if success else 1)
+
+    elif cmd == "urls":
+        if len(sys.argv) < 3:
+            print("Usage: doc_sync.py urls <directory> [--json]")
+            sys.exit(1)
+        path = Path(sys.argv[2])
+        if not path.is_absolute():
+            path = PM_OS_DIR / path
+        json_flag = "--json" in sys.argv[3:]
+        success = folder_urls(str(path), json_output=json_flag)
         sys.exit(0 if success else 1)
 
     elif cmd == "sync-all":

@@ -1,56 +1,56 @@
 ---
 name: workflow-doc-sync
-description: Bidirectional Markdown to Word document sync for SharePoint/OneDrive collaboration
+description: Use when someone asks how Markdown-to-Word sync works, wants a Word copy of a document, or asks about doc_sync - explains that publishing happens only from the board editor's 3-dot menu and that the doc_sync CLI is operator-run maintenance agents must not use to push
 triggers:
-  - sync document to SharePoint
-  - convert markdown to Word
   - doc sync
+  - convert markdown to Word
   - Word document sync
-  - SharePoint sync
+  - Open in Word
+  - doc_sync status
 type: workflow
 ---
 
 # Document Sync Skill
 
-Manages bidirectional sync between local markdown files and Word documents in OneDrive/SharePoint.
-
-## Architecture
+Reference for how local markdown relates to Word copies in the OneDrive sync folder.
 
 ```
-Local MD files <-> pandoc <-> .docx in OneDrive sync folder <-> SharePoint
+Local MD files -> pandoc -> .docx in OneDrive sync folder -> SharePoint
 ```
 
-## Commands
+## The rule: the editor menu is the only publish path
 
-### Manual Sync (single file)
+Word is a tertiary surface, touched only on purpose. The **only** place the system pushes a Word doc is the board's markdown editor 3-dot menu:
+
+- **Publish to Word** - shown when no Word copy exists yet. The first-ever publish asks one plain-language confirm.
+- **Sync with Word** - shown once the Word copy exists. Overwrites the .docx from markdown.
+
+**Agents, skills, commands, and workers must never push to Word/OneDrive.** Do not run `sync-one`, `sync-folder`, `sync-all`, `sync-back`, or `resolve`. Task completion no longer syncs anything. When a PM wants a Word copy, tell them to open the file in the board editor and use the 3-dot menu.
+
+## What agents may run (read-only)
+
 ```bash
-python3 scripts/doc_sync.py sync-one datasets/product/packages/2026/example/PRD_example.md
-```
+# Word Online URLs for .md files in a folder whose Word copy already exists
+python3 scripts/doc_sync.py urls datasets/product/packages/2026/example/ --json
+# -> {"folder": "...", "files": [{"file": "...", "url": "..."}]}
 
-### Sync Back (Word -> Markdown)
-```bash
-python3 scripts/doc_sync.py sync-back /path/to/OneDrive/PM-OS/product/packages/2026/example/PRD_example.docx
-```
-
-### Sync Folder (all .md files in a directory)
-```bash
-python3 scripts/doc_sync.py sync-folder datasets/product/packages/2026/example/ [--json]
-```
-
-### Sync All Tracked Files
-```bash
-python3 scripts/doc_sync.py sync-all
-```
-
-### Check Status
-```bash
+# Sync state report
 python3 scripts/doc_sync.py status
 ```
 
-### Resolve Conflicts
-```bash
-python3 scripts/doc_sync.py resolve datasets/product/packages/2026/example/PRD_example.md
-```
+## Operator maintenance CLI (not for agents)
+
+The `doc_sync.py` push/pull subcommands remain as low-level maintenance tools the operator runs themselves, by hand, in a terminal:
+
+| Subcommand | What it does |
+|---|---|
+| `sync-one <md>` | Render one .md to its .docx |
+| `sync-folder <dir> [--json]` | Render every .md in a folder |
+| `sync-all` | Render every tracked file |
+| `sync-back <docx>` | Pull Word edits back into markdown |
+| `resolve <md>` | Push the local version after a manual conflict merge |
+
+If an operator asks an agent to run one of these, point them to the editor 3-dot menu first; these are for repair and bulk maintenance, not the normal flow.
 
 ## Path Mapping
 
@@ -59,7 +59,7 @@ python3 scripts/doc_sync.py resolve datasets/product/packages/2026/example/PRD_e
 | `datasets/product/packages/2026/X/PRD_X.md` | `{onedrive}/PM-OS/product/packages/2026/X/PRD_X.docx` |
 | `datasets/strategy/memos/X.md` | `{onedrive}/PM-OS/strategy/memos/X.docx` |
 
-Rule: strip `datasets/` prefix, mirror path, change `.md` to `.docx`.
+Rule: strip `datasets/` prefix, mirror path, change `.md` to `.docx`. A document "has a Word copy" when that mapped .docx is on disk.
 
 ## Conflict Resolution
 
@@ -67,31 +67,23 @@ When both local and remote files change since last sync:
 1. Neither file is overwritten
 2. Backup copies are created with `_CONFLICT_{timestamp}` suffix
 3. Conflict logged to `logs/doc_sync_conflicts.log`
-4. Run `resolve <path>` after manual merge (pushes local version)
+4. The operator runs `resolve <path>` after a manual merge
 
-## Watcher Daemon
+## Watcher Daemon (retired)
 
-Runs as launchd: `~/Library/LaunchAgents/com.pm-os.doc-sync.plist`
-
-```bash
-# Stop watcher
-launchctl unload ~/Library/LaunchAgents/com.pm-os.doc-sync.plist
-
-# Start watcher
-launchctl load ~/Library/LaunchAgents/com.pm-os.doc-sync.plist
-```
+The `doc_sync_watcher.py` file watcher is retired: it exits with a message, and `scripts/setup_doc_sync.sh` no longer installs its launchd job. Nothing syncs in the background.
 
 ## Configuration
 
 Edit `scripts/sync_config.yaml` to change:
 - `onedrive_root` - OneDrive sync folder path
-- `sync_paths` - Which file patterns to sync
+- `sync_paths` - Which file patterns map to Word
 - `sync_exclude` - Which patterns to skip
 
 ## Setup
 
-Run `scripts/setup_doc_sync.sh` for first-time setup (installs pandoc, fswatch, configures launchd).
+The operator runs `scripts/setup_doc_sync.sh` for first-time setup (installs pandoc, writes config).
 
 ## Integration with Task System
 
-When a task is completed with `--output`, the output artifact is automatically synced to SharePoint if it matches sync_paths. The task board UI shows "Open in Word" links for synced documents.
+Completing a task with `--output` does not create a Word copy. The task card shows an "Open in Word" link only when the output's .docx already exists (created from the editor 3-dot menu).

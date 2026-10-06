@@ -19,6 +19,7 @@ import socket
 import shlex
 import subprocess
 import sys
+import threading
 import traceback
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
@@ -32,6 +33,7 @@ class ReusableHTTPServer(ThreadingHTTPServer):
 # Add script directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import task_lib
+import doc_sync
 import chat_runner
 import chat_transcript
 import ladder_lib
@@ -191,6 +193,29 @@ def _read_request_body(handler):
     return json.loads(raw.decode("utf-8"))
 
 
+_DRAIN_LIMIT = 1024 * 1024
+
+
+def _discard_request_body(handler):
+    """Consume an unread request body before an early error response, so a
+    keep-alive connection doesn't parse the leftover bytes as the next request.
+    Bodies that are oversized or have a bad Content-Length close the connection."""
+    try:
+        length = int(handler.headers.get("Content-Length", 0) or 0)
+    except (TypeError, ValueError):
+        handler.close_connection = True
+        return
+    if length <= 0:
+        return
+    if length > _DRAIN_LIMIT:
+        handler.close_connection = True
+        return
+    try:
+        handler.rfile.read(length)
+    except Exception:
+        handler.close_connection = True
+
+
 def _resolve_output_path(rel):
     """Resolve a task's agent_output to an absolute .md path inside PM_OS_DIR.
 
@@ -241,21 +266,44 @@ def _parse_task_id(path_segment):
 
 # ─── API Route Handlers ──────────────────────────────────────────────────────
 
-def _enrich_sharepoint_url(task_dict):
-    """Add sharepoint_url to a task dict if missing. Tries sharepoint_path first, then agent_output."""
-    if task_dict.get("sharepoint_url"):
+_WORD_CONFIG_UNSET = object()
+
+
+def _enrich_sharepoint_url(task_dict, word_config=_WORD_CONFIG_UNSET):
+    """Advertise a Word (.docx) link on a task dict ONLY when the .docx exists.
+
+    Word is a tertiary surface published from the editor menu, so a URL is never
+    computed for a document that was never published. A sharepoint_path that is
+    on disk is trusted (URL filled in if missing). Stale sharepoint_path/url
+    fields whose .docx is gone are dropped, then agent_output is checked via the
+    read-only doc_sync.word_status lookup.
+
+    List endpoints pass `word_config` (one doc_sync._try_load_config() per
+    request) so the config isn't re-read per task; None means doc_sync is not
+    configured, so the agent_output lookup is skipped.
+    """
+    sp_path = task_dict.get("sharepoint_path")
+    if sp_path and os.path.isfile(str(sp_path)):
+        if not task_dict.get("sharepoint_url"):
+            url = task_lib._sharepoint_url_from_docx(str(sp_path))
+            if url:
+                task_dict["sharepoint_url"] = url
         return task_dict
-    # Try from existing sharepoint_path (local docx path)
-    if task_dict.get("sharepoint_path"):
-        url = task_lib._sharepoint_url_from_docx(str(task_dict["sharepoint_path"]))
-        if url:
-            task_dict["sharepoint_url"] = url
-            return task_dict
-    # Fall back to computing from agent_output (markdown path)
-    if task_dict.get("agent_output"):
-        url = task_lib._sharepoint_url(str(task_dict["agent_output"]))
-        if url:
-            task_dict["sharepoint_url"] = url
+    # No verifiable .docx behind these fields - never advertise them.
+    task_dict.pop("sharepoint_path", None)
+    task_dict.pop("sharepoint_url", None)
+    if word_config is None:
+        return task_dict
+    md_path = _resolve_output_path(str(task_dict.get("agent_output") or ""))
+    if md_path:
+        if word_config is _WORD_CONFIG_UNSET:
+            st = doc_sync.word_status(md_path)
+        else:
+            st = doc_sync.word_status(md_path, config=word_config)
+        if st.get("exists") and st.get("url"):
+            task_dict["sharepoint_url"] = st["url"]
+            if st.get("docx_path"):
+                task_dict["sharepoint_path"] = st["docx_path"]
     return task_dict
 
 
@@ -287,8 +335,9 @@ def handle_list_tasks(handler, query_params):
             return _live[card_type]
 
         tasks = [t for t in tasks if _card_live(t.get("card_type") or "task")]
+        word_config = doc_sync._try_load_config()  # once per request, not per task
         for t in tasks:
-            _enrich_sharepoint_url(t)
+            _enrich_sharepoint_url(t, word_config=word_config)
         _json_response(handler, tasks)
     except Exception as e:
         _error_response(handler, f"Failed to list tasks: {e}", status=500)
@@ -304,8 +353,9 @@ def handle_list_activity(handler, query_params):
 
     try:
         tasks = task_lib.list_archived(limit=limit)
+        word_config = doc_sync._try_load_config()  # once per request, not per task
         for t in tasks:
-            _enrich_sharepoint_url(t)
+            _enrich_sharepoint_url(t, word_config=word_config)
         _json_response(handler, tasks)
     except Exception as e:
         _error_response(handler, f"Failed to list activity: {e}", status=500)
@@ -833,12 +883,132 @@ def handle_get_output(handler, task_id):
         # yet (e.g. an agent stamped agent_output without producing the file).
         # Return the path so the client can title the doc and show an honest
         # "not found" state, rather than 404ing into a silent blank editor.
-        _json_response(handler, {"path": rel.strip(), "format": "markdown", "content": "", "exists": False})
+        resp = {"path": rel.strip(), "format": "markdown", "content": "", "exists": False}
+        if _under_datasets(filepath):
+            resp["word"] = doc_sync.word_status(filepath)
+        _json_response(handler, resp)
         return
     except Exception as e:
         _error_response(handler, f"Failed to read output: {e}", status=500)
         return
-    _json_response(handler, {"path": rel.strip(), "format": "markdown", "content": content, "exists": True})
+    resp = {"path": rel.strip(), "format": "markdown", "content": content, "exists": True}
+    if _under_datasets(filepath):  # only datasets/ outputs are publishable to Word
+        resp["word"] = doc_sync.word_status(filepath)
+    _json_response(handler, resp)
+
+
+WORD_CONFIRM_MESSAGE = (
+    "Publishing creates a Word copy of this document in your OneDrive, "
+    "where others with access can see it. Continue?"
+)
+
+
+def _doc_sync_confirmed():
+    """True only when integrations.yaml doc_sync.confirmed is literally true."""
+    try:
+        return profile_lib.integration("doc_sync").get("confirmed") is True
+    except Exception:
+        return False
+
+
+# Serializes the publish critical section (existed check -> sync_one -> stamp)
+# so two concurrent clicks can't both report "published" or race the stamp.
+_WORD_LOCK = threading.Lock()
+
+
+def _under_datasets(filepath):
+    """True when filepath (already realpath'd) is inside PM_OS_DIR/datasets/."""
+    root = os.path.join(os.path.realpath(PM_OS_DIR), "datasets")
+    return filepath.startswith(root + os.sep)
+
+
+def handle_publish_word(handler, task_id):
+    """POST /api/tasks/{id}/output/word - the ONLY Word (.docx) push in the system.
+
+    Body {"confirm": bool}. Publishes the task's markdown output to Word when no
+    .docx exists yet ("published"), else overwrites it from markdown ("synced").
+    Only outputs under datasets/ are publishable. Tier-2 (invariant #5): until
+    doc_sync.confirmed is true, a request without confirm gets 409
+    {"needs_confirmation", "message"}; confirm records consent. On success
+    stamps sharepoint_path/sharepoint_url so the card's Word tile shows.
+    """
+    # Read the body first: an early return that leaves it unread corrupts the
+    # next request on a keep-alive connection.
+    try:
+        body = _read_request_body(handler)
+    except (json.JSONDecodeError, ValueError) as e:
+        _error_response(handler, f"Invalid JSON body: {e}", status=400)
+        return
+    if not isinstance(body, dict):
+        _error_response(handler, "Request body must be a JSON object", status=400)
+        return
+
+    try:
+        task_data = task_lib.read_task(task_id)
+    except FileNotFoundError:
+        _error_response(handler, f"Task {task_id} not found", status=404)
+        return
+    except Exception as e:
+        _error_response(handler, f"Failed to read task: {e}", status=500)
+        return
+
+    rel = str(task_data["frontmatter"].get("agent_output") or "")
+    filepath = _resolve_output_path(rel)
+    if filepath is None:
+        _error_response(handler, "Task has no markdown output to publish", status=404)
+        return
+    if not _under_datasets(filepath):
+        _error_response(handler, "Only documents under datasets/ can be published to Word",
+                        status=400)
+        return
+    if not os.path.isfile(filepath):
+        _error_response(handler, "Output file not found - save the document first", status=404)
+        return
+
+    if not doc_sync.is_configured():
+        _error_response(handler, "Word sync is not set up - run the Doctor to connect OneDrive "
+                                 "(doc_sync) first.", status=400)
+        return
+
+    if not _doc_sync_confirmed():
+        if not body.get("confirm"):
+            _json_response(handler, {"needs_confirmation": True, "message": WORD_CONFIRM_MESSAGE},
+                           status=409)
+            return
+        try:
+            profile_lib.set_integration_confirmed("doc_sync", True)
+        except Exception as e:
+            _error_response(handler, f"Failed to record consent: {e}", status=500)
+            return
+
+    with _WORD_LOCK:
+        existed = bool(doc_sync.word_status(filepath).get("exists"))
+        try:
+            ok = doc_sync.sync_one(filepath)
+        except (Exception, SystemExit) as e:
+            # SystemExit too: doc_sync.load_config exits when the config vanished.
+            _error_response(handler, str(e) or "Word sync failed", status=500)
+            return
+        if ok is False:
+            _error_response(handler, "Word sync failed", status=500)
+            return
+
+        action = "synced" if existed else "published"
+        word = doc_sync.word_status(filepath)
+        changes = {}
+        if word.get("docx_path"):
+            changes["sharepoint_path"] = word["docx_path"]
+        if word.get("url"):
+            changes["sharepoint_url"] = word["url"]
+        if changes:
+            try:
+                task_lib.update_task(task_id, changes=changes,
+                                     comment="Published to Word." if action == "published"
+                                     else "Synced to Word.",
+                                     actor="human")
+            except Exception:
+                pass  # the push succeeded; a stamp failure must not report it as failed
+    _json_response(handler, {"ok": True, "action": action, "word": word})
 
 
 def handle_get_patch(handler, task_id):
@@ -3764,6 +3934,18 @@ class TaskServerHandler(SimpleHTTPRequestHandler):
                 _error_response(self, "Invalid task ID format", status=400)
             else:
                 handle_get_patch(self, task_id)
+            return True
+
+        # Match /api/tasks/{id}/output/word - POST publishes/syncs the .md to Word
+        # (the only Word push; editor 3-dot menu).
+        match = re.match(r"^/api/tasks/([^/]+)/output/word$", path)
+        if match and method == "POST":
+            task_id = _parse_task_id(match.group(1))
+            if task_id is None:
+                _discard_request_body(self)  # keep the keep-alive stream in sync
+                _error_response(self, "Invalid task ID format", status=400)
+            else:
+                handle_publish_word(self, task_id)
             return True
 
         # Match /api/tasks/{id}/output — GET reads, PUT writes the .md artifact.

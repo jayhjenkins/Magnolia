@@ -5,7 +5,9 @@ doc_sync_watcher.py — Bidirectional file watcher for MD <-> DOCX sync.
 Watches local datasets/ for .md changes and OneDrive PM-OS/ for .docx changes.
 Uses fswatch for file system events with debouncing to prevent loops.
 
-Runs as a launchd daemon: ~/Library/LaunchAgents/com.pm-os.doc-sync.plist
+RETIRED: Word publishing happens only from the board editor's menu. main()
+prints a retirement notice and exits 0; setup_doc_sync.sh no longer installs
+the launchd agent that used to run this file.
 """
 
 import os
@@ -160,7 +162,18 @@ def log(msg):
     print(f"[{ts}] {msg}", flush=True)
 
 
+RETIRED_MESSAGE = "doc_sync_watcher is retired: Word publishing happens only from the editor menu."
+
+
 def main():
+    # Retired: Word is a tertiary surface, pushed only on purpose from the board
+    # editor's menu (POST /api/tasks/{id}/output/word). Exit before watching.
+    print(RETIRED_MESSAGE, flush=True)
+    sys.exit(0)
+
+
+def _legacy_main():
+    """The pre-retirement watcher loop, kept for reference (never called)."""
     config = doc_sync.load_config()
 
     if not config["sync_enabled"]:

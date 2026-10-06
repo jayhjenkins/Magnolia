@@ -2,7 +2,8 @@
 # setup_doc_sync.sh — One-time setup for bidirectional MD <-> Word sync.
 #
 # Installs dependencies, detects OneDrive path, creates config,
-# generates pandoc reference template, and installs launchd watcher.
+# generates pandoc reference template. No watcher is installed: Word
+# publishing happens only from the board editor's menu.
 
 set -euo pipefail
 
@@ -130,57 +131,18 @@ else
 fi
 echo
 
-# ─── 7. Install launchd watcher ──────────────────────────────────────────────
+# ─── 7. Retire any previously installed watcher ──────────────────────────────
+# Word publishing happens only from the board editor's menu, so no launchd
+# watcher is installed. An older install's agent is unloaded and its plist
+# removed (KeepAlive would otherwise relaunch the retired script forever).
 
-echo "Step 7: Installing launchd watcher daemon..."
-
-# Unload existing if present
-if launchctl list "$PLIST_NAME" &>/dev/null 2>&1; then
-    echo "  Stopping existing watcher..."
+if [ -f "$PLIST_PATH" ]; then
+    echo "Step 7: Retiring the old doc-sync watcher daemon..."
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    rm -f "$PLIST_PATH"
+    echo "  Removed: $PLIST_PATH"
+    echo
 fi
-
-cat > "$PLIST_PATH" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${PLIST_NAME}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/env</string>
-        <string>python3</string>
-        <string>${SCRIPT_DIR}/doc_sync_watcher.py</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>${PM_OS_DIR}</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>${PM_OS_DIR}/logs/doc_sync_watcher.log</string>
-    <key>StandardErrorPath</key>
-    <string>${PM_OS_DIR}/logs/doc_sync_watcher.log</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    </dict>
-</dict>
-</plist>
-EOF
-
-echo "  Written: $PLIST_PATH"
-
-# Ensure logs directory exists
-mkdir -p "$PM_OS_DIR/logs"
-
-# Load the daemon
-launchctl load "$PLIST_PATH"
-echo "  Watcher daemon started."
-echo
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 
@@ -191,8 +153,5 @@ echo "  python3 scripts/doc_sync.py sync-one datasets/product/prds/2026/example.
 echo "  python3 scripts/doc_sync.py status"
 echo "  python3 scripts/doc_sync.py sync-all"
 echo
-echo "The watcher daemon will auto-sync changes bidirectionally."
-echo "Logs: $PM_OS_DIR/logs/doc_sync_watcher.log"
-echo
-echo "To stop the watcher:  launchctl unload $PLIST_PATH"
-echo "To restart:           launchctl unload $PLIST_PATH && launchctl load $PLIST_PATH"
+echo "Word copies are published only from the board editor's menu (Publish to Word)."
+echo "The commands above are operator-run maintenance tools."

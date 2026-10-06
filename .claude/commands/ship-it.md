@@ -287,20 +287,22 @@ Ask the PM:
 - If `--skip-jira` or the PM declines: end Phase 7 with the reminder "Run `/jira:create --feature` later, or re-run with `--jira-only --package {package}`."
 - If yes: continue.
 
-#### Step 7.2: Get the Spec Reference URL (manual publish gate)
+#### Step 7.2: Get the Spec Reference URL (existing Word links only)
 
-The PRD's Word/SharePoint URL becomes both the Jira **Spec Reference** field value and the in-body link. We also need the internal press release URL for the description body.
+The PRD's Word URL becomes both the Jira **Spec Reference** field value and the in-body link. We also need the internal press release URL for the description body.
+
+**This command never pushes a Word doc.** The only place a Word copy is created or updated is the board's markdown editor 3-dot menu ("Publish to Word" / "Sync with Word"). Never run `doc_sync.py sync-one`, `sync-folder`, or `sync-all` here.
 
 Ask:
 > "To populate Spec Reference, the PRD needs a Word URL. Pick one:
-> (a) Publish the package to SharePoint now (manual confirmation — same rule as always).
+> (a) Use the existing Word links for this package (read-only lookup).
 > (b) Paste a URL I already have.
-> (c) Skip — draft with Spec Reference blank, fill in later."
+> (c) Skip - draft with Spec Reference blank, fill in later."
 
-- **(a)**: Run `python3 scripts/doc_sync.py sync-folder {package} --json`. Parse the JSON output (shape: `{"folder": "...", "files": [{"file": "...", "url": "...", ...}]}`). Capture two URLs:
+- **(a)**: Run `python3 scripts/doc_sync.py urls {package} --json` (read-only; it lists only the `.md` files whose Word copy already exists). Parse the JSON output (shape: `{"folder": "...", "files": [{"file": "...", "url": "..."}]}`). Capture two URLs:
   - The `url` from the entry whose `file` matches `PRD_{slug}.md` → **Spec Reference** field + "Full PRD" line in the description.
   - The `url` from the entry whose `file` matches `press-release-internal.md` → "Internal Press Release" line in the description.
-  Skip a URL silently if its entry has `status: "error: ..."` or `url` is empty.
+  If either file has no entry (no Word copy yet) or its `url` is empty, tell the PM: "`{file}` has no Word copy yet. Open it in the board editor and use **Publish to Word** from the 3-dot menu, then re-run this step - or pick (b) or (c)." Do not publish it yourself.
 - **(b)**: Prompt twice — once for the PRD URL (Spec Reference) and once for the internal press release URL. Either can be skipped.
 - **(c)**: Leave both empty.
 
@@ -418,6 +420,6 @@ This pipeline is cheap to run. Feed it different input context, run it multiple 
 While `/ship-it` minimizes pauses, the PM MUST still make judgment calls at:
 - **Expansion proposals**: Accept or reject each one (auto-pauses here)
 - **Critical red team findings**: Confirm fixes are adequate
-- **Jira Feature handoff (Phase 7)**: Confirm intent, decide on manual publish vs. paste vs. skip for the Spec Reference URL, and provide GTM/EA dates (TBD allowed)
+- **Jira Feature handoff (Phase 7)**: Confirm intent, decide on existing Word link lookup vs. paste vs. skip for the Spec Reference URL (no Word push), and provide GTM/EA dates (TBD allowed)
 
 These pauses are non-negotiable even in end-to-end mode. The PM decides, agents propose.

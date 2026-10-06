@@ -53,8 +53,8 @@ def test_publish_without_mgc_raises_not_configured(monkeypatch):
 
 
 # ── Attachments degrade ladder (inc5 slice 9) ────────────────────────────────
-# email: md -> temp docx (base64). teams: md -> docx in OneDrive -> SharePoint URL
-# (reference). ANY failure degrades to an inline link in the body; never raises.
+# email: md -> temp docx (base64). teams: reference an EXISTING Word copy's URL
+# (never pushes one). ANY failure degrades to an inline link in the body; never raises.
 
 def test_publish_email_converts_md_attachment_to_docx(monkeypatch, tmp_path):
     monkeypatch.setattr(m365.shutil, "which", lambda _: "/usr/bin/mgc")
@@ -89,13 +89,19 @@ def test_publish_email_degrades_to_inline_link_when_conversion_fails(monkeypatch
     assert str(md) in seen["body"]     # link inlined instead — never dropped silently
 
 
-def test_publish_teams_references_sharepoint_url(monkeypatch, tmp_path):
+def _no_push(_p):
+    raise AssertionError("Teams attachments must never push a Word doc (sync_one)")
+
+
+def test_publish_teams_references_existing_word_url(monkeypatch, tmp_path):
     monkeypatch.setattr(m365.shutil, "which", lambda _: "/usr/bin/mgc")
     monkeypatch.setattr(m365, "_resolve_me_upn", lambda: "me@co.com")
     md = tmp_path / "digest.md"
     md.write_text("# hi")
-    monkeypatch.setattr(m365.doc_sync, "sync_one", lambda p: None)
-    monkeypatch.setattr(m365.doc_sync, "sharepoint_url_for", lambda p: "https://sp/digest.docx")
+    monkeypatch.setattr(m365.doc_sync, "sync_one", _no_push)
+    monkeypatch.setattr(m365.doc_sync, "word_status",
+                        lambda p: {"exists": True, "url": "https://sp/digest.docx",
+                                   "docx_path": "/od/digest.docx"})
     seen = {}
     monkeypatch.setattr(graph, "send_teams",
                         lambda me, to, body, **k: seen.update(atts=k.get("attachments"), body=body)
@@ -103,36 +109,56 @@ def test_publish_teams_references_sharepoint_url(monkeypatch, tmp_path):
     m365.publish({"channel": "teams", "to": ["t@co.com"], "body": "B", "attachments": [str(md)]})
     assert seen["atts"][0]["url"] == "https://sp/digest.docx"
     assert seen["atts"][0]["name"] == "digest.md"
+    assert seen["body"] == "B"
 
 
-def test_publish_teams_degrades_when_doc_sync_unconfigured_systemexit(monkeypatch, tmp_path):
-    """doc_sync.load_config() calls sys.exit(1) (SystemExit, a BaseException) when
-    doc_sync is unconfigured - the default. The Teams attachment path must still
-    degrade to an inline link, NOT crash the send (slice 9 iron rule)."""
+def test_publish_teams_degrades_when_no_word_copy(monkeypatch, tmp_path):
+    """No .docx published yet -> never push one; degrade to an inline link."""
     monkeypatch.setattr(m365.shutil, "which", lambda _: "/usr/bin/mgc")
     monkeypatch.setattr(m365, "_resolve_me_upn", lambda: "me@co.com")
     md = tmp_path / "digest.md"
     md.write_text("# hi")
-    def _exit(_p):
-        raise SystemExit(1)   # mirrors doc_sync.load_config() when unconfigured
-    monkeypatch.setattr(m365.doc_sync, "sync_one", _exit)
+    monkeypatch.setattr(m365.doc_sync, "sync_one", _no_push)
+    monkeypatch.setattr(m365.doc_sync, "word_status",
+                        lambda p: {"exists": False, "url": None, "docx_path": None})
     seen = {}
     monkeypatch.setattr(graph, "send_teams",
                         lambda me, to, body, **k: seen.update(atts=k.get("attachments"), body=body)
                         or {"message_id": "M1"})
-    # Must NOT raise SystemExit; must degrade.
     m365.publish({"channel": "teams", "to": ["t@co.com"], "body": "B", "attachments": [str(md)]})
     assert not seen["atts"]
     assert str(md) in seen["body"]
 
 
-def test_publish_teams_degrades_when_no_url(monkeypatch, tmp_path):
+def test_publish_teams_degrades_when_doc_sync_unconfigured_systemexit(monkeypatch, tmp_path):
+    """Belt-and-braces: even if the Word lookup raised SystemExit (doc_sync's
+    load_config exits when unconfigured), the Teams send degrades to an inline
+    link instead of crashing (slice 9 iron rule)."""
     monkeypatch.setattr(m365.shutil, "which", lambda _: "/usr/bin/mgc")
     monkeypatch.setattr(m365, "_resolve_me_upn", lambda: "me@co.com")
     md = tmp_path / "digest.md"
     md.write_text("# hi")
-    monkeypatch.setattr(m365.doc_sync, "sync_one", lambda p: None)
-    monkeypatch.setattr(m365.doc_sync, "sharepoint_url_for", lambda p: None)
+    def _exit(_p):
+        raise SystemExit(1)
+    monkeypatch.setattr(m365.doc_sync, "word_status", _exit)
+    monkeypatch.setattr(m365.doc_sync, "sync_one", _no_push)
+    seen = {}
+    monkeypatch.setattr(graph, "send_teams",
+                        lambda me, to, body, **k: seen.update(atts=k.get("attachments"), body=body)
+                        or {"message_id": "M1"})
+    m365.publish({"channel": "teams", "to": ["t@co.com"], "body": "B", "attachments": [str(md)]})
+    assert not seen["atts"]
+    assert str(md) in seen["body"]
+
+
+def test_publish_teams_degrades_when_word_exists_but_no_url(monkeypatch, tmp_path):
+    monkeypatch.setattr(m365.shutil, "which", lambda _: "/usr/bin/mgc")
+    monkeypatch.setattr(m365, "_resolve_me_upn", lambda: "me@co.com")
+    md = tmp_path / "digest.md"
+    md.write_text("# hi")
+    monkeypatch.setattr(m365.doc_sync, "sync_one", _no_push)
+    monkeypatch.setattr(m365.doc_sync, "word_status",
+                        lambda p: {"exists": True, "url": None, "docx_path": "/od/digest.docx"})
     seen = {}
     monkeypatch.setattr(graph, "send_teams",
                         lambda me, to, body, **k: seen.update(atts=k.get("attachments"), body=body)

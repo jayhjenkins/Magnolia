@@ -156,6 +156,9 @@ button.dt-artifact { width: 100%; text-align: left; font-family: inherit; cursor
 }
 .dte-menu-item:hover { background: var(--surface-hover); }
 .dte-menu-item svg { width: 15px; height: 15px; color: var(--text-dim); flex: 0 0 auto; }
+.dte-menu-item[hidden] { display: none; }
+.dte-menu-item:disabled { cursor: default; color: var(--text-dim); }
+.dte-menu-item:disabled:hover { background: transparent; }
 
 /* Scroll region holding the editor surface. */
 .dte-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; position: relative; }

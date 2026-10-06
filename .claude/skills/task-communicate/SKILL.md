@@ -78,13 +78,12 @@ When the agent finishes work:
 ./scripts/task.sh agent:complete TASK-0042 --output "datasets/product/agent-output/retention-analysis.md"
 ```
 
-**Output location:** Save agent work products to `datasets/product/agent-output/` by default. This folder is synced to Word/SharePoint, so the "Open in Word" link will appear on the task card automatically. Use domain-specific folders (e.g., `datasets/recruiting/...`) only when the output clearly belongs there.
+**Output location:** Save agent work products to `datasets/product/agent-output/` by default. Completing a task never creates a Word copy; if the PM wants one, they publish it from the board editor's 3-dot menu ("Publish to Word"), after which the "Open in Word" link appears on the card. Use domain-specific folders (e.g., `datasets/recruiting/...`) only when the output clearly belongs there.
 
 This sets:
 - `agent_status: complete`
 - `agent_completed: <timestamp>`
 - `agent_output: <path>`
-- `sharepoint_path: <computed Word/OneDrive path>` (if output is in a synced folder)
 - Archives the task to `_archive/YYYY-MM/`
 
 The human sees completed tasks in `inbox` under "COMPLETED BY AGENT (need your review)".

@@ -123,7 +123,7 @@ is visible on the board once it spawns), mark it in-progress as you begin, done 
 4. **Doctor pass** — invoke the `workflow-doctor` skill; it runs `python3 scripts/doctor.py detect`
    and remediates conversationally. **Treat qmd, pandoc, and mgc as strongly recommended, not
    optional** — offer to install each now and say plainly what it unlocks: qmd → semantic search
-   (the killer feature); pandoc → Word-doc creation / publish-package; mgc → Outlook + Teams send
+   (the killer feature); pandoc → Word-doc publishing from the editor menu; mgc → Outlook + Teams send
    and calendar invites. Posture: "you don't have to, but you really should." qmd installs with
    **`npm install -g @tobilu/qmd`** (https://github.com/tobi/qmd, Node ≥ 22) — never `brew install
    qmd` or any other "qmd" repo. Still: if a tool can't be fixed, degraded features just stay

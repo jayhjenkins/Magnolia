@@ -10,7 +10,6 @@ One implementation, zero duplication, zero drift.
 import os
 import sys
 import shutil
-import subprocess
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -136,22 +135,6 @@ def _write_task_file(filepath, frontmatter, body):
         raise ValueError(f"YAML validation failed after write: {e}")
 
 
-def _sharepoint_path(local_path):
-    """Return the SharePoint/OneDrive docx path for a local file, or None.
-
-    Non-critical: returns None silently if doc_sync is not configured.
-    """
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "doc_sync", os.path.join(os.path.dirname(__file__), "doc_sync.py"))
-        doc_sync = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(doc_sync)
-        return doc_sync.sharepoint_path_for(local_path)
-    except Exception:
-        return None
-
-
 def _sharepoint_url(local_path):
     """Return a browser-openable SharePoint/OneDrive URL for a local file, or None.
 
@@ -179,20 +162,6 @@ def _sharepoint_url_from_docx(docx_path):
         return doc_sync.sharepoint_url_from_docx_path(docx_path)
     except Exception:
         return None
-
-
-def _trigger_doc_sync(local_path):
-    """Trigger async doc sync for an output artifact. Fire-and-forget."""
-    try:
-        sync_script = os.path.join(os.path.dirname(__file__), "doc_sync.py")
-        subprocess.Popen(
-            [sys.executable, sync_script, "sync-one", str(local_path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **platform_lib.process_group_kwargs(),
-        )
-    except Exception:
-        pass  # Non-critical, don't break task completion
 
 
 def _next_id():
@@ -641,13 +610,8 @@ def complete_task(task_id, output_path=None, actor="human"):
     fm["updated"] = now
     if output_path:
         fm["agent_output"] = output_path
-        # Compute SharePoint path and URL if doc sync is configured
-        sp = _sharepoint_path(output_path)
-        if sp:
-            fm["sharepoint_path"] = sp
-        sp_url = _sharepoint_url(output_path)
-        if sp_url:
-            fm["sharepoint_url"] = sp_url
+        # No Word push / sharepoint stamping here: Word publishing happens only
+        # from the board editor's menu (POST /api/tasks/{id}/output/word).
 
     # Append completion log entry
     log_msg = "Task completed."
@@ -662,10 +626,6 @@ def complete_task(task_id, output_path=None, actor="human"):
 
     _write_task_file(archive_path, fm, body)
     os.remove(filepath)
-
-    # Trigger async doc sync if output has a SharePoint path
-    if output_path and fm.get("sharepoint_path"):
-        _trigger_doc_sync(output_path)
 
     return archive_path
 

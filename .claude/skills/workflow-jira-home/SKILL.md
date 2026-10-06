@@ -392,5 +392,5 @@ The flow is identical to Phase 3 (Epic mirrors Feature) and Phase 4 (Story mirro
 ## Related Skills
 
 - `prd-creation` — Create PRDs that can be linked to Features
-- `publish-package` — Sync PRD packages to SharePoint (generates shareable URLs for Feature descriptions)
+- `publish-package` — Read-only lookup of existing Word URLs for a PRD package (for Spec Reference / Feature descriptions); Word copies are created only from the board editor 3-dot menu
 - `product-planning` — Meetings-to-backlog pipeline that may generate Unit / Bug drafts

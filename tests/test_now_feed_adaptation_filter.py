@@ -41,7 +41,7 @@ def _patch(monkeypatch, *, off_card_type):
     """Stub the list source and is_live so only off_card_type is not-live."""
     import task_server, task_lib
     monkeypatch.setattr(task_lib, "list_tasks", lambda **kw: [dict(t) for t in _MIXED_TASKS])
-    monkeypatch.setattr(task_server, "_enrich_sharepoint_url", lambda t: None)
+    monkeypatch.setattr(task_server, "_enrich_sharepoint_url", lambda t, **kw: None)
     monkeypatch.setattr(
         task_server.adaptations_lib, "is_live",
         lambda surface, ref: not (surface == "card-type" and ref == off_card_type),
@@ -87,7 +87,7 @@ def test_is_live_queried_once_per_distinct_card_type(monkeypatch):
     (t-4 and t-5 share 'stock-alert'; is_live should see it a single time)."""
     import task_server, task_lib
     monkeypatch.setattr(task_lib, "list_tasks", lambda **kw: [dict(t) for t in _MIXED_TASKS])
-    monkeypatch.setattr(task_server, "_enrich_sharepoint_url", lambda t: None)
+    monkeypatch.setattr(task_server, "_enrich_sharepoint_url", lambda t, **kw: None)
 
     refs = []
 

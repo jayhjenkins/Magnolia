@@ -15,7 +15,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import send_message_graph as graph  # noqa: E402
-import doc_sync  # noqa: E402 — the md->docx + SharePoint-URL seam (reused, not rebuilt)
+import doc_sync  # noqa: E402 - the md->docx + Word-URL lookup seam (reused, not rebuilt)
 from adapters.messaging._contract import NotConfigured  # noqa: E402
 
 # Cached signed-in UPN (needed to build the Teams chat member list). One resolve
@@ -53,8 +53,11 @@ def _resolve_attachments(paths, channel, root=None):
     Returns (send_attachments, degraded_paths, tmp_files):
       - email: send_attachments is a list of local file paths (a markdown source
         is rendered to a temp .docx via doc_sync; pandoc-missing -> degrade).
-      - teams: send_attachments is a list of {"name","url"} reference dicts (md ->
-        docx in OneDrive -> SharePoint URL; no URL resolvable -> degrade).
+      - teams: send_attachments is a list of {"name","url"} reference dicts. A
+        markdown source reuses the URL of its EXISTING Word copy (doc_sync
+        .word_status); this path never pushes a .docx to OneDrive - Word
+        publishing happens only from the board editor's menu. No published Word
+        copy (or no URL) -> degrade.
     A path that can't be prepared lands in degraded_paths (inline link instead).
     NEVER raises: an attachment failure must not block the send (invariant: the
     artifact is always delivered, as an attachment or a link, never silently lost)."""
@@ -73,19 +76,22 @@ def _resolve_attachments(paths, channel, root=None):
                     raise FileNotFoundError(src)
                 send_atts.append(src)
             else:  # teams — reference a hosted file by URL (no base64 path exists)
+                # Never push a Word doc from here: Word publishing happens only
+                # from the board editor's menu. Reuse an existing Word copy's URL.
                 url = None
                 if p.lower().endswith(".md"):
-                    doc_sync.sync_one(p)  # land the docx in OneDrive (raises if unconfigured)
-                    url = doc_sync.sharepoint_url_for(p)
+                    st = doc_sync.word_status(p)  # read-only lookup, never writes
+                    if st.get("exists"):
+                        url = st.get("url")
                 if not url:
-                    raise RuntimeError("no hosted URL for attachment")
+                    raise RuntimeError("no published Word copy for attachment")
                 send_atts.append({"name": os.path.basename(p), "url": url})
         except (Exception, SystemExit):
             # SystemExit too (not just Exception): doc_sync.load_config() calls
             # sys.exit(1) when doc_sync is unconfigured (the default on a fresh
-            # install / no sync_config.yaml), which is a BaseException and would
-            # otherwise escape and CRASH the send. The degrade-to-inline-link
-            # guarantee must hold regardless of doc_sync config state.
+            # install / no sync_config.yaml). word_status already swallows it,
+            # but the degrade-to-inline-link guarantee must hold regardless of
+            # doc_sync config state, so a BaseException exit never crashes a send.
             degraded.append(p)
     return send_atts, degraded, tmp_files
 

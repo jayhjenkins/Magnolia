@@ -3,25 +3,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import task_lib, otter_sync, doc_sync_watcher  # noqa: E402
 
 
-def test_doc_sync_trigger_uses_sys_executable(monkeypatch, tmp_path):
-    seen = {}
-    monkeypatch.setattr(task_lib.subprocess, "Popen",
-                        lambda cmd, **k: seen.setdefault("cmd", cmd))
-    task_lib._trigger_doc_sync(str(tmp_path / "a.md"))
-    assert seen["cmd"][0] == sys.executable
-
-
-def test_doc_sync_trigger_detaches_via_seam(monkeypatch, tmp_path):
-    import task_lib
-    monkeypatch.setattr(task_lib.platform_lib, "process_group_kwargs",
-                        lambda: {"_seam_marker": 1})
-    seen = {}
-    monkeypatch.setattr(task_lib.subprocess, "Popen",
-                        lambda cmd, **k: seen.update(k))
-    task_lib._trigger_doc_sync(str(tmp_path / "a.md"))
-    assert seen.get("_seam_marker") == 1
-
-
 def test_otter_notify_skips_without_osascript(monkeypatch):
     monkeypatch.setattr(otter_sync.shutil, "which", lambda n: None)
     called = []
@@ -45,3 +26,20 @@ def test_fswatch_guard_disables_watch_without_fswatch(monkeypatch):
     doc_sync_watcher.watch_local("/tmp/datasets")
     doc_sync_watcher.watch_remote("/tmp/remote")
     assert popened == []
+
+
+def test_doc_sync_watcher_is_retired(monkeypatch, capsys):
+    """Word publishing is menu-only: the watcher's entry point prints a retirement
+    notice and exits 0 before any watching starts."""
+    import pytest
+    started = []
+    monkeypatch.setattr(doc_sync_watcher, "watch_local", lambda *a, **k: started.append("l"))
+    monkeypatch.setattr(doc_sync_watcher, "watch_remote", lambda *a, **k: started.append("r"))
+    monkeypatch.setattr(doc_sync_watcher.subprocess, "Popen",
+                        lambda *a, **k: started.append("popen"))
+    with pytest.raises(SystemExit) as ei:
+        doc_sync_watcher.main()
+    assert ei.value.code == 0
+    assert started == []
+    assert ("doc_sync_watcher is retired: Word publishing happens only from the editor menu."
+            in capsys.readouterr().out)

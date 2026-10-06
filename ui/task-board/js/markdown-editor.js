@@ -32,6 +32,8 @@
   let crepeImportPromise = null;
   let menuClickHandler = null; // the one document click handler that dismisses the overflow menu
   let saving = false;        // true while a PUT is in flight, to serialize saves
+  let wordState = null;      // {exists, url, docx_path} from GET /output, or null when Word doesn't apply
+  let wordBusy = false;      // true while a Publish/Sync to Word POST is in flight
 
   // ── CSS injection (once) ─────────────────────────────────────────────
   function ensureCrepeCss() {
@@ -81,6 +83,8 @@
           <div class="dte-menu" role="menu">
             <a class="dte-menu-item dte-obsidian" role="menuitem" target="_blank" rel="noopener">${svgIcon('obsidian')}<span>Open in Obsidian</span></a>
             <button class="dte-menu-item dte-copy" type="button" role="menuitem">${svgIcon('output')}<span>Copy markdown</span></button>
+            <button class="dte-menu-item dte-word" type="button" role="menuitem" hidden>${svgIcon('send')}<span>Publish to Word</span></button>
+            <a class="dte-menu-item dte-word-open" role="menuitem" target="_blank" rel="noopener" hidden>${svgIcon('doc')}<span>Open in Word</span></a>
           </div>
         </div>
       </div>
@@ -122,6 +126,11 @@
       const md = getMarkdown();
       if (navigator.clipboard) navigator.clipboard.writeText(md).catch(() => {});
       menu.classList.remove('open');
+    });
+    ov.querySelector('.dte-word').addEventListener('click', () => {
+      menu.classList.remove('open');
+      ofBtn.setAttribute('aria-expanded', 'false');
+      publishToWord();
     });
 
     // Formatting toolbar. mousedown→preventDefault keeps the editor's selection
@@ -206,13 +215,16 @@
     saveTimer = setTimeout(flushSave, 750);
   }
 
+  // Returns true when the latest markdown is persisted (saved now, or nothing
+  // to save), false when the save failed or there is no editor, and null when a
+  // PUT is already in flight (the caller should wait and retry).
   async function flushSave() {
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-    if (!editorTaskId) return;
-    // Serialize: if a PUT is already in flight, bail — the debounce/poll re-attempts.
-    if (saving) return;
+    if (!editorTaskId) return false;
+    // Serialize: if a PUT is already in flight, bail - the debounce/poll re-attempts.
+    if (saving) return null;
     const md = getMarkdown();
-    if (md === lastSaved) { setSaveState('saved'); return; }
+    if (md === lastSaved) { setSaveState('saved'); return true; }
     setSaveState('saving');
     saving = true;
     try {
@@ -224,13 +236,94 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       lastSaved = md;
       setSaveState('saved');
+      return true;
     } catch (e) {
       setSaveState('error');
       // The editor may already be torn down (final save on close), so the
-      // inline indicator can no-op — surface the failure via the global toast.
-      if (typeof toast === 'function') toast('Couldn’t save your latest edit - please try again.');
+      // inline indicator can no-op - surface the failure via the global toast.
+      if (typeof toast === 'function') toast('Couldn\'t save your latest edit - please try again.');
+      return false;
     } finally {
       saving = false;
+    }
+  }
+
+  // Wait out any in-flight PUT, then persist pending edits, so Word gets the
+  // latest markdown. Returns false if the latest edit couldn't be saved.
+  async function settleSave() {
+    for (let i = 0; i < 100; i++) {
+      if (saving) { await new Promise(r => setTimeout(r, 50)); continue; }
+      const saved = await flushSave();
+      if (saved === null) continue;   // a PUT started in between - wait it out
+      return saved;                   // false: save failed (flushSave toasted)
+    }
+    return false;
+  }
+
+  // ── Word (menu-only publish surface) ─────────────────────────────────
+  // The menu item reflects `word` from GET /output: hidden when the server
+  // sends no `word` key (or the doc doesn't exist), "Publish to Word" before
+  // the first push, "Sync with Word" after; "Open in Word" once it has a URL.
+  function renderWordMenu() {
+    const btn = document.querySelector('.dt-editor .dte-word');
+    const open = document.querySelector('.dt-editor .dte-word-open');
+    if (!btn || !open) return;
+    const w = wordState;
+    btn.hidden = !w;
+    btn.disabled = wordBusy;
+    const label = btn.querySelector('span');
+    if (w && label) {
+      label.textContent = wordBusy
+        ? (w.exists ? 'Syncing...' : 'Publishing...')
+        : (w.exists ? 'Sync with Word' : 'Publish to Word');
+    }
+    if (w && w.exists && w.url) { open.href = w.url; open.hidden = false; }
+    else { open.removeAttribute('href'); open.hidden = true; }
+  }
+
+  async function postWord(taskId, confirm) {
+    const res = await fetch(`${API}/tasks/${taskId}/output/word`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (_) {}
+    return { res, data };
+  }
+
+  async function publishToWord() {
+    const taskId = editorTaskId;
+    if (!taskId || !wordState || wordBusy) return;
+    wordBusy = true;
+    renderWordMenu();
+    try {
+      if (!(await settleSave())) return;
+      if (editorTaskId !== taskId) return;
+      let { res, data } = await postWord(taskId, false);
+      if (res.status === 409 && data && data.needs_confirmation) {
+        const syncing = !!(wordState && wordState.exists);
+        const confirmTitle = syncing ? 'Sync with Word?' : 'Publish to Word?';
+        const confirmLabel = syncing ? 'Sync' : 'Publish';
+        const ok = typeof confirmAction === 'function'
+          ? await confirmAction({ title: confirmTitle, message: data.message || '', confirmLabel })
+          : window.confirm(data.message || confirmTitle);
+        if (!ok || editorTaskId !== taskId) return;
+        ({ res, data } = await postWord(taskId, true));
+      }
+      if (!res.ok || !data || !data.ok) {
+        throw new Error((data && data.error) || `HTTP ${res.status}`);
+      }
+      if (editorTaskId !== taskId) return;
+      if (data.word) wordState = data.word;
+      // core.js toast() only surfaces errors by design (a click is its own
+      // confirmation); the label flipping to "Sync with Word" is the visible cue.
+      if (typeof toast === 'function') toast(data.action === 'synced' ? 'Synced with Word' : 'Published to Word', 'success');
+    } catch (e) {
+      if (typeof toast === 'function') toast(`Couldn't publish to Word: ${(e && e.message) || 'unknown error'}`);
+    } finally {
+      wordBusy = false;
+      if (editorTaskId === taskId) renderWordMenu();
     }
   }
 
@@ -260,9 +353,16 @@
     let content = '', path = '', exists = true;
     try {
       const res = await fetch(`${API}/tasks/${taskId}/output`);
-      if (res.ok) { const data = await res.json(); content = data.content || ''; path = data.path || ''; exists = data.exists !== false; }
+      if (res.ok) {
+        const data = await res.json();
+        content = data.content || ''; path = data.path || ''; exists = data.exists !== false;
+        wordState = (data.word && typeof data.word === 'object') ? data.word : null;
+      }
     } catch (_) {}
+    if (editorTaskId !== taskId) return;
     docPath = path;
+    if (!exists) wordState = null;   // nothing to publish
+    renderWordMenu();
     lastSaved = content;
 
     // Filename + Obsidian link.
@@ -333,6 +433,8 @@
     if (crepe) { try { crepe.destroy(); } catch (_) {} crepe = null; }
     fallbackEl = null;
     editorTaskId = null;
+    wordState = null;
+    wordBusy = false;
     const ov = document.querySelector('.dt-editor');
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     const taskPane = document.querySelector('#split-modal .task-pane');
