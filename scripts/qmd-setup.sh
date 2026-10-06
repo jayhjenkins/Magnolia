@@ -23,7 +23,7 @@ echo
 echo "Adding collections..."
 
 # Build the HTML-artifact mirror first so its collection dir exists on a fresh install.
-python3 "$PMDIR/scripts/html_text_mirror.py"
+python3 "$PMDIR/scripts/html_text_mirror.py" || mkdir -p "$PMDIR/datasets/.qmd-html"
 
 $QMD collection add "$PMDIR/datasets/meetings/product"    --mask "**/*.txt" --name meetings_product
 $QMD collection add "$PMDIR/datasets/meetings/leadership" --mask "**/*.txt" --name meetings_leadership
