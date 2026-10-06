@@ -118,6 +118,7 @@ function outputLink(task) {
   if (task.agent_output) {
     const v = String(task.agent_output).trim();
     if (v.endsWith('.md')) return { href: obsidianUri(v), label: 'Open output', external: false };
+    if (/\.html?$/i.test(v)) return { href: '/artifact/' + encodeURIComponent(task.id), label: 'Open page', external: true };
     const m = v.match(/https?:\/\/[^\s)]+/);
     if (m) return { href: m[0], label: 'Open output', external: true };
   }

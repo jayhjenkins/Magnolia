@@ -90,6 +90,8 @@ async function openTask(taskId, keepChat) {
       const v = String(task.agent_output).trim();
       if (v.endsWith('.md')) {
         artifacts.push({ icon: 'doc', cls: 'dt-review', kind: 'Markdown', name: v.split('/').pop(), path: shortArtifactPath(v), inline: true, taskId: task.id, label: 'Review & edit', external: false });
+      } else if (/\.html?$/i.test(v)) {
+        artifacts.push({ icon: 'doc', cls: 'dt-review dt-html', kind: 'HTML page', name: v.split('/').pop(), path: shortArtifactPath(v), inline: true, taskId: task.id, label: 'Preview', external: false });
       } else {
         const mu = v.match(/https?:\/\/[^\s)]+/);
         if (mu) artifacts.push({ icon: 'output', cls: '', kind: 'Link', name: 'Agent output', path: mu[0].replace(/^https?:\/\//, ''), href: mu[0], label: 'Open', external: true });

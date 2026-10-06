@@ -493,7 +493,7 @@
   // keep the click off parent card handlers), which would otherwise prevent a
   // bubble-phase document listener from ever seeing it. Capture runs first.
   document.addEventListener('click', (e) => {
-    const btn = e.target.closest && e.target.closest('.dt-review[data-output-task]');
+    const btn = e.target.closest && e.target.closest('.dt-review[data-output-task]:not(.dt-html)');
     if (btn) openOutputEditor(btn.dataset.outputTask);
   }, true);
 
