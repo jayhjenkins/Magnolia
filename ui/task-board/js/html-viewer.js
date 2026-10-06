@@ -29,6 +29,7 @@
   let saveTimer = null;
   let saving = false;
   let saveGen = 0;         // bumps when a PUT starts; polls begun earlier are discarded
+  let lastPersist = null;  // promise of the latest close-time snapshot save
   let knownDisk = null;    // {taskId, content} last known on disk (outlives the viewer)
 
   function q(sel) { return document.querySelector('.dt-htmlview ' + sel); }
@@ -117,6 +118,9 @@
       const snap = snapshot();
       destroyViewer();
       pending = persistSnapshot(snap);
+    } else if (lastPersist) {
+      // A just-closed viewer may still be saving - wait so we never fetch stale.
+      pending = lastPersist;
     }
     const gen = ++viewGen;
     viewTaskId = taskId;
@@ -174,9 +178,19 @@
     } else {
       const gen = viewGen;
       btn.disabled = true;
-      const saved = await settleSave();
+      ta.readOnly = true;   // freeze input while we persist
+      let saved = await settleSave();
       if (gen !== viewGen) return;
+      if (saved) {
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+        // Anything that landed after the snapshot gets one more save.
+        if (ta.value !== lastContent) {
+          saved = await settleSave();
+          if (gen !== viewGen) return;
+        }
+      }
       btn.disabled = false;
+      ta.readOnly = false;
       // Save failed (already toasted): stay in source so the edit isn't lost.
       if (!saved) return;
       mode = 'preview';
@@ -279,6 +293,12 @@
     return putContent(snap.taskId, snap.content);
   }
 
+  function trackPersist(p) {
+    const tracked = p.catch(() => false).finally(() => { if (lastPersist === tracked) lastPersist = null; });
+    lastPersist = tracked;
+    return tracked;
+  }
+
   // Persist a snapshot taken before teardown: wait out any in-flight PUT,
   // then PUT the snapshot if it still differs from what's known on disk.
   async function persistSnapshot(snap) {
@@ -373,7 +393,7 @@
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
     const ta = q('.dth-source');
     if (ta) ta.readOnly = true;
-    persistSnapshot(snap);
+    trackPersist(persistSnapshot(snap));
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     const gen = viewGen;
     const done = () => { if (gen === viewGen) destroyViewer(); };
@@ -395,7 +415,7 @@
     if (document.querySelector('.dt-htmlview')) {
       const snap = snapshot();
       destroyViewer();
-      persistSnapshot(snap);
+      trackPersist(persistSnapshot(snap));
     }
     if (typeof _origCloseModal === 'function') return _origCloseModal.apply(this, arguments);
   };
