@@ -159,3 +159,33 @@ def test_output_routes_registered_before_generic_get():
     out_idx = src.index('/api/tasks/([^/]+)/output$')
     generic_idx = src.index('^/api/tasks/([^/]+)$')
     assert out_idx < generic_idx, "output route must be matched before the generic task GET"
+
+
+def test_resolve_output_path_html_opt_in(srv):
+    assert srv._resolve_output_path("datasets/product/x.html") is None          # default md-only
+    got = srv._resolve_output_path("datasets/product/x.html", allow_html=True)
+    assert got is not None and got.endswith("x.html")
+    assert srv._resolve_output_path("../../etc/x.html", allow_html=True) is None
+
+
+def test_get_output_html_returns_format_html(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    h = _FakeHandler()
+    srv.handle_get_output(h, tid)
+    body = h.json()
+    assert h.status == 200 and body["format"] == "html" and body["content"] == "<h1>Hi</h1>"
+    assert "word" not in body
+
+
+def test_put_output_html_saves_in_place(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    srv.handle_save_output(_FakeHandler({"content": "<h1>Bye</h1>"}), tid)
+    with open(os.path.join(tasks_root, "datasets/product/p.html"), encoding="utf-8") as f:
+        assert f.read() == "<h1>Bye</h1>"
+
+
+def test_publish_word_still_rejects_html(srv, tasks_root):
+    tid = _seed_task_with_output(tasks_root, "datasets/product/p.html", "<h1>Hi</h1>")
+    h = _FakeHandler({"confirm": False})
+    srv.handle_publish_word(h, tid)
+    assert h.status == 404

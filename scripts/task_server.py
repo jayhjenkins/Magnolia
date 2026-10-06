@@ -40,6 +40,7 @@ import ladder_lib
 import cron_lib
 import program_lib
 import jira_publish
+import html_artifact_lib
 import profile_lib
 import packs_lib
 import platform_lib
@@ -216,15 +217,18 @@ def _discard_request_body(handler):
         handler.close_connection = True
 
 
-def _resolve_output_path(rel):
-    """Resolve a task's agent_output to an absolute .md path inside PM_OS_DIR.
+def _resolve_output_path(rel, allow_html=False):
+    """Resolve a task's agent_output to an absolute path inside PM_OS_DIR.
 
-    Returns the absolute path, or None when there is no path, it is not a .md
-    file, or it would escape PM_OS_DIR (path-traversal guard). Mirrors
-    handle_open_file's PM_OS_DIR resolution, plus the containment check.
+    Accepts .md paths always, and .html/.htm paths only when allow_html=True
+    (the inline editor and the /artifact page; Word stays markdown-only).
+    Returns the absolute path, or None when there is no path, it is not an
+    accepted file type, or it would escape PM_OS_DIR (path-traversal guard).
+    Mirrors handle_open_file's PM_OS_DIR resolution, plus the containment check.
     """
     rel = (rel or "").strip()
-    if not rel or not rel.endswith(".md"):
+    if not rel or not (rel.endswith(".md")
+                       or (allow_html and html_artifact_lib.is_html_path(rel))):
         return None
     base = os.path.realpath(PM_OS_DIR)
     candidate = os.path.realpath(rel if os.path.isabs(rel) else os.path.join(base, rel))
@@ -860,7 +864,11 @@ def handle_get_task(handler, task_id):
 
 
 def handle_get_output(handler, task_id):
-    """GET /api/tasks/{id}/output — return the task's .md artifact for inline editing."""
+    """GET /api/tasks/{id}/output - return the task's .md or .html artifact for inline editing.
+
+    `format` is "html" for .html/.htm outputs, else "markdown". `word` (Word
+    publish status) is attached only for markdown outputs under datasets/.
+    """
     try:
         task_data = task_lib.read_task(task_id)
     except FileNotFoundError:
@@ -871,10 +879,11 @@ def handle_get_output(handler, task_id):
         return
 
     rel = str(task_data["frontmatter"].get("agent_output") or "")
-    filepath = _resolve_output_path(rel)
+    filepath = _resolve_output_path(rel, allow_html=True)
     if filepath is None:
-        _error_response(handler, "Task has no editable markdown output", status=404)
+        _error_response(handler, "Task has no editable output", status=404)
         return
+    fmt = "html" if html_artifact_lib.is_html_path(rel) else "markdown"
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
@@ -883,16 +892,16 @@ def handle_get_output(handler, task_id):
         # yet (e.g. an agent stamped agent_output without producing the file).
         # Return the path so the client can title the doc and show an honest
         # "not found" state, rather than 404ing into a silent blank editor.
-        resp = {"path": rel.strip(), "format": "markdown", "content": "", "exists": False}
-        if _under_datasets(filepath):
+        resp = {"path": rel.strip(), "format": fmt, "content": "", "exists": False}
+        if fmt == "markdown" and _under_datasets(filepath):
             resp["word"] = doc_sync.word_status(filepath)
         _json_response(handler, resp)
         return
     except Exception as e:
         _error_response(handler, f"Failed to read output: {e}", status=500)
         return
-    resp = {"path": rel.strip(), "format": "markdown", "content": content, "exists": True}
-    if _under_datasets(filepath):  # only datasets/ outputs are publishable to Word
+    resp = {"path": rel.strip(), "format": fmt, "content": content, "exists": True}
+    if fmt == "markdown" and _under_datasets(filepath):  # only datasets/ markdown publishes to Word
         resp["word"] = doc_sync.word_status(filepath)
     _json_response(handler, resp)
 
@@ -1047,7 +1056,7 @@ def _utc_now_iso():
 
 
 def handle_save_output(handler, task_id):
-    """PUT /api/tasks/{id}/output — persist edited markdown back to the artifact file."""
+    """PUT /api/tasks/{id}/output - persist edited markdown or HTML back to the artifact file."""
     try:
         task_data = task_lib.read_task(task_id)
     except FileNotFoundError:
@@ -1058,9 +1067,9 @@ def handle_save_output(handler, task_id):
         return
 
     rel = str(task_data["frontmatter"].get("agent_output") or "")
-    filepath = _resolve_output_path(rel)
+    filepath = _resolve_output_path(rel, allow_html=True)
     if filepath is None:
-        _error_response(handler, "Task has no editable markdown output", status=404)
+        _error_response(handler, "Task has no editable output", status=404)
         return
     try:
         body = _read_request_body(handler)
