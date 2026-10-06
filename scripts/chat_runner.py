@@ -27,6 +27,7 @@ import platform_lib
 import profile_lib
 import task_lib
 import chat_transcript
+import html_artifact_lib
 
 # Reuse dispatch's process-group teardown verbatim so chat and background runs
 # share one battle-tested kill path (SIGTERM → wait(timeout=5) → SIGKILL the
@@ -242,6 +243,12 @@ def _card_type_context(task, name):
     return ""
 
 
+def _html_hint(task):
+    """Edit-in-place guidance when the task's output is an HTML page."""
+    out = str((task or {}).get("agent_output") or "").strip()
+    return html_artifact_lib.chat_hint(out) if html_artifact_lib.is_html_path(out) else ""
+
+
 def build_context_prompt(task, body, user_message):
     """Build the first-turn system/context prompt for a NEW chat session.
 
@@ -286,6 +293,7 @@ def build_context_prompt(task, body, user_message):
         f"{_capability_boundary(name)}\n\n"
         f"{_engine_change_boundary()}\n\n"
         f"{card_ctx}"
+        f"{_html_hint(task)}"
         f"{task_block}\n\n"
         f"{body_block}"
         f"## {name}'s message\n"
@@ -335,6 +343,7 @@ def build_resume_prompt(task, user_message, *, first_interactive=False, body=Non
             f"{_engine_change_boundary()}\n\n"
             f"{state_block}\n\n"
             f"{_card_body_block(body, current=True)}"
+            f"{_html_hint(task)}"
             f"## {name}'s message\n"
             f"{user_message}"
         )
@@ -345,6 +354,7 @@ def build_resume_prompt(task, user_message, *, first_interactive=False, body=Non
         f"{state_block}\n"
         f"(These are the task's current values — they may have changed since the "
         f"last turn; trust them over anything earlier in the conversation.)\n\n"
+        f"{_html_hint(task)}"
         f"## {name}'s message\n"
         f"{user_message}"
     )
