@@ -17,6 +17,9 @@ def test_detect_output_format_phrases():
     assert h.detect_output_format("Pre-read as an HTML page", "") == "html"
     assert h.detect_output_format("Write the memo", "summarize the html export") is None
     assert h.detect_output_format("Write the memo", "") is None
+    assert h.detect_output_format("Fix layout", "use it as a page break") is None
+    assert h.detect_output_format("Fix layout", "save as page 2") is None
+    assert h.detect_output_format("Escape", "treat as html entities") is None
 
 
 def test_resolve_output_format_precedence():
@@ -25,26 +28,35 @@ def test_resolve_output_format_precedence():
     assert h.resolve_output_format({}, {}) == "md"
     assert h.resolve_output_format({"output_format": "bogus"}, {}) == "md"
     assert h.resolve_output_format(None, None) == "md"
+    assert h.resolve_output_format("html", ["html"]) == "md"
+    assert h.resolve_output_format("bad", {"output_format": "html"}) == "html"
 
 
 def test_dispatch_block_points_at_contract_and_profile():
     b = h.dispatch_block()
     assert "context-html-artifact" in b and "profile/voice/html.md" in b
     assert ".html" in b
-    b.encode("ascii")  # ASCII-safe runtime text
+    assert b.isascii()  # ASCII-safe runtime text
 
 
 def test_chat_hint_names_path_and_in_place_rule():
     t = h.chat_hint("datasets/product/agent-output/x.html")
     assert "datasets/product/agent-output/x.html" in t
     assert "in place" in t
-    t.encode("ascii")
+    assert t.isascii()
 
 
-def test_csp_blocks_network_and_same_origin():
-    assert "sandbox allow-scripts" in h.CSP
-    assert "allow-same-origin" not in h.CSP
-    assert "connect-src 'none'" in h.CSP
+def test_csp_exact():
+    assert h.CSP == (
+        "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; "
+        "default-src 'none'; "
+        "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com data:; "
+        "img-src https: data:; "
+        "script-src 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "connect-src 'none'"
+    )
+    assert h.CSP.isascii()
 
 
 def test_html_to_text_drops_style_script_and_tags():
@@ -53,3 +65,32 @@ def test_html_to_text_drops_style_script_and_tags():
     out = h.html_to_text(src)
     assert "color:red" not in out and "var x" not in out
     assert "Offers" in out and "GA in Q4." in out
+    assert "Offers\nGA in Q4." in out
+
+
+def test_html_to_text_table_cells_separated():
+    out = h.html_to_text("<table><tr><th>Name</th><th>Value</th></tr>"
+                         "<tr><td>A</td><td>1</td></tr></table>")
+    assert "NameValue" not in out and "A1" not in out
+    assert out.splitlines() == ["Name Value", "A 1"]
+
+
+def test_html_to_text_drops_noscript_svg_template():
+    src = ("<p>keep</p><noscript>ns-gone</noscript>"
+           "<svg><g><svg><text>inner-gone</text></svg><text>outer-gone</text></g></svg>"
+           "<template>tpl-gone</template><p>after</p>")
+    out = h.html_to_text(src)
+    for gone in ("ns-gone", "inner-gone", "outer-gone", "tpl-gone"):
+        assert gone not in out
+    assert out.splitlines() == ["keep", "after"]
+
+
+def test_html_to_text_new_block_tags_break_lines():
+    out = h.html_to_text("<dl><dt>Term</dt><dd>Def</dd></dl><figure>Fig"
+                         "<figcaption>Cap</figcaption></figure><details><summary>S</summary>D</details>")
+    assert out.splitlines() == ["Term", "Def", "Fig", "Cap", "S", "D"]
+
+
+def test_html_to_text_entities_and_nbsp():
+    out = h.html_to_text("<p>R&amp;D&nbsp;&nbsp; team</p>")
+    assert out == "R&D team"

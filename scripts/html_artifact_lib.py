@@ -23,10 +23,11 @@ CSP = (
     "connect-src 'none'"
 )
 
-_HTML_ASK = re.compile(r"\bas\s+(?:an?\s+)?(?:html(?:\s+page)?|page|web\s*page)\b", re.I)
+_HTML_ASK = re.compile(r"\bas\s+(?:an?\s+)?(?:html(?:\s+page)?|page|web\s*page)\b(?!\s+(?:break|\d|entit))", re.I)
 
 
 def is_html_path(path):
+    """True when the path ends in .html or .htm (case/whitespace-insensitive)."""
     p = (path or "").strip().lower()
     return p.endswith(".html") or p.endswith(".htm")
 
@@ -39,7 +40,9 @@ def detect_output_format(title, description=""):
 
 def resolve_output_format(task_fm, worker):
     """Task field wins, then the worker's default, then md."""
-    for src in (task_fm or {}, worker or {}):
+    for src in (task_fm, worker):
+        if not isinstance(src, dict):
+            continue
         v = str(src.get("output_format") or "").strip().lower()
         if v in FORMATS:
             return v
@@ -47,6 +50,7 @@ def resolve_output_format(task_fm, worker):
 
 
 def dispatch_block():
+    """Prompt suffix for HTML tasks; starts with blank lines since callers append it to a prompt."""
     return (
         "\n\nOUTPUT FORMAT: HTML\n"
         "This task's deliverable is a single self-contained .html file, not markdown.\n"
@@ -58,6 +62,7 @@ def dispatch_block():
 
 
 def chat_hint(path):
+    """Chat preamble telling the agent to edit the HTML file at path in place."""
     return (
         f"This task's output is an HTML page at {path}. When asked to change it, "
         "make targeted edits to that file in place with the Edit tool - never "
@@ -69,7 +74,10 @@ def chat_hint(path):
 class _Text(HTMLParser):
     _SKIP = {"style", "script", "noscript", "svg", "template"}
     _BLOCK = {"p", "div", "section", "header", "footer", "li", "tr", "h1", "h2",
-              "h3", "h4", "h5", "h6", "br", "table", "ul", "ol", "blockquote", "article"}
+              "h3", "h4", "h5", "h6", "br", "table", "ul", "ol", "blockquote", "article",
+              "dt", "dd", "dl", "nav", "main", "aside", "figure", "figcaption", "hr",
+              "pre", "details", "summary", "title"}
+    _CELL = {"td", "th"}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -80,6 +88,8 @@ class _Text(HTMLParser):
             self._skip += 1
         elif tag in self._BLOCK:
             self.out.append("\n")
+        elif tag in self._CELL and not self._skip:
+            self.out.append(" ")
 
     def handle_endtag(self, tag):
         if tag in self._SKIP and self._skip:
@@ -93,8 +103,9 @@ class _Text(HTMLParser):
 
 
 def html_to_text(src):
+    """Visible text of an HTML document, one block per line, for search and judging."""
     p = _Text()
     p.feed(src or "")
     p.close()
-    lines = (re.sub(r"[ \t\r\f\v]+", " ", ln).strip() for ln in "".join(p.out).split("\n"))
+    lines = (re.sub(r"\s+", " ", ln).strip() for ln in "".join(p.out).split("\n"))
     return "\n".join(ln for ln in lines if ln)
