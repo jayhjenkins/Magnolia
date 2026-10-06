@@ -140,3 +140,13 @@ def test_task_frontmatter_fallback_logs_warn(monkeypatch):
     monkeypatch.setattr(task_dispatch, "log", lambda msg, **k: lines.append(msg))
     task_dispatch._task_frontmatter({"id": "TASK-9999"})
     assert any(l.startswith("WARN") for l in lines)
+
+
+def test_dispatch_rerun_of_existing_html_output_gets_block():
+    import task_dispatch, html_artifact_lib
+    fm = {"agent_output": "datasets/product/agent-output/x.html"}
+    assert task_dispatch.apply_output_format("BASE", fm, {}).endswith(html_artifact_lib.dispatch_block())
+    # an explicit md on the task still wins
+    assert task_dispatch.apply_output_format("BASE", {**fm, "output_format": "md"}, {}) == "BASE"
+    # an existing md output stays md
+    assert task_dispatch.apply_output_format("BASE", {"agent_output": "x.md"}, {}) == "BASE"

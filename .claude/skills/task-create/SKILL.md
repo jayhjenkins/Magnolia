@@ -58,7 +58,9 @@ Example: "Talk to Greg about voting requirements" → `collab` + `--task-type sc
 
 **Recommended fields:** domain, description
 
-**Optional fields:** due, tags, creator, source-meeting, project, waiting-on, waiting-expected
+**Optional fields:** due, tags, creator, source-meeting, project, waiting-on, waiting-expected, format
+
+**Output format (agent tasks):** markdown is the default. Pass `--format html` only when the deliverable is meant to be looked at or presented - roadmap visuals, pre-reads, infographics, dashboards, slides, mockups. Keep markdown for anything edited as text or headed to Word or Jira: PRDs, memos, strategy docs, briefs. When unsure, leave it off.
 
 ### 4. Create via CLI
 
@@ -70,7 +72,8 @@ Example: "Talk to Greg about voting requirements" → `collab` + `--task-type sc
   --description "What needs to happen and why" \
   --due "YYYY-MM-DD" \
   --tags "tag1,tag2" \
-  --project "project-name"
+  --project "project-name" \
+  --format html            # optional; default md
 ```
 
 For waiting queue tasks, also include:

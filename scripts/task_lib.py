@@ -259,7 +259,8 @@ def create_task(title, queue="human", priority="medium", domain=None,
         # handler (cadence-propose-update) reads fm["proposal"] to apply it.
         frontmatter["proposal"] = proposal
     # Absent means md. An explicit value always wins; phrase detection ("as HTML")
-    # only applies to human-created tasks, never agent/meeting-extracted ones.
+    # only applies when creator == "human" (the CLI default and board quick-add);
+    # tasks created with creator="agent" or "cadence" never auto-detect.
     fmt = output_format
     if fmt is None and creator == "human":
         fmt = html_artifact_lib.detect_output_format(title, description)

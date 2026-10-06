@@ -758,7 +758,14 @@ def _persist_session_id(task_id, claude_session_id):
 
 
 def apply_output_format(prompt, task_fm, worker):
-    """Append the HTML contract pointer when the task resolves to html."""
+    """Append the HTML contract pointer when the task resolves to html.
+
+    A task with no declared format whose existing output is already an .html
+    page (e.g. a rerun) is treated as html, ahead of any worker default."""
+    task_fm = task_fm if isinstance(task_fm, dict) else {}
+    if (not task_fm.get("output_format")
+            and html_artifact_lib.is_html_path(task_fm.get("agent_output"))):
+        task_fm = {**task_fm, "output_format": "html"}
     if html_artifact_lib.resolve_output_format(task_fm, worker) == "html":
         return prompt + html_artifact_lib.dispatch_block()
     return prompt
