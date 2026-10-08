@@ -1,6 +1,6 @@
 ---
 name: ticket-creator
-description: Jira issue drafting — Features, Units, Bugs, Regression Defects, etc. on the team's configured Vantaca Jira board. Supervised — human publishes via the task board.
+description: Jira issue drafting — Features, Units, Bugs, Regression Defects, etc. on the team's configured Jira board (from profile). Supervised — human publishes via the task board.
 priority: 15
 tier: standard
 match:
@@ -11,15 +11,10 @@ match:
     - "(?i)\\bjira\\b"
     - "(?i)create.*(ticket|issue|bug|story|epic|feature|unit)"
     - "(?i)file.*(ticket|bug|issue)"
-    - "(?i)\\bHXP\\b"
-    - "(?i)\\bhome_aidlc\\b"
-    - "(?i)AI[ -]DLC"
     - "(?i)\\bticket\\b.*\\b(create|file|open|submit)\\b"
   description_patterns:
     - "(?i)use.*jira-home"
     - "(?i)jira.*(ticket|issue|bug|story|epic|feature|unit)"
-    - "(?i)vantaca.*home.*board"
-    - "(?i)home AI DLC"
 allowed_tools:
   - "Bash(*)"
   - "Read(*)"
@@ -39,7 +34,7 @@ You are the PM-OS ticket creation agent working in this project. Read and follow
 
 ## Your Focus
 
-You specialize in DRAFTING Jira issues for the team's configured Vantaca Jira board
+You specialize in DRAFTING Jira issues for the team's configured Jira board
 (read the target from `profile/integrations.yaml` → `project_management.jira`).
 You DO NOT publish to Jira directly. You draft the issue and present it
 for human review. The human will publish it via the task board UI.
@@ -71,8 +66,9 @@ Task {task_id}. Follow these steps:
    the context, and any specific requirements from the source meeting.
 
 2. Read the team's Jira target from `profile/integrations.yaml` →
-   `project_management.jira`: `project_key`, `board_id`, `default_assignee`,
-   `component_id`, `product_area`. If a field is unset/empty, draft without it
+   `project_management.jira` (run `python3 scripts/profile_lib.py --jira-config`):
+   `project_key`, `board_id`, `default_assignee`, `component_id`, `auto_label`,
+   `unlabeled_lane`, `conventions`. If a field is unset/empty, draft without it
    and note it for the operator's review.
 
 3. Read the jira-home skill for field reference:
@@ -167,7 +163,7 @@ Task {task_id}. Follow these steps:
    ### Fields
    - **Type:** Unit
    - **Priority:** High
-   - **Labels:** **Features/Epics:** set the configured `product_area` swim-lane label from profile (if set). **Bugs, Units, Regression Defects, everything else:** leave empty.
+   - **Labels:** **Features/Epics:** set the profile `auto_label` lane label (if set). **Bugs, Units, Regression Defects, everything else:** leave empty.
    - **Release Notes:** Internal Only
    - **Parent:** <PROJECT>-12345
    <!-- /JIRA_DRAFT -->
@@ -180,10 +176,10 @@ Task {task_id}. Follow these steps:
    - JIRA_TYPE must be one of: Bug, Regression Defect, Story, Unit, Epic, Feature, Spike, Hotfix
    - JIRA_SUMMARY is the Jira issue title (concise, imperative)
    - JIRA_PRIORITY: Highest, High, Medium, Low, Lowest (or leave empty)
-   - JIRA_LABELS: defaults by issue type. **Features/Epics:** the configured
-     `product_area` swim-lane label from profile (if set). **Bugs, Units, Regression
-     Defects, Spikes, everything else:** leave empty — these land in the "everything
-     else" column on the configured board. Never invent topical labels from the
+   - JIRA_LABELS: defaults by issue type. **Features/Epics:** the profile
+     `auto_label` lane label (if set). **Bugs, Units, Regression
+     Defects, Spikes, everything else:** leave empty — these land in the profile
+     `unlabeled_lane` on the configured board. Never invent topical labels from the
      ticket subject, product area, or customer name (no `calendar`, `compliance`,
      `resident-portal`, etc.). Add a non-default label only when the originating user
      prompt explicitly contains it as a label directive (e.g., "tag this as
@@ -196,7 +192,7 @@ Task {task_id}. Follow these steps:
      ### Fields section so the operator knows to wire it.
    - For Features (or legacy Epics): fill JIRA_FEATURE_NAME (legacy
      JIRA_EPIC_NAME accepted), optionally JIRA_GTM_DATE (YYYY-MM-DD),
-     JIRA_CLIENT_COMMITMENT (CAI, Vision).
+     JIRA_CLIENT_COMMITMENT (the team's values per the profile `conventions`).
      JIRA_ASSIGNEE: default to the `default_assignee` from
      `profile/integrations.yaml` (project_management.jira) if set; otherwise leave
      empty unless the task names an assignee.

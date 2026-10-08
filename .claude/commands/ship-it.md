@@ -275,7 +275,7 @@ Briefly summarize what was produced in Phases 1–3:
 
 ### Phase 7: Jira Feature Handoff (Orchestrator — Direct) — unless `--skip-jira`
 
-Sam's 2026-05-22 process refresh made the Jira **Feature** the source of truth for downstream comms. Three fields drive that workflow: **Spec Reference** (URL of the spec/PRD), **GTM Date**, and **EA Date**. Phase 7 turns this package into a published-ready Jira Feature draft.
+The Jira **Feature** is the source of truth for downstream comms. Three fields drive that workflow: **Spec Reference** (URL of the spec/PRD), **GTM Date**, and **EA Date**. Phase 7 turns this package into a published-ready Jira Feature draft.
 
 **Handle this directly in the orchestrator — no sub-agent.** It is interactive and short.
 
@@ -308,12 +308,12 @@ Ask:
 
 #### Step 7.3: Gather Feature fields
 
-Ask in order, accepting `TBD` or empty for each date field (these mean "leave the Jira field blank — Sam's process accepts filling them in later"):
+Ask in order, accepting `TBD` or empty for each date field (these mean "leave the Jira field blank — fill it in later"):
 
 1. **Feature Name** — default to `{slug}` title-cased; allow edit.
 2. **GTM Date** — `YYYY-MM-DD`, or `TBD`/empty.
 3. **EA Date** — `YYYY-MM-DD`, or `TBD`/empty. (Early-access date; typically before GTM.)
-4. **Client Commitment** — `CAI` / `Vision` / none.
+4. **Client Commitment** — one of the team's values (profile `conventions`) / none.
 
 Do **not** ask about Release Notes, Priority, Components, or Regression Area — those are set in Jira when the issue transitions out of Refinement.
 
@@ -339,12 +339,12 @@ Create the task. Build the description argument as a single string containing th
 <!-- JIRA_DRAFT -->
 <!-- JIRA_TYPE:Feature -->
 <!-- JIRA_SUMMARY:{summary} -->
-<!-- JIRA_LABELS:home_aidlc -->
+<!-- JIRA_LABELS:{auto_label from `profile_lib.py --jira-config`, or empty} -->
 <!-- JIRA_FEATURE_NAME:{feature name} -->
 <!-- JIRA_GTM_DATE:{YYYY-MM-DD or empty} -->
 <!-- JIRA_EA_DATE:{YYYY-MM-DD or empty} -->
 <!-- JIRA_SPEC_REFERENCE:{PRD Word URL or empty} -->
-<!-- JIRA_CLIENT_COMMITMENT:{CAI/Vision/empty} -->
+<!-- JIRA_CLIENT_COMMITMENT:{team commitment value per profile conventions, or empty} -->
 
 ### Summary
 {summary}
@@ -362,14 +362,14 @@ Internal Press Release: {press-release-internal Word URL}
 
 ### Fields
 - Type: Feature
-- Labels: home_aidlc (Features go to the AI DLC swim lane)
+- Labels: {auto_label} (Features go to the team's lane; none if the profile has no auto_label)
 <!-- /JIRA_DRAFT -->
 EOF
 )"
 ```
 
 Print the TASK ID and the task-board URL. End with:
-> "Draft saved at TASK-NNNN. Open the task board, review the draft, click **Publish to Jira** when ready. Sam's process is satisfied as long as Spec Reference is set — GTM/EA dates can be filled in later in the Jira UI."
+> "Draft saved at TASK-NNNN. Open the task board, review the draft, click **Publish to Jira** when ready. Set Spec Reference now; GTM/EA dates can be filled in later in the Jira UI."
 
 ---
 

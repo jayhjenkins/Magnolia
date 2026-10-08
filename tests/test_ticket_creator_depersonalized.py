@@ -8,5 +8,6 @@ def test_ticket_creator_reads_jira_target_from_profile():
     assert "board 1096" not in text
     assert not re.search(r"\bJay\b", text)
     assert "profile/integrations.yaml" in text
-    assert "Vantaca" in text
+    assert "Vantaca" not in text            # site/team come from the profile, not the worker
+    assert "profile_lib.py --jira-config" in text
     assert "Regression Defect" in text and "Unit" in text
