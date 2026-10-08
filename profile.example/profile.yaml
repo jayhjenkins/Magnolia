@@ -1,5 +1,5 @@
 # WHO THE OPERATOR IS — the only place identity lives.
-# Copied to profile/ by onboarding; edit there, never here.
+# Seeded into profile/ by profile_lib.bootstrap_profile(); edit there, never here.
 display_name: "Your Name"
 email: "you@company.com"
 company: "Your Company"
