@@ -110,7 +110,7 @@ Two distinct axes live here; keep them separate (the [`UX_VISION.md`](./UX_VISIO
 
 ## 4. Rocks as the reference workflow — ⬜ planned
 
-`metric-quarterly-rocks` + `update_rocks_xlsx.py` would be the most concrete recurring agent job (Q2 2026: Home WAU and Board Member Weekly Login Rate). Harden it as the canonical pattern: byte-reproducible, scored by the judge, cron-driven, exception-review only. *(Not yet on disk — the skill and script don't exist.)*
+A quarterly-rocks metrics refresh (the operator's rock metrics, pulled from their analytics sources) would be the most concrete recurring agent job. Harden it as the canonical pattern: byte-reproducible, scored by the judge, cron-driven, exception-review only. *(Not in the shared engine — rock definitions are per-operator.)*
 
 **Done when:** the weekly Rocks run requires zero manual touch and you review only the delta.
 
@@ -148,7 +148,7 @@ Once 1–3 hold, organize workers into **mini squads by product area** (e.g., Ho
 
 The cron substrate is ✅ built (`datasets/cron/jobs.json` + daemon tick + atomic counter). **Three jobs are seeded today:** doctor self-heal, weekly self-improvement (`eval_digest`), and the graduation-ladder assessment. The load-bearing recurring jobs below grow that set toward ~20 over time.
 
-1. ⬜ **Rocks metrics refresh** — weekly; Home WAU + Board Member login rate (reference workflow, see §4)
+1. ⬜ **Rocks metrics refresh** — weekly; the operator's quarterly rock metrics (reference workflow, see §4)
 2. ⬜ **Human-queue audit** — weekly; finds human tasks an agent could own, messages an agent could draft, and stale tasks to kill → proposes each as a one-tap recommendation. The self-improvement loop pointed at task *routing*; keeps the human pile from forming. See `UX_VISION.md`. **Highest QoL priority.**
 3. ⬜ **Meetings-to-backlog** — nightly; new transcripts → signals / PRD proposals *(runs today via `run-meetings-to-backlog.sh`; not yet a seeded cron)*
 4. ⬜ **Shadow judge pass** — scores cards completed since last run *(per-card scoring is event-driven and live; this would be the backfill/sweep)*

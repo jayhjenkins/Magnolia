@@ -138,3 +138,14 @@ docs/*
 
 # Private scratch / personal notes (never tracked)
 private/
+
+# Operator-personal scorecard / rocks / activation-metric machinery. Lives only
+# on the owner's machine; the shared engine must never depend on it.
+/.claude/skills/metric-quarterly-rocks/
+/.claude/skills/metric-scorecard-fetch/
+/.claude/skills/workflow-pm-agent-activation-metric/
+/.claude/commands/update-rocks.md
+/.claude/commands/scorecard-update.md
+/.claude/commands/pm-agent-activation.md
+/scripts/build_scorecard_dashboard.py
+/requirements-rocks.txt
