@@ -152,3 +152,4 @@ private/
 # Personal editor + doc-sync state (per machine, never shared)
 .obsidian/
 scripts/_sync_manifest.json
+scripts/sync_config.yaml
