@@ -12,7 +12,7 @@
 
 ## Purpose
 
-Run meeting-to-task extraction on unprocessed transcripts. Calls `./scripts/task-extract-meetings.sh --all-unprocessed` to scan meeting files, extract action items, and create task entries automatically.
+Run meeting-to-task extraction on unprocessed transcripts. Calls `python3 scripts/task_extract_meetings.py --all-unprocessed` (the `scripts/task-extract-meetings.sh` shim wraps the same script) to scan meeting files, extract action items, and create task entries automatically.
 
 ## Arguments
 

@@ -27,7 +27,7 @@ No exceptions. No rationalizations. Documentation sync is mandatory.
 ## When to Use This Skill
 
 Activate when:
-- Creating any new skill (meta, quality-gate, context-assembly, workflow)
+- Creating any new skill (any category prefix in `.claude/CLAUDE.md`: `meta-`, `quality-`, `context-`, `workflow-`, `metric-`, `task-`)
 - Modifying existing skill that changes capabilities or interfaces
 - Adding new slash commands that invoke skills
 - Changing skill categories or organizational structure
@@ -40,6 +40,8 @@ Activate when:
 - Refactoring that doesn't change external interface
 
 ## The 6 Documentation Files
+
+> **Current repo reality — check before editing.** Skills auto-discover from `.claude/skills/` and commands from `.claude/commands/`; no file needs a per-skill registry entry. `CURSOR-PM-SYSTEM.md` and `.cursor/rules/*.mdc` do not exist in this repo, and `README.md` / `AGENTS.md` do not enumerate skills — skip any file below that does not exist or has no matching section, rather than creating it. What still applies: keep cross-references valid (no skill/command name that does not exist), update `.claude/CLAUDE.md` or root `CLAUDE.md` only if the change alters a convention or routing entry they document, and add the skill to a pack in `.claude/packs.yaml` when it belongs to one.
 
 ### 1. `.claude/CLAUDE.md` (Cursor-specific, primary)
 **Purpose**: Instructions for Cursor AI agents
@@ -90,7 +92,7 @@ Activate when:
 - `strategy-workflows.mdc` — Strategy session workflows
 - `research-workflows.mdc` — Research processing workflows
 - `quality-gates.mdc` — Quality gate definitions
-- `context-assembly.mdc` — Context assembly patterns
+- `context.mdc` — Context (`context-*`) skill patterns
 
 ## Documentation Update Matrix
 
@@ -110,10 +112,10 @@ Activate when:
 - ⚬ `CURSOR-PM-SYSTEM.md` — Only if architecture-significant
 - ⚬ `README.md` — Brief mention in quality standards
 
-### For Context Assembly Skills
-- ✓ `.claude/CLAUDE.md` — Add to Context Assembly list
-- ✓ `CLAUDE.md` — Add to Context Assembly category
-- ✓ `.cursor/rules/context-assembly.mdc` — Add full description
+### For Context Skills (`context-*`)
+- ✓ `.claude/CLAUDE.md` — Add to Context list
+- ✓ `CLAUDE.md` — Add to Context category
+- ✓ `.cursor/rules/context.mdc` — Add full description
 - ⚬ `CURSOR-PM-SYSTEM.md` — Only if architecture-significant
 - ⚬ `AGENTS.md` — Only if user-facing
 - ⚬ `README.md` — Only if user needs to know
@@ -134,7 +136,7 @@ Activate when:
 ## Validation Procedure
 
 ### Step 1: Identify Skill Type
-Determine which category applies: meta, quality-gate, context-assembly, or workflow.
+Determine which category applies from the skill's prefix (see the naming table in `.claude/CLAUDE.md`): meta, quality, context, workflow, metric, or task.
 
 ### Step 2: Apply Documentation Matrix
 Use the matrix above to determine which files require updates.
