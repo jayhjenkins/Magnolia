@@ -89,7 +89,12 @@ window. Fix the cause and run the one-liner again — it's idempotent and picks 
   the installer rewrites the shims (handy if you reinstall or move Python).
 - **`PYTHONUTF8=1`.** Windows' default console encoding (cp1252) garbles or crashes on Claude's
   UTF-8 output. The installer sets `PYTHONUTF8=1` as a user environment variable.
-- Both take effect in **new** terminal windows — open a fresh one after installing.
+- **`MAGNOLIA_PYTHON`.** The qmd search server in `.mcp.json` starts as
+  `${MAGNOLIA_PYTHON:-python3} scripts/qmd_mcp.py`. Claude Code can't start the `python3.cmd`
+  shim as an MCP server, so the installer sets `MAGNOLIA_PYTHON` to your real `python.exe`. If
+  qmd search is missing in Claude, check `echo $env:MAGNOLIA_PYTHON` in a new window (or re-run
+  the installer).
+- All of these take effect in **new** terminal windows — open a fresh one after installing.
 
 ---
 

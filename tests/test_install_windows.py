@@ -87,6 +87,16 @@ def test_ps1_sets_pythonutf8_persistently_and_in_session():
     assert '$env:PYTHONUTF8 = "1"' in PS1
 
 
+def test_ps1_pins_magnolia_python_for_the_qmd_mcp():
+    # .mcp.json runs "${MAGNOLIA_PYTHON:-python3}". On Windows python3 is our
+    # .cmd shim, which Claude Code can't spawn as an MCP command, so the
+    # installer must pin the real python.exe - persistently and in-session.
+    assert '[Environment]::SetEnvironmentVariable("MAGNOLIA_PYTHON", $Py, "User")' in PS1
+    assert "$env:MAGNOLIA_PYTHON = $Py" in PS1
+    # set after $Py is resolved and validated
+    assert PS1.index('"MAGNOLIA_PYTHON", $Py') > PS1.index("$Py = Resolve-Python")
+
+
 def test_ps1_python3_shim_cmd_and_git_bash_and_prepends_path():
     assert 'Join-Path $env:LOCALAPPDATA "Magnolia\\shims"' in PS1
     assert 'Write-PythonShim "python3" $Py' in PS1
