@@ -1,0 +1,8 @@
+# Runtime dependencies for the Magnolia board server (scripts/task_server.py)
+# and its import chain. Verified by importing task_server in a fresh venv.
+# Both installers (install.sh / install.ps1) install from this file, and
+# `magnolia doctor` checks every package listed here (scripts/doctor.py).
+# Optional extras live in requirements-*.txt (dev, langfuse, transcript, rocks).
+ruamel.yaml>=0.18
+croniter>=1.3
+requests>=2.28
