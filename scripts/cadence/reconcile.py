@@ -1250,8 +1250,10 @@ def _dated_evidence(body, now):
     return lines[-_DATE_CHECK_MAX_EVIDENCE:]
 
 
-def _build_date_judge_prompt(fm, type_entry, body, field, when, now):
-    """The judgment prompt. Asks for judgment, never a counting rule."""
+def _build_date_judge_prompt(fm, type_entry, body, field, when, now, human_answer=None):
+    """The judgment prompt. Asks for judgment, never a counting rule. When the
+    operator already answered for this date, that answer is evidence from a
+    point in time - the judge weighs what changed since, it is not a lock."""
     now_date = _to_date(now)
     days = (when - now_date).days
     timing = (f"in {days} days" if days > 0 else
@@ -1282,6 +1284,7 @@ def _build_date_judge_prompt(fm, type_entry, body, field, when, now):
         f"Child tickets of the tracker item (latest snapshot):\n{child}\n\n"
         f"Recent observations, oldest to newest:\n{ev_text}\n\n"
         f"Recent cycle verdicts:\n{cyc_text}\n\n"
+        + (_human_answer_section(human_answer) if human_answer else "") +
         "Weigh: which open tickets actually gate this milestone; whether work "
         "has moved recently or is sitting still; whether open work is in a "
         "release/fix version that lands before the date; what people said in "
@@ -1296,7 +1299,22 @@ def _build_date_judge_prompt(fm, type_entry, body, field, when, now):
         '{"verdict": "holds|at-risk|unknown|met", '
         '"reason": "one or two plain sentences", '
         '"suggested_date": "YYYY-MM-DD or null (a realistic date when at-risk)", '
-        '"key_evidence": ["short quote or fact", "..."]}'
+        '"key_evidence": ["short quote or fact", "..."], '
+        '"changed_since_answer": true|false}'
+    )
+
+
+def _human_answer_section(answer):
+    """Prompt section: the operator's earlier answer, as dated evidence."""
+    said = ("said this date holds" if answer.get("answer") == "holds"
+            else "acknowledged the risk and acted on it")
+    return (
+        f"Operator input: on {answer.get('on')} the operator reviewed this date "
+        f"and {said}. Treat that as strong evidence as of {answer.get('on')}, not "
+        "as permanent: state changes. Keep their call unless evidence dated on or "
+        f"after {answer.get('on')} materially changes the picture. Set "
+        '"changed_since_answer" to true only when it does, and put that new '
+        "evidence first in key_evidence.\n\n"
     )
 
 
@@ -1325,6 +1343,7 @@ def _parse_date_judgment(text):
         "reason": _ascii_text(str(data.get("reason") or "").strip()) or "no reason given",
         "suggested_date": suggested.isoformat() if suggested else None,
         "key_evidence": [_ascii_text(str(e).strip()) for e in evidence if str(e).strip()][:5],
+        "changed_since_answer": data.get("changed_since_answer") is True,
     }
 
 
@@ -1372,20 +1391,23 @@ def _task_status(task_lib, task_id):
 
 
 def _resolved_date_proposals(task_lib, program_id):
-    """{(field, jira_date): status} for this program's resolved (done = accepted,
-    cancelled = rejected) update-tracker-date proposal cards, queue or archive."""
+    """{(field, jira_date): [(card_id, status)]} for this program's resolved
+    (done = accepted, cancelled = rejected) update-tracker-date proposals."""
     out = {}
-    seen = []
+    seen_ids = set()
+    rows = []
     for status in ("done", "cancelled"):
-        seen.extend(task_lib.list_tasks(queue=None, status=status))
-    seen.extend(task_lib.list_archived(limit=500))
-    for t in seen:
-        if t.get("task_type") != "cadence-propose-update":
+        rows.extend(task_lib.list_tasks(queue=None, status=status))
+    rows.extend(task_lib.list_archived(limit=500))
+    for t in rows:
+        tid = t.get("id")
+        if tid in seen_ids or t.get("task_type") != "cadence-propose-update":
             continue
         if t.get("status") not in ("done", "cancelled"):
             continue
+        seen_ids.add(tid)
         try:
-            fm = task_lib.read_task(t["id"])["frontmatter"]
+            fm = task_lib.read_task(tid)["frontmatter"]
         except Exception:
             fm = t
         if program_id not in (fm.get("tags") or []):
@@ -1393,22 +1415,34 @@ def _resolved_date_proposals(task_lib, program_id):
         prop = fm.get("proposal") or {}
         if not isinstance(prop, dict) or prop.get("op") != "update-tracker-date":
             continue
-        out[(prop.get("field"), prop.get("current_jira_date"))] = t.get("status")
+        key = (prop.get("field"), prop.get("current_jira_date"))
+        out.setdefault(key, []).append((tid, t.get("status")))
     return out
 
 
-def _apply_human_answers(fm, checks, now):
-    """Fold the human's answers back into the stored judgments (mutates `checks`).
+def _evidence_mark(body):
+    """A fingerprint of the evidence: latest observation date + observation
+    count. Observations are append-only, so a new one always changes the mark,
+    even when it lands on the same day as the last judgment."""
+    latest = _latest_observation_date(body)
+    count = sum(1 for _ in _iter_observations(body or ""))
+    return f"{latest.isoformat() if latest else 'none'}#{count}"
 
-    - A closed question card (asked once per date) = "the date holds".
-    - A rejected at-risk proposal for this exact date = "the date holds".
-    - An accepted proposal for this exact date = acknowledged: the human acted
-      (moved the date or flagged it), so no new card for this date.
-    A human answer stands until the tracker date changes or the date passes.
+
+def _apply_human_answers(fm, checks, now, evidence):
+    """Record the operator's answers on the stored judgments (mutates `checks`).
+
+    An answer is evidence from a point in time, never a lock:
+    - a closed question card, or a rejected at-risk proposal = "holds" as of today;
+    - an accepted proposal = "acknowledged" (the operator acted on the risk).
+    Each card is applied once (`answered_cards`). The answer is stamped with the
+    evidence mark at the time, so the date is re-judged as soon as anything new
+    arrives - with the answer handed to the judge, which keeps it unless the new
+    evidence materially changes the picture.
     """
     pending = [f for f, r in checks.items() if isinstance(r, dict)
-               and r.get("source") != "human" and not r.get("acknowledged")
-               and (r.get("asked") or r.get("verdict") == "at-risk")]
+               and ((r.get("asked") and r["asked"] not in (r.get("answered_cards") or []))
+                    or r.get("verdict") == "at-risk")]
     if not pending:
         return
     import task_lib
@@ -1416,31 +1450,43 @@ def _apply_human_answers(fm, checks, now):
     today = _to_date(now).isoformat()
     for field in pending:
         rec = checks[field]
-        if rec.get("asked") and _task_status(task_lib, rec["asked"]) in ("done", "cancelled"):
-            rec.update({"verdict": "holds", "source": "human", "answered": today,
-                        "reason": "Operator closed the date question: the date holds."})
-            continue
-        if rec.get("verdict") == "at-risk":
+        seen = list(rec.get("answered_cards") or [])
+        answer, card = None, None
+        q = rec.get("asked")
+        if q and q not in seen and _task_status(task_lib, q) in ("done", "cancelled"):
+            answer, card = "holds", q
+        elif rec.get("verdict") == "at-risk":
             if proposals is None:
                 proposals = _resolved_date_proposals(task_lib, fm.get("program_id"))
-            status = proposals.get((field, rec.get("date")))
-            if status == "cancelled":
-                rec.update({"verdict": "holds", "source": "human", "answered": today,
-                            "reason": "Operator rejected the date change: the date holds."})
-            elif status == "done":
-                rec["acknowledged"] = today
+            for tid, status in proposals.get((field, rec.get("date")), []):
+                if tid in seen:
+                    continue
+                answer = "holds" if status == "cancelled" else "acknowledged"
+                card = tid
+        if not answer:
+            continue
+        seen.append(card)
+        rec["answered_cards"] = seen
+        rec["human_answer"] = {"answer": answer, "on": today, "card": card}
+        rec["evidence_through"] = evidence  # re-judge on anything newer
+        rec.pop("reopened_after", None)
+        if answer == "holds":
+            rec.update({"verdict": "holds", "source": "human",
+                        "reason": f"Operator said the date holds ({today})."})
+        else:
+            rec["acknowledged"] = today
 
 
 def _run_date_checks(fm, type_entry, body, now, period):
     """Judge each candidate EA/GA date and store the result in fm["date_checks"].
 
     Mutates `fm` in place (the caller persists it). Drops records whose tracker
-    date changed or vanished, folds in human answers, then judges a candidate
-    only when something relevant changed since the last judgment: the date, the
-    evidence, the cadence period, or whether the date has passed. A human answer
-    is not re-judged until the date changes or passes. A failed judge call is
-    retried at most once per day. Returns (changed, judged): whether
-    fm["date_checks"] changed, and whether the (slow) judge was called.
+    date changed or vanished, folds in the operator's answers, then judges a
+    candidate when something relevant changed since it was last looked at: the
+    evidence, whether the date has passed, or (for judge-only records) the
+    cadence period. An operator answer is input to the judge, not a lock: new
+    evidence re-opens the question. A failed judge call is retried at most once
+    per day. Returns (changed, judged).
     """
     before = json.dumps(fm.get("date_checks") or {}, sort_keys=True, default=str)
     if not program_lib.tracker_anchor(fm):
@@ -1454,33 +1500,31 @@ def _run_date_checks(fm, type_entry, body, now, period):
         when = current.get(field)
         if rec and (when is None or rec.get("date") != when.isoformat()):
             checks.pop(field, None)  # the tracker date moved: old judgment is moot
-    _apply_human_answers(fm, checks, now)
+    evidence = _evidence_mark(body)
+    _apply_human_answers(fm, checks, now, evidence)
 
     fm_view = dict(fm, date_checks=checks)
     candidates = dict(_date_check_candidates(fm_view, body, now))
-    latest_obs = _latest_observation_date(body)
-    evidence_through = latest_obs.isoformat() if latest_obs else None
     today = _to_date(now)
     judged = False
 
     for field, when in candidates.items():
         rec = checks.get(field)
         passed = when < today
+        answer = (rec or {}).get("human_answer")
         if rec:
             if rec.get("verdict") == "met":
                 continue
             if rec.get("last_failed") == today.isoformat():
                 continue  # back off: one retry per day after a failure
-            if rec.get("passed", False) == passed and (
-                    rec.get("source") == "human" or rec.get("acknowledged")
-                    or (rec.get("evidence_through") == evidence_through
-                        and rec.get("period") == period)):
-                continue  # nothing new to judge
+            same = (rec.get("evidence_through") == evidence
+                    and rec.get("passed", False) == passed)
+            if same and (answer or rec.get("period") == period):
+                continue  # nothing new since the last look
         judged = True
-        judgment = _llm_judge_date(
-            _build_date_judge_prompt(fm, type_entry, body, field, when, now))
+        judgment = _llm_judge_date(_build_date_judge_prompt(
+            fm, type_entry, body, field, when, now, human_answer=answer))
         if judgment is None:
-            # Fail closed: keep any prior judgment, note the failure for backoff.
             failed = rec or {"date": when.isoformat(), "verdict": "unavailable"}
             failed["last_failed"] = today.isoformat()
             checks[field] = failed
@@ -1492,18 +1536,34 @@ def _run_date_checks(fm, type_entry, body, now, period):
             "suggested_date": judgment["suggested_date"],
             "key_evidence": judgment["key_evidence"],
             "checked": today.isoformat(),
-            "evidence_through": evidence_through,
+            "evidence_through": evidence,
             "period": period,
             "passed": passed,
         }
-        if rec and rec.get("asked"):
-            new["asked"] = rec["asked"]  # never re-ask the same date
+        for keep in ("answered_cards", "human_answer"):
+            if rec and rec.get(keep):
+                new[keep] = rec[keep]
+        concern = judgment["verdict"] in ("at-risk", "unknown")
+        if answer and concern and not judgment["changed_since_answer"]:
+            # Nothing material since the operator's answer: their call stands.
+            if answer.get("answer") == "holds":
+                new.update({"verdict": "holds", "source": "human",
+                            "reason": f"Operator said the date holds ({answer.get('on')}); "
+                                      f"nothing material since. Judge note: {judgment['reason']}"})
+            else:
+                new["acknowledged"] = (rec or {}).get("acknowledged") or answer.get("on")
+            if rec and rec.get("asked"):
+                new["asked"] = rec["asked"]
+        elif answer and concern:
+            new["reopened_after"] = answer.get("on")  # state changed: ask again
+        elif rec and rec.get("asked"):
+            new["asked"] = rec["asked"]  # never re-ask the same question unprompted
         checks[field] = new
 
     if judged:
         # A fresh judgment can land on a date the operator already answered
-        # (e.g. rejected an earlier proposal for it): honor that answer now.
-        _apply_human_answers(fm, checks, now)
+        # (e.g. rejected an earlier proposal for it): record that answer now.
+        _apply_human_answers(fm, checks, now, evidence)
 
     if checks:
         fm["date_checks"] = checks
@@ -1550,6 +1610,9 @@ def _build_date_check_description(mutation, rec, child_summary, program_id):
         f"{program_id}.",
         f"Assessment: {rec.get('reason', 'no reason given')}",
     ]
+    if rec.get("reopened_after"):
+        lines.append(f"You said this date held on {rec['reopened_after']}; "
+                     "the evidence has changed since (newest first below).")
     if rec.get("key_evidence"):
         lines.append("Evidence:")
         lines.extend(f"- {e}" for e in rec["key_evidence"])
@@ -1571,6 +1634,9 @@ def _build_date_question_description(field, rec, child_summary, program_id, days
         f"It is {timing}, and Cadence could not tell from the evidence.",
         f"Assessment: {rec.get('reason', 'no reason given')}",
     ]
+    if rec.get("reopened_after"):
+        lines.append(f"You said this date held on {rec['reopened_after']}; "
+                     "the evidence has changed since.")
     if rec.get("key_evidence"):
         lines.append("Evidence:")
         lines.extend(f"- {e}" for e in rec["key_evidence"])
@@ -2168,7 +2234,8 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
                         continue
                     if resolved_prop_ops is None:
                         resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
-                    if _suppressed_by_resolution(key, resolved_prop_ops, body):
+                    if (not rec.get("reopened_after")
+                            and _suppressed_by_resolution(key, resolved_prop_ops, body)):
                         continue
                     task_id, _ = task_lib.create_task(
                         title=f"{title}: update Jira {field.split('_')[0].upper()} date?",
