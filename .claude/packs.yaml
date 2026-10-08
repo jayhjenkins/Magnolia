@@ -45,8 +45,6 @@ core:
     - workflow-doc-sync
     - quality-meeting-schema-validation
     - quality-documentation-sync
-    - metric-quarterly-rocks
-    - metric-scorecard-fetch
 
 pm:
   label: "Product Management"
@@ -127,6 +125,8 @@ recruiting:
   skills:
     - hiring-assess-pm-candidate
     - hiring-assess-pm-practicum
+    - recruiting-setup-new-opening
+    - recruiting-prep-interview
     - recruiting-process-interview
     - recruiting-process-practicum
 
