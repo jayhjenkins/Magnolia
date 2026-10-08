@@ -51,6 +51,7 @@ pm:
   description: "PRDs, roadmaps, strategy, metrics, prioritization, tickets, and research."
   skills:
     - workflow-prd-creation
+    - workflow-context-brief
     - workflow-product-planning
     - workflow-roadmap-updating
     - workflow-product-strategy-creation
