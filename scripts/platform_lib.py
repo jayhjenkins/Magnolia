@@ -203,6 +203,46 @@ def process_group_kwargs():
     return {"start_new_session": True}
 
 
+# Windows creation flags (literal fallbacks: the subprocess constants only exist
+# on Windows builds of Python).
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_NO_WINDOW = 0x08000000
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
+def detached_popen_kwargs(breakaway=False):
+    """Popen kwargs so a long-lived background child (the board server) outlives
+    the terminal that launched it.
+
+    Windows: closing a console window kills every process attached to it, so the
+    child gets its own process group and its own hidden console
+    (CREATE_NO_WINDOW, not DETACHED_PROCESS: grandchildren like `claude` then
+    inherit the hidden console instead of each popping a visible window).
+    `breakaway` adds CREATE_BREAKAWAY_FROM_JOB for terminals that wrap their
+    shell in a kill-on-close job object. POSIX: {} (behavior unchanged).
+    """
+    if os_kind() != "windows":
+        return {}
+    flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", _CREATE_NEW_PROCESS_GROUP)
+             | getattr(subprocess, "CREATE_NO_WINDOW", _CREATE_NO_WINDOW))
+    if breakaway:
+        flags |= getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", _CREATE_BREAKAWAY_FROM_JOB)
+    return {"creationflags": flags}
+
+
+def popen_detached(cmd, **kwargs):
+    """subprocess.Popen a long-lived background child detached from this terminal.
+
+    On Windows, first try breaking away from the parent's job object; if the job
+    forbids breakaway (Popen raises OSError / access denied), retry without it."""
+    if os_kind() == "windows":
+        try:
+            return subprocess.Popen(cmd, **detached_popen_kwargs(breakaway=True), **kwargs)
+        except OSError:
+            return subprocess.Popen(cmd, **detached_popen_kwargs(breakaway=False), **kwargs)
+    return subprocess.Popen(cmd, **kwargs)
+
+
 def kill_process_group(proc):
     """Best-effort kill of a child and its group, cross-platform."""
     try:
