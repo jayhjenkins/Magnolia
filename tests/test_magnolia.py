@@ -179,3 +179,19 @@ def test_main_launch_failure_is_clean(monkeypatch, capsys):
     assert rc == 1
     out = capsys.readouterr().out
     assert "doctor" in out.lower()   # points the user at the remedy
+
+
+def test_main_launch_failure_shows_server_log_tail(monkeypatch, capsys, tmp_path):
+    log = tmp_path / "task-server.log"
+    log.write_text("--- board start ---\nTraceback (most recent call last):\n"
+                   "ModuleNotFoundError: No module named 'croniter'\n")
+    monkeypatch.setattr(magnolia, "LOG_PATH", str(log))
+
+    def boom(**k):
+        raise TimeoutError("server did not come up")
+    monkeypatch.setattr(magnolia, "launch", boom)
+    assert magnolia._main([]) == 1
+    out = capsys.readouterr().out
+    assert str(log) in out
+    assert "No module named 'croniter'" in out
+    assert "doctor" in out.lower()

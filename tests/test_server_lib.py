@@ -2,7 +2,15 @@ import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import pytest
+
 import server_lib
+
+
+@pytest.fixture(autouse=True)
+def _log_to_tmp(tmp_path, monkeypatch):
+    # start() appends server output to LOG_PATH; keep tests out of the repo's logs/.
+    monkeypatch.setattr(server_lib, "LOG_PATH", str(tmp_path / "logs" / "task-server.log"))
 
 
 def test_url_uses_port(monkeypatch):
@@ -140,3 +148,49 @@ def test_start_kills_child_that_ignores_sigterm(tmp_path):
         except ProcessLookupError:
             pass
         raise AssertionError("start() left a SIGTERM-ignoring child alive")
+
+
+def test_start_logs_server_output_instead_of_devnull(tmp_path):
+    # A crashing server's stderr must land in the log so the failure is diagnosable.
+    script = tmp_path / "crash.py"
+    script.write_text("import sys\nsys.stderr.write('ModuleNotFoundError: croniter\\n')\nsys.exit(1)\n")
+    p = server_lib.free_port()
+    with pytest.raises(TimeoutError) as ei:
+        server_lib.start(port=p, cmd=[_sys.executable, str(script)], timeout=3.0)
+    assert server_lib.LOG_PATH in str(ei.value)
+    body = open(server_lib.LOG_PATH, encoding="utf-8").read()
+    assert "--- board start" in body
+    assert "ModuleNotFoundError: croniter" in body
+    assert "croniter" in server_lib.log_tail(5)
+
+
+def test_start_spawns_through_detached_seam(monkeypatch):
+    seen = {}
+
+    class FakeProc:
+        def poll(self): return 1
+        def terminate(self): pass
+        def wait(self, timeout=None): return 1
+        def kill(self): pass
+
+    def fake_popen_detached(cmd, **kw):
+        seen["cmd"], seen["kw"] = cmd, kw
+        return FakeProc()
+
+    monkeypatch.setattr(server_lib.platform_lib, "popen_detached", fake_popen_detached)
+    with pytest.raises(TimeoutError):
+        server_lib.start(port=server_lib.free_port(), cmd=["x"], timeout=0.5, poll=0.05)
+    assert seen["cmd"] == ["x"]
+    assert seen["kw"]["stdout"] is not server_lib.subprocess.DEVNULL
+    assert seen["kw"]["stderr"] == server_lib.subprocess.STDOUT
+    assert seen["kw"]["stdin"] == server_lib.subprocess.DEVNULL
+
+
+def test_log_tail_missing_file_is_empty(tmp_path):
+    assert server_lib.log_tail(5, path=str(tmp_path / "nope.log")) == ""
+
+
+def test_log_tail_returns_last_lines(tmp_path):
+    f = tmp_path / "x.log"
+    f.write_text("\n".join(f"line{i}" for i in range(50)) + "\n")
+    assert server_lib.log_tail(3, path=str(f)).splitlines() == ["line47", "line48", "line49"]

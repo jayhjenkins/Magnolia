@@ -20,7 +20,7 @@ import profile_lib
 import server_lib
 
 PM_OS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOG_PATH = os.path.join(PM_OS_DIR, "logs", "task-server.log")
+LOG_PATH = server_lib.LOG_PATH   # logs/task-server.log
 
 
 def launch(open_browser=True):
@@ -98,8 +98,16 @@ def _main(argv=None):
         return 0 if res["status"] == "ok" else 1
     try:
         res = launch()
-    except Exception:
-        print("Magnolia could not start the board. Run: magnolia doctor")
+    except Exception as e:
+        print(f"Magnolia could not start the board ({e}).")
+        # ASCII-safe: a cp1252 Windows console must never crash on the log's bytes.
+        tail = server_lib.log_tail(15, LOG_PATH).encode("ascii", "replace").decode("ascii")
+        if tail:
+            print(f"Last lines of the server log ({LOG_PATH}):")
+            print("    " + tail.replace("\n", "\n    "))
+        else:
+            print(f"Server log: {LOG_PATH}")
+        print("Run: magnolia doctor")
         return 1
     print(f"Magnolia is live at {res['url']}")
     return 0

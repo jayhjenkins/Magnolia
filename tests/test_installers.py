@@ -38,7 +38,8 @@ def test_install_sh_has_required_steps():
     body = open(os.path.join(ROOT, "install.sh"), encoding="utf-8").read()
     assert "brew install" in body                       # prerequisites
     assert "@tobilu/qmd" in body                         # qmd (exact package)
-    assert "ruamel.yaml" in body                         # python deps
+    assert '-r "$DEST/requirements.txt"' in body          # python deps from requirements.txt
+    assert "import task_server" in body                  # server import check
     assert "command -v claude" in body                   # detect-and-direct for claude
     assert "git clone" in body
     assert "scripts/trust_seed.py" in body and "seed" in body   # Inc 1 trust seed
@@ -64,9 +65,9 @@ def test_install_sh_redirects_stdin_for_interactive_commands():
     # and won't interactively prompt.
     assert "brew install $missing </dev/null" in body
     assert "npm install -g @tobilu/qmd </dev/null" in body
-    assert "ruamel.yaml pytest </dev/null" in body
-    # claude login reads the real terminal even under `... | bash`.
-    assert "claude login </dev/tty" in body
+    assert 'requirements.txt" pytest </dev/null' in body
+    # sign-in reads the real terminal even under `... | bash`.
+    assert "claude auth login </dev/tty" in body
 
 
 def test_install_docs_use_safe_bash_c_oneliner():

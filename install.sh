@@ -64,8 +64,6 @@ else
   say "Installing qmd (semantic search)..."
   npm install -g @tobilu/qmd </dev/null
 fi
-say "Installing Python dependencies..."
-python3 -m pip install --break-system-packages ruamel.yaml pytest </dev/null
 
 # 2. Claude CLI: detect-and-direct (never guess an install command)
 if ! command -v claude >/dev/null 2>&1; then
@@ -88,7 +86,7 @@ if [ "$LOGGED_IN" != "yes" ]; then
   # </dev/tty so that under the old `... | bash` form claude reads the real
   # terminal, not the piped script. Harmless under the safe `bash -c "$(...)"`
   # form, where stdin is already the terminal.
-  claude login </dev/tty
+  claude auth login </dev/tty
 fi
 
 # 4. Clone (or fast-forward an existing checkout)
@@ -100,10 +98,21 @@ else
   git -C "$DEST" pull --ff-only || true
 fi
 
-# 5. Seed folder trust + qmd enablement (Inc 1; safe no-op if not logged in)
+# 5. Python dependencies (the board server's runtime deps live in requirements.txt)
+say "Installing Python dependencies..."
+if ! python3 -m pip install --break-system-packages -r "$DEST/requirements.txt" pytest </dev/null; then
+  say "Python dependencies did not install (see the pip error above). The board will not start without them. Fix it, then run:  python3 -m pip install -r \"$DEST/requirements.txt\""
+  exit 1
+fi
+# Prove the board server imports cleanly now, not at first launch.
+if ! (cd "$DEST" && python3 -c "import sys; sys.path.insert(0, 'scripts'); import task_server"); then
+  say "The board server failed to import (see the error above). Run 'magnolia doctor' after fixing it."
+fi
+
+# 6. Seed folder trust + qmd enablement (Inc 1; safe no-op if not logged in)
 python3 "$DEST/scripts/trust_seed.py" seed "$DEST" || true
 
-# 6. Put `magnolia` on PATH
+# 7. Put `magnolia` on PATH
 mkdir -p "$HOME/.local/bin"
 ln -sf "$DEST/bin/magnolia" "$HOME/.local/bin/magnolia"
 case ":$PATH:" in
@@ -111,6 +120,6 @@ case ":$PATH:" in
   *) say "Add this to your shell profile so 'magnolia' is found:  export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-# 7. Done
+# 8. Done
 banner
 say "Magnolia is installed. Type:  magnolia   then press Enter."

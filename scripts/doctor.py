@@ -42,6 +42,7 @@ def probe_python_deps(modules):
     if missing:
         cap["status"] = "degraded"
         cap["missing"] = missing
+        cap["remedy"] = "python3 -m pip install -r requirements.txt  (from the Magnolia folder)"
     else:
         cap["status"] = "ok"
         cap["detail"] = ", ".join(modules)
@@ -80,7 +81,26 @@ _LOCAL_TOOLS = {
                              "extract it, add the folder to your PATH; then authorize once: "
                              f'mgc login --scopes "{MGC_SCOPES}"'},
 }
-_PYTHON_DEPS = ["ruamel.yaml"]
+def _requirements_modules(path=None):
+    """Importable module names for every package in the root requirements.txt
+    (the board server's runtime deps). Falls back to ruamel.yaml if unreadable."""
+    path = path or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "requirements.txt")
+    mods = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                name = line.split("#", 1)[0].split(";", 1)[0].strip()
+                for sep in ("[", "=", ">", "<", "!", "~", " "):
+                    name = name.split(sep, 1)[0]
+                if name:
+                    mods.append(name if "." in name else name.replace("-", "_"))
+    except OSError:
+        pass
+    return mods or ["ruamel.yaml"]
+
+
+_PYTHON_DEPS = _requirements_modules()
 # Remote connectors keyed by the integration category that implies them.
 _REMOTE_FROM_INTEGRATION = {
     "project_management": lambda prov: prov,   # 'jira'/'asana'/'linear'
