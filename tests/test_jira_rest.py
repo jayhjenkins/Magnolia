@@ -221,11 +221,12 @@ class TestDispatchRouting:
         import requests as req_mod
         monkeypatch.setattr(jp, "_get_client", lambda: jp.JiraClient(
             "test.atlassian.net", "me@test.com", "tok"))
+        monkeypatch.setattr(jp, "JIRA_FIELDS", {"ea_date": "cf_ea", "ga_date": "cf_ga"})
         resp = type("R", (), {
             "status_code": 200,
             "json": lambda self: {"fields": {
                 "summary": "Test", "status": {"name": "Open"},
-                "duedate": None, "customfield_10683": None, "customfield_10300": None,
+                "duedate": None, "cf_ea": "2026-01-01", "cf_ga": None,
             }},
             "text": "",
         })()
@@ -233,3 +234,5 @@ class TestDispatchRouting:
         result = jp.fetch_issue("TEST-42")
         assert result["status"] == "Open"
         assert result["title"] == "Test"
+        assert result["ea_date"] == "2026-01-01"
+        assert result["ga_date"] is None

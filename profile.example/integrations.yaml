@@ -8,8 +8,16 @@ project_management:
     auto_label: ""
     default_assignee: "" # Jira accountId
     board_id: ""         # e.g. 1096 — the team's Jira board id
-    product_area: ""     # e.g. Home AI DLC — the team's product-area / swim-lane label
+    product_area: ""     # display name of the board lane that auto_label routes to
+    unlabeled_lane: ""   # name of the lane issues with no labels land in (optional)
     conventions: ""      # free-form team nuance the factory captures (e.g. "always set Sprint")
+    fields:              # this site's custom-field ids (e.g. customfield_12345); empty = omit
+      epic_name: ""          # Epic Name (sent for Epics only)
+      ga_date: ""            # GA / GTM date (Features and Epics)
+      ea_date: ""            # Early Access date (Features and Epics)
+      spec_reference: ""     # spec / PRD link (Features and Epics)
+      client_commitment: ""  # client commitment flag (Features and Epics)
+      release_notes: ""      # release-notes select field
     email: ""            # Atlassian account email for REST API auth
     api_token: ""        # Jira API token (id.atlassian.com > Security > API tokens)
 transcript:

@@ -79,3 +79,29 @@ def test_unconfigured_profile_does_not_false_positive_parse(tmp_path, monkeypatc
 
     with pytest.raises(RuntimeError, match="Could not parse Jira result"):
         jira_publish.publish_to_jira({"summary": "x", "description": "y", "type": "Bug"})
+
+
+def test_custom_field_ids_come_from_profile(tmp_path, monkeypatch):
+    """Custom-field ids are per-instance: jira_publish reads them from the
+    profile's project_management.jira.fields map, never from engine literals."""
+    prof = tmp_path / "profile"
+    prof.mkdir(parents=True)
+    (prof / "integrations.yaml").write_text(textwrap.dedent("""\
+        project_management:
+          provider: "jira"
+          jira:
+            cloud_id: "acme.atlassian.net"
+            project_key: "ACM"
+            fields:
+              ga_date: "customfield_777"
+    """))
+    import profile_lib
+    monkeypatch.setattr(profile_lib, "PM_OS_DIR", str(tmp_path))
+    import jira_publish
+    importlib.reload(jira_publish)
+    assert jira_publish.JIRA_FIELDS["ga_date"] == "customfield_777"
+    assert jira_publish.JIRA_FIELDS["epic_name"] == ""
+    fields = jira_publish._build_additional_fields(
+        {"type": "Feature", "summary": "s", "gtm_date": "2026-01-01", "feature_name": "F"})
+    assert fields["customfield_777"] == "2026-01-01"
+    assert "components" not in fields          # no component configured -> omitted
