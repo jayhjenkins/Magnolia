@@ -11,6 +11,7 @@ Supported harnesses:
   - codex: OpenAI Codex CLI (codex exec)
 """
 import json
+import re
 import platform_lib
 import profile_lib
 
@@ -56,6 +57,27 @@ def _claude_oneshot(prompt, model, allowed_tools, max_turns,
     if allowed_tools is not None:
         cmd += ["--allowedTools", allowed_tools]
     return cmd
+
+
+def stdin_prompt(cmd):
+    """Move a `claude -p <prompt>` prompt off argv when claude is a .cmd shim.
+
+    Returns (cmd, stdin_text). On Windows an npm-installed claude resolves to
+    claude.cmd; cmd.exe re-parses its argv and mangles multi-line prompts.
+    `claude -p` with no positional prompt reads it from stdin, so for a shim we
+    drop the prompt from argv and hand it back for `subprocess.run(input=...)`.
+    For a real binary (or any non-claude argv) this is a no-op: (cmd, None)."""
+    if not cmd or not platform_lib.is_cmd_shim(cmd[0]):
+        return cmd, None
+    if re.split(r"[\\/]", str(cmd[0]))[-1].lower().split(".")[0] != "claude":
+        return cmd, None
+    try:
+        i = cmd.index("-p")
+    except ValueError:
+        return cmd, None
+    if i + 1 >= len(cmd) or str(cmd[i + 1]).startswith("--"):
+        return cmd, None
+    return list(cmd[:i + 1]) + list(cmd[i + 2:]), cmd[i + 1]
 
 
 def _codex_oneshot(prompt, model, allowed_tools, max_turns,

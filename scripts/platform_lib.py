@@ -107,6 +107,26 @@ def resolve_claude(path=None):
     return "claude"
 
 
+def text_kwargs():
+    """subprocess kwargs to decode a child's output as UTF-8.
+
+    `text=True` alone decodes with the locale encoding — cp1252 on Windows,
+    which raises UnicodeDecodeError on curly quotes / em dashes / emoji that
+    claude routinely emits. errors="replace" means a stray bad byte degrades to
+    U+FFFD instead of crashing the caller."""
+    return {"text": True, "encoding": "utf-8", "errors": "replace"}
+
+
+def is_cmd_shim(path):
+    """True if `path` is a Windows batch shim (.cmd/.bat), e.g. npm's claude.cmd.
+
+    Arguments to a batch shim are re-parsed by cmd.exe, which mangles long
+    multi-line prompts (newlines truncate, & | < > ^ % are interpreted)."""
+    if not path:
+        return False
+    return str(path).lower().endswith((".cmd", ".bat"))
+
+
 def resolve_codex(path=None):
     """Absolute path to the codex CLI, or None if not installed.
 
