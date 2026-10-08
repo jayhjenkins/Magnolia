@@ -55,9 +55,11 @@ This form passes the script to bash as an argument, so stdin stays attached to y
 input. It will, in order:
 - install prerequisites via Homebrew (git, node, python, pandoc) and **qmd** (semantic search)
 - confirm Claude Code is present (or stop and tell you to install it)
-- sign you into Claude **only if you aren't already** (a browser opens — this is the one
-  interactive moment for a brand-new user)
+- sign you into Claude **only if you aren't already** (`claude auth login` — a browser opens;
+  this is the one interactive moment for a brand-new user)
 - clone Magnolia to `~/Magnolia` (or your `MAGNOLIA_DIR`)
+- install the Python dependencies from `requirements.txt` and check that the board server imports
+  cleanly (if pip fails, it stops with a clear message)
 - seed folder trust + qmd enablement
 - put `magnolia` on your PATH (`~/.local/bin`)
 
@@ -79,6 +81,9 @@ capability check, all in plain language. When it's done, the room hands off to y
 Other commands:
 - `magnolia update` — pull the latest engine (fast-forward only)
 - `magnolia doctor` — check capabilities and get remediation if something's off
+
+Server output goes to `logs/task-server.log` in your Magnolia folder. If the board can't start,
+`magnolia` prints the last lines of that log.
 
 ---
 
@@ -102,5 +107,7 @@ Onboarding will flag these if they're missing; you can add them anytime:
 
 ## If something goes wrong
 Run `magnolia doctor` — it detects and helps remediate a missing or degraded capability (Claude
-not found, login expired, qmd not enabled, etc.). The installer is idempotent: re-running it is
-safe and will fast-forward an existing checkout rather than re-clone.
+not found, login expired, qmd not enabled, missing Python packages, etc.). If the board won't
+start, read `logs/task-server.log`; a missing package is fixed with
+`python3 -m pip install -r requirements.txt` from the Magnolia folder. The installer is
+idempotent: re-running it is safe and will fast-forward an existing checkout rather than re-clone.

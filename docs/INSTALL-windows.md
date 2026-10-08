@@ -59,18 +59,37 @@ irm https://raw.githubusercontent.com/jayhjenkins/Magnolia/main/install.ps1 | ie
 (Windows is unaffected by the stdin footgun that the macOS/Linux installer guards against:
 PowerShell's `iex` runs the script in-session rather than reading it from a pipe, so the
 sign-in step reads your terminal as-is.) It will, in order:
-- install prerequisites via winget (git, node, python, pandoc) and **qmd** (semantic search)
+- install whichever prerequisites are missing via winget (git, node, python, pandoc), then
+  re-read PATH from the registry so the freshly installed tools work in the same window
+- find your **real** Python (the `py -3` launcher or the installed `python.exe`) — never the
+  Microsoft Store "python" stub in `...\WindowsApps`, which only opens the Store
+- create a small **`python3` shim** folder (`%LOCALAPPDATA%\Magnolia\shims`) and put it at the
+  front of your user PATH (details below)
+- set **`PYTHONUTF8=1`** for your user account (details below)
+- install **qmd** (semantic search)
 - confirm Claude Code is present (or stop and tell you to install it)
-- sign you into Claude **only if you aren't already** (a browser opens — this is the one
-  interactive moment for a brand-new user)
+- sign you into Claude **only if you aren't already** (`claude auth login` — a browser opens; this
+  is the one interactive moment for a brand-new user)
 - clone Magnolia to `%USERPROFILE%\Magnolia` (or your `MAGNOLIA_DIR`)
+- install the Python dependencies from `requirements.txt` and check that the board server imports
+  cleanly (if pip fails, it stops with a clear message instead of failing later)
 - seed folder trust + qmd enablement
 - add the repo's `bin` folder to your user PATH
 
-> **PATH hot-swap gotcha:** winget does not refresh the *current* shell's PATH. On a bare machine,
-> the `npm install -g @tobilu/qmd` (or `git`) step right after a fresh Node/Git install may not be
-> found in the same session. If the installer errors there, **open a new PowerShell window and run
-> the one-liner again** — it's idempotent and will pick up where it left off.
+If a step fails, the installer prints what went wrong and stops without closing your PowerShell
+window. Fix the cause and run the one-liner again — it's idempotent and picks up where it left off.
+
+### What the installer changes on your account (and why)
+- **`python3` shim.** Magnolia's skills, workers and hooks call `python3`. On Windows that name is
+  usually missing or the Store stub. The installer writes `python3.cmd` (for PowerShell/cmd) and an
+  extensionless `python3` script (for Git Bash, which Claude Code uses on Windows) into
+  `%LOCALAPPDATA%\Magnolia\shims`; both run your real Python by its full path. That folder goes
+  first on your **user** PATH so it wins over `...\WindowsApps`. If plain `python` is also the
+  Store stub, a `python` shim is added the same way; a working `python` is left alone. Re-running
+  the installer rewrites the shims (handy if you reinstall or move Python).
+- **`PYTHONUTF8=1`.** Windows' default console encoding (cp1252) garbles or crashes on Claude's
+  UTF-8 output. The installer sets `PYTHONUTF8=1` as a user environment variable.
+- Both take effect in **new** terminal windows — open a fresh one after installing.
 
 ---
 
@@ -89,6 +108,11 @@ capability check, all in plain language. When it's done, the room hands off to y
 Other commands:
 - `magnolia update` — pull the latest engine (fast-forward only)
 - `magnolia doctor` — check capabilities and get remediation if something's off
+
+The board runs in the background, detached from the terminal: **closing the terminal window does
+not stop the board.** Server output goes to `logs\task-server.log` in your Magnolia folder. If the
+board can't start, `magnolia` prints the last lines of that log — read those first (a missing
+Python package shows up there as `ModuleNotFoundError`).
 
 ---
 
@@ -112,5 +136,15 @@ Onboarding will flag these if they're missing; you can add them anytime:
 
 ## If something goes wrong
 Run `magnolia doctor` — it detects and helps remediate a missing or degraded capability (Claude
-not found, login expired, qmd not enabled, etc.). The installer is idempotent: re-running it is
-safe and will fast-forward an existing checkout rather than re-clone.
+not found, login expired, qmd not enabled, missing Python packages, etc.). The installer is
+idempotent: re-running it is safe and will fast-forward an existing checkout rather than re-clone.
+
+Common Windows fixes:
+- **`python3` opens the Microsoft Store, or "Python was not found".** Open a *new* terminal (the
+  shim PATH change only applies to new windows). If it persists, re-run the installer. You can also
+  turn off the `python.exe` / `python3.exe` entries under *Settings → Apps → Advanced app settings →
+  App execution aliases*.
+- **Board won't start.** Read the log lines `magnolia` prints (or `logs\task-server.log`). For a
+  missing package, run this from the Magnolia folder: `python3 -m pip install -r requirements.txt`.
+- **Garbled characters or `UnicodeDecodeError`.** In a new PowerShell window, `echo $env:PYTHONUTF8`
+  should print `1`; if not, re-run the installer.
