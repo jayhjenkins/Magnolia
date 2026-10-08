@@ -309,6 +309,17 @@ _OBS_HEADING_RE = re.compile(r"^## Observations\s*$", re.MULTILINE)
 
 # Closed observation-kind enum. Sentinels (later tasks) may only emit one of
 # these; append_observation rejects anything outside the set. Kept ASCII-safe.
+_ASCII_FOLD = {"\u2014": "-", "\u2013": "-", "\u2018": "'", "\u2019": "'",
+               "\u201c": '"', "\u201d": '"', "\u2026": "..."}
+
+
+def ascii_fold(text):
+    """ASCII-safe runtime text: fold common typographic characters (dashes,
+    curly quotes, ellipsis) to ASCII and drop anything else non-ASCII."""
+    text = "".join(_ASCII_FOLD.get(ch, ch) for ch in str(text or ""))
+    return text.encode("ascii", "ignore").decode("ascii")
+
+
 OBSERVATION_KINDS = frozenset({
     "status-signal",
     "date-change",

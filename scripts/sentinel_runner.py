@@ -423,6 +423,55 @@ def _map_tracker_fact(fact):
     return records
 
 
+_CHILD_OPEN_LIMIT = 8
+_CHILD_SUMMARY_CHARS = 70
+_ascii = program_lib.ascii_fold
+
+
+def _map_child_summary(children):
+    """Map an issue's child tickets to ONE factual status-signal claim, or None.
+
+    Mechanical, no interpretation: counts by status category (canceled tickets
+    counted apart, since Jira files them as done), the most recent movement, and
+    the open (not done) tickets with their status and fix versions. The date
+    check in the reconciler reads this as evidence. Because `last movement`
+    advances whenever any child changes, an unchanged tree yields an identical
+    claim, which append_observation dedupes.
+    """
+    if not children:
+        return None
+    canceled = [c for c in children if c.get("canceled")]
+    active = [c for c in children if not c.get("canceled")]
+    done = [c for c in active if c.get("status_category") == "done"]
+    in_progress = [c for c in active if c.get("status_category") == "indeterminate"]
+    not_started = [c for c in active if c.get("status_category") == "new"]
+    dates = [c.get("updated") for c in children if c.get("updated")]
+    claim = (f"Child tickets: {len(active)} active ({len(done)} done, "
+             f"{len(in_progress)} in progress, {len(not_started)} not started), "
+             f"{len(canceled)} canceled")
+    if dates:
+        claim += f"; last movement {max(dates)}"
+    open_items = []
+    for c in (in_progress + not_started)[:_CHILD_OPEN_LIMIT]:
+        tag = _ascii(c.get("status") or "?")
+        versions = [
+            _ascii(v.get("name", "")) + (f" {v['release_date']}" if v.get("release_date") else "")
+            for v in (c.get("fix_versions") or []) if v.get("name")
+        ]
+        if versions:
+            tag += ", fix " + "/".join(versions)
+        summary = _ascii(c.get("summary") or "").strip()
+        if len(summary) > _CHILD_SUMMARY_CHARS:
+            summary = summary[:_CHILD_SUMMARY_CHARS - 3].rstrip() + "..."
+        open_items.append(f"{_ascii(c.get('key'))} [{tag}] {summary}")
+    extra = len(in_progress) + len(not_started) - len(open_items)
+    if open_items:
+        claim += "; open: " + "; ".join(open_items)
+        if extra > 0:
+            claim += f"; +{extra} more open"
+    return claim + "."
+
+
 def _run_tracker_truth(name, programs, root=None, now=None):
     """Mechanical tracker-truth: read adapter facts, map deterministically, append.
 
@@ -449,6 +498,14 @@ def _run_tracker_truth(name, programs, root=None, now=None):
             continue
         any_fact = True
         records = _map_tracker_fact(fact)
+        try:
+            children = adapters.fetch_children(_ADAPTER_FAMILY, epic, root=root)
+        except Exception as exc:  # child read is best-effort evidence
+            log(f"sentinel '{name}': child read for {epic} failed: {exc}")
+            children = None
+        child_claim = _map_child_summary(children)
+        if child_claim:
+            records.append(("status-signal", child_claim))
         for kind, claim in records:
             try:
                 appended = program_lib.append_observation(

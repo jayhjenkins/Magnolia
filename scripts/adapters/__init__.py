@@ -108,3 +108,19 @@ def fetch_status(family, issue_key, root=None):
         # degrade to None per this function's contract - a free read NEVER crashes
         # its caller. Writes are different: publish() lets such errors surface.
         return None
+
+
+def fetch_children(family, issue_key, root=None):
+    """FREE read of an issue's child tickets (an epic/feature's work items).
+    Same contract as fetch_status: never Tier-2 gated, and every degrade path
+    (no provider, unconfigured, a provider without the op, a RuntimeError)
+    collapses to None so callers no-op without fabricating data."""
+    mod = get(family, root)
+    if mod is None or not hasattr(mod, "fetch_children"):
+        return None
+    if not mod.is_configured(root):
+        return None
+    try:
+        return mod.fetch_children(issue_key, root)
+    except RuntimeError:
+        return None

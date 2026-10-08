@@ -41,3 +41,11 @@ def fetch_status(issue_key, root=None):
     if not is_configured(root):
         raise NotConfigured("Jira is not configured in this profile")
     return jira_publish.fetch_issue(issue_key)
+
+
+def fetch_children(issue_key, root=None):
+    """READ op: return the child tickets of an issue (see the contract). A read
+    is free -- never Tier-2 gated."""
+    if not is_configured(root):
+        raise NotConfigured("Jira is not configured in this profile")
+    return jira_publish.fetch_children(issue_key)
