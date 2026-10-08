@@ -192,6 +192,133 @@ def resolve_tool(name):
     return None
 
 
+def resolve_qmd():
+    """Absolute path to the qmd CLI (tobi/qmd, `npm install -g @tobilu/qmd`), or None.
+
+    On Windows npm installs qmd as a `qmd.cmd` batch shim, which shutil.which
+    finds via PATHEXT; callers must launch it through foreground_cmd(), never as
+    a bare argv (CreateProcess can't run a .cmd directly)."""
+    return resolve_tool("qmd")
+
+
+# cmd.exe re-parses a batch shim's command line: inside "..." the & | < > ^
+# operators are literal, but these still expand or break the quoting outright.
+_CMD_UNSAFE = ('"', "%", "!", "\r", "\n", "\0")
+_CMD_NEEDS_QUOTES = (" ", "\t", "&", "|", "<", ">", "^", "(", ")", ",", ";", "=")
+
+
+def _cmd_quote(arg):
+    if any(c in arg for c in _CMD_UNSAFE):
+        raise ValueError(f"argument not safe to pass through cmd.exe: {arg!r}")
+    if not arg or any(c in arg for c in _CMD_NEEDS_QUOTES):
+        return f'"{arg}"'
+    return arg
+
+
+def foreground_cmd(exe, args):
+    """The command to Popen/exec `exe args...` WITHOUT a shell, cross-platform.
+
+    POSIX and real Windows executables: a plain argv list. A Windows batch shim
+    (.cmd/.bat, e.g. npm's qmd.cmd) can't be CreateProcess'd, so it runs under
+    %COMSPEC% as an explicit command line `"cmd" /d /s /c ""<shim>" args"`:
+    /s strips exactly the outer quote pair, /d skips AutoRun. Built by hand,
+    never shell=True and never list2cmdline (its \\" escaping is not cmd's).
+    Arguments cmd.exe would expand (% ! ") raise ValueError instead of being
+    silently mangled."""
+    args = list(args)
+    if os_kind() != "windows" or not is_cmd_shim(exe):
+        return [exe] + args
+    if any(c in exe for c in _CMD_UNSAFE):
+        raise ValueError(f"path not safe to pass through cmd.exe: {exe!r}")
+    comspec = os.environ.get("COMSPEC") or "cmd.exe"
+    inner = " ".join([f'"{exe}"'] + [_cmd_quote(a) for a in args])
+    return f'"{comspec}" /d /s /c "{inner}"'
+
+
+_JOB_HANDLE = None  # held open for the process lifetime; closing it kills the tree
+
+
+def _kill_children_with_parent():
+    """Windows: put this process in a KILL_ON_JOB_CLOSE job object, so every child
+    it spawns afterwards (cmd.exe -> node for an npm shim) is killed by the OS the
+    moment this process exits - including TerminateProcess, which no signal
+    handler sees. Best-effort: returns False (no-op) off Windows or on failure."""
+    global _JOB_HANDLE
+    if os_kind() != "windows":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_ulonglong) for n in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+        class _BasicLimits(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                        ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class _ExtendedLimits(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", _BasicLimits),
+                        ("IoInfo", _IoCounters),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                wintypes.LPVOID, wintypes.DWORD]
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return False
+        info = _ExtendedLimits()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(job, 9,  # JobObjectExtendedLimitInformation
+                                           ctypes.byref(info), ctypes.sizeof(info)):
+            return False
+        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+            return False
+        _JOB_HANDLE = job
+        return True
+    except Exception:
+        return False
+
+
+def run_foreground(cmd):
+    """Run `cmd` (from foreground_cmd) as a transparent stand-in for this process.
+
+    stdin/stdout/stderr are inherited handles, never pipes, so a byte stream such
+    as MCP stdio passes straight through: no buffering, no re-encoding.
+    POSIX: exec in place (never returns) - the caller's signals, stdio and exit
+    status belong to the child directly. Windows (no real exec): spawn, tie the
+    child tree's life to ours via a job object, wait, and return its exit code."""
+    if os_kind() != "windows":
+        os.execv(cmd[0], cmd)
+    _kill_children_with_parent()
+    proc = subprocess.Popen(cmd)
+    while True:
+        try:
+            return proc.wait()
+        except KeyboardInterrupt:
+            # Ctrl+C/Break reaches the child via the shared console; let it
+            # shut down and report its own exit code.
+            continue
+
+
 def open_file_cmd(path):
     """OS-correct argv to open a file in the user's default handler."""
     kind = os_kind()
