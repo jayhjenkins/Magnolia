@@ -29,8 +29,10 @@ or from the capability's own fields.
      - **qmd specifically**: the ONE correct tool is **`npm install -g @tobilu/qmd`**
        (https://github.com/tobi/qmd, needs Node ≥ 22). Do NOT install any other package or repo
        named "qmd" — they are different tools and will break the qmd MCP. After install, qmd runs
-       as the MCP via `qmd mcp` (already wired in the repo's `.mcp.json` as the bare `qmd`
-       command); on first launch the user approves it via `/mcp`.
+       as the MCP via `qmd mcp` (already wired in the repo's `.mcp.json` through the
+       `scripts/qmd_mcp.py` launcher, which finds `qmd` / Windows' `qmd.cmd` on PATH); on first
+       launch the user approves it via `/mcp`. If search is missing on Windows, check that
+       `MAGNOLIA_PYTHON` is set (re-running install.ps1 sets it).
    - **feed/transcript**: depends on the active provider (`transcript.provider` in
      `profile/integrations.yaml`; `probe_transcript` keys off it). Granola and Otter are equal
      options — fix whichever one is active. Either way, the board runs the sync hourly by itself on
