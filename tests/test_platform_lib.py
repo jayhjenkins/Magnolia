@@ -348,3 +348,110 @@ def test_is_cmd_shim():
     assert not platform_lib.is_cmd_shim(r"C:\Program Files\claude\claude.exe")
     assert not platform_lib.is_cmd_shim("/opt/homebrew/bin/claude")
     assert not platform_lib.is_cmd_shim(None)
+
+
+# --- qmd resolution + foreground (stdio passthrough) launch seams ---
+
+def test_resolve_qmd_darwin_plain_binary(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "darwin")
+    monkeypatch.setattr(platform_lib.shutil, "which", lambda n: "/opt/homebrew/bin/" + n)
+    assert platform_lib.resolve_qmd() == "/opt/homebrew/bin/qmd"
+
+
+def test_resolve_qmd_windows_finds_npm_cmd_shim(monkeypatch):
+    # shutil.which honors PATHEXT on Windows, so `qmd` resolves to npm's qmd.cmd.
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    shim = r"C:\Users\Pat Doe\AppData\Roaming\npm\qmd.CMD"
+    monkeypatch.setattr(platform_lib.shutil, "which", lambda n: shim)
+    assert platform_lib.resolve_qmd() == shim
+    assert platform_lib.is_cmd_shim(platform_lib.resolve_qmd())
+
+
+def test_resolve_qmd_missing_returns_none(monkeypatch):
+    monkeypatch.setattr(platform_lib.shutil, "which", lambda n: None)
+    monkeypatch.setattr(platform_lib.os.path, "isfile", lambda p: False)
+    assert platform_lib.resolve_qmd() is None
+
+
+def test_foreground_cmd_posix_is_plain_argv(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "darwin")
+    assert platform_lib.foreground_cmd("/opt/homebrew/bin/qmd", ["mcp"]) == [
+        "/opt/homebrew/bin/qmd", "mcp"]
+
+
+def test_foreground_cmd_windows_exe_is_plain_argv(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    assert platform_lib.foreground_cmd(r"C:\tools\qmd.exe", ["mcp"]) == [
+        r"C:\tools\qmd.exe", "mcp"]
+
+
+def test_foreground_cmd_windows_cmd_shim_goes_through_comspec(monkeypatch):
+    # A .cmd can't be CreateProcess'd directly; it runs under cmd.exe. Built as an
+    # explicit command line (cmd /d /s /c ""<shim>" args") - never shell=True and
+    # never list2cmdline, whose \" escaping cmd.exe does not understand.
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\system32\cmd.exe")
+    shim = r"C:\Users\Pat Doe\AppData\Roaming\npm\qmd.cmd"
+    cmd = platform_lib.foreground_cmd(shim, ["mcp", "--index", "my index"])
+    assert cmd == ('"C:\\Windows\\system32\\cmd.exe" /d /s /c '
+                   '""C:\\Users\\Pat Doe\\AppData\\Roaming\\npm\\qmd.cmd" mcp --index "my index""')
+
+
+def test_foreground_cmd_windows_shim_default_comspec(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    monkeypatch.delenv("COMSPEC", raising=False)
+    cmd = platform_lib.foreground_cmd(r"C:\npm\qmd.cmd", ["mcp"])
+    assert cmd == '"cmd.exe" /d /s /c ""C:\\npm\\qmd.cmd" mcp"'
+
+
+def test_foreground_cmd_windows_shim_rejects_cmd_expansion_chars(monkeypatch):
+    import pytest
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    for bad in ['a"b', "%PATH%", "x!y", "a\nb"]:
+        with pytest.raises(ValueError):
+            platform_lib.foreground_cmd(r"C:\npm\qmd.cmd", ["mcp", bad])
+
+
+def test_run_foreground_posix_execs_in_place(monkeypatch):
+    # POSIX: exec replaces the launcher, so the client's signals, stdio and exit
+    # code reach qmd directly with no relay in between.
+    import pytest
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "darwin")
+    seen = {}
+
+    def fake_execv(path, argv):
+        seen["path"], seen["argv"] = path, argv
+        raise SystemExit(0)
+
+    monkeypatch.setattr(platform_lib.os, "execv", fake_execv)
+    with pytest.raises(SystemExit):
+        platform_lib.run_foreground(["/opt/homebrew/bin/qmd", "mcp"])
+    assert seen == {"path": "/opt/homebrew/bin/qmd",
+                    "argv": ["/opt/homebrew/bin/qmd", "mcp"]}
+
+
+def test_run_foreground_windows_inherits_stdio_and_returns_rc(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    jobbed = []
+    monkeypatch.setattr(platform_lib, "_kill_children_with_parent", lambda: jobbed.append(1))
+    seen = {}
+
+    class FakeProc:
+        def __init__(self, cmd, **kw):
+            seen["cmd"], seen["kw"] = cmd, kw
+
+        def wait(self):
+            return 3
+
+    monkeypatch.setattr(platform_lib.subprocess, "Popen", FakeProc)
+    assert platform_lib.run_foreground("CMDLINE") == 3
+    assert jobbed == [1]                  # child tree dies with the launcher
+    assert seen["cmd"] == "CMDLINE"
+    # stdio inherited (binary-safe: Python never touches the MCP stream), no shell
+    for k in ("stdin", "stdout", "stderr", "shell", "text", "encoding"):
+        assert not seen["kw"].get(k)
+
+
+def test_kill_children_with_parent_is_noop_off_windows(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "darwin")
+    assert platform_lib._kill_children_with_parent() is False

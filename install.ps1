@@ -194,6 +194,10 @@ if (Add-UserPath $ShimDir -Prepend) { Say "Put $ShimDir at the front of your PAT
 # Set persistently (this also broadcasts the environment change to new windows).
 [Environment]::SetEnvironmentVariable("PYTHONUTF8", "1", "User")
 $env:PYTHONUTF8 = "1"
+# The qmd MCP server (.mcp.json) starts as "${MAGNOLIA_PYTHON:-python3}". Claude
+# Code can't spawn our python3 .cmd shim as an MCP command, so pin the real exe.
+[Environment]::SetEnvironmentVariable("MAGNOLIA_PYTHON", $Py, "User")
+$env:MAGNOLIA_PYTHON = $Py
 Update-SessionPath
 
 if (Test-Have "qmd") {

@@ -2,8 +2,8 @@
   "mcpServers": {
     "qmd": {
       "type": "stdio",
-      "command": "qmd",
-      "args": ["mcp"]
+      "command": "${MAGNOLIA_PYTHON:-python3}",
+      "args": ["scripts/qmd_mcp.py"]
     }
   }
 }

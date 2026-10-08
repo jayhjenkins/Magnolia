@@ -227,6 +227,20 @@ def test_detect_assembles_capabilities(tmp_path, monkeypatch):
     assert (tmp_path / "profile" / "capabilities.json").is_file()
 
 
+def test_detect_counts_windows_npm_qmd_cmd_as_installed(tmp_path, monkeypatch):
+    # npm installs qmd as qmd.cmd on Windows; shutil.which finds it via PATHEXT,
+    # and the qmd MCP launcher (scripts/qmd_mcp.py) can run it - so it's "ok".
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "config.yaml").write_text("server:\n  port: 59998\n")
+    monkeypatch.setattr(doctor.platform_lib, "os_kind", lambda: "windows")
+    shim = r"C:\Users\pat\AppData\Roaming\npm\qmd.cmd"
+    monkeypatch.setattr(doctor.shutil, "which", lambda n: shim if n == "qmd" else None)
+    monkeypatch.setattr(doctor.importlib.util, "find_spec", lambda n: object())
+    c = doctor.detect(root=str(tmp_path))["capabilities"]
+    assert c["qmd"]["status"] == "ok"
+    assert "remedy" not in c["qmd"]
+
+
 def test_msgraph_remedy_is_a_real_install_command():
     # The msgraph_cli remedy must be a real macOS install route, not a placeholder.
     remedy = doctor._LOCAL_TOOLS["msgraph_cli"]["remedy"]
