@@ -114,6 +114,83 @@ def _tail(path, n=20):
         return ""
 
 
+_TRANSCRIPT_STALE_HOURS = 26
+_GRANOLA_CONNECT = "Connect Granola via /mcp, then finish granola.ai/mcp-signup"
+_GRANOLA_STALE_REMEDY = ("The board server runs the Granola sync hourly - make sure it is "
+                         "running, or run: python scripts/granola_sync.py "
+                         "(see logs/granola_sync.log)")
+
+
+def _hours_since(iso):
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+
+
+def _probe_granola(cap, state_dir):
+    """Granola is a claude.ai connector that detect() can't probe directly, so the
+    sync's own record is the proof: granola_status.json (last_success /
+    error_kind, written by every run - even an empty one). An older install with
+    only the ledger (granola_downloaded.json) is judged by its mtime."""
+    import json
+    status_path = os.path.join(state_dir, "granola_status.json")
+    ledger_path = os.path.join(state_dir, "granola_downloaded.json")
+    status = None
+    if os.path.isfile(status_path):
+        try:
+            with open(status_path, encoding="utf-8") as f:
+                status = json.load(f)
+        except (OSError, ValueError):
+            status = None
+    if not isinstance(status, dict):
+        if not os.path.isfile(ledger_path):
+            cap["status"] = "needs_reauth"
+            cap["detail"] = _GRANOLA_CONNECT
+            return cap
+        try:
+            age_h = (time.time() - os.path.getmtime(ledger_path)) / 3600
+        except OSError:
+            age_h = 0
+        if age_h > _TRANSCRIPT_STALE_HOURS:
+            cap.update(status="stale", detail=f"no Granola sync recorded in {age_h:.0f}h",
+                       remedy=_GRANOLA_STALE_REMEDY)
+        else:
+            cap["status"] = "ok"
+        return cap
+
+    age_h = _hours_since(status.get("last_success"))
+    kind = status.get("error_kind")
+    if kind == "needs_reauth":
+        cap["status"] = "needs_reauth"
+        cap["detail"] = _GRANOLA_CONNECT
+        cap["last_error"] = str(status.get("last_error") or "")[:200]
+        return cap
+    if age_h is None:
+        if kind:
+            cap["status"] = "degraded"
+            cap["detail"] = f"Granola sync has not succeeded yet: {status.get('last_error') or kind}"[:200]
+            cap["remedy"] = "Check logs/granola_sync.log"
+        else:
+            cap["status"] = "needs_reauth"
+            cap["detail"] = _GRANOLA_CONNECT
+        return cap
+    if age_h > _TRANSCRIPT_STALE_HOURS:
+        cap.update(status="stale", detail=f"last successful Granola sync {age_h:.0f}h ago",
+                   remedy=_GRANOLA_STALE_REMEDY)
+        return cap
+    cap["status"] = "ok"
+    cap["detail"] = f"last synced {age_h:.1f}h ago"
+    pending = status.get("pending") or {}
+    if pending:
+        cap["detail"] += f"; {len(pending)} meeting(s) waiting to retry"
+    return cap
+
+
 def probe_transcript(root=None):
     tc = profile_lib.transcript_config(root)
     provider = tc["provider"]
@@ -123,16 +200,7 @@ def probe_transcript(root=None):
         return cap
     state_dir = profile_lib.transcript_state_dir(root)
     if provider == "granola":
-        # The Granola MCP is a claude.ai connector — detect() can't probe it
-        # directly. A successful-sync marker (granola_downloaded.json) is our
-        # proof of a working feed; absent it, nudge the user to connect.
-        marker = os.path.join(state_dir, "granola_downloaded.json")
-        if os.path.isfile(marker):
-            cap["status"] = "ok"
-        else:
-            cap["status"] = "needs_reauth"
-            cap["detail"] = "Connect Granola via /mcp, then finish granola.ai/mcp-signup"
-        return cap
+        return _probe_granola(cap, state_dir)
     if tc["external_feed"]:
         log_path = os.path.join(state_dir, "otter_sync.log")
         dl_path = os.path.join(state_dir, "downloaded.json")

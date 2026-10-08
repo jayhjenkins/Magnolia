@@ -137,6 +137,74 @@ def test_probe_transcript_granola_with_marker_ok(tmp_path):
     assert cap["status"] == "ok"
 
 
+def _granola_status(tmp_path, **status):
+    import json
+    (tmp_path / "profile").mkdir(exist_ok=True)
+    (tmp_path / "profile" / "integrations.yaml").write_text("transcript:\n  provider: granola\n")
+    st = tmp_path / "profile" / "transcript"
+    st.mkdir(parents=True, exist_ok=True)
+    (st / "granola_status.json").write_text(json.dumps(status))
+    return st
+
+
+def _ago(hours):
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+
+def test_probe_transcript_granola_green_after_empty_first_run(tmp_path):
+    # An empty first sync writes status with last_success and an empty ledger.
+    st = _granola_status(tmp_path, last_success=_ago(0.1), last_error=None, pending={})
+    (st / "granola_downloaded.json").write_text("{}")
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["status"] == "ok"
+
+
+def test_probe_transcript_granola_stale_after_26h(tmp_path):
+    _granola_status(tmp_path, last_success=_ago(30))
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["status"] == "stale"
+    assert "30h" in cap["detail"]
+    assert cap.get("remedy")
+
+
+def test_probe_transcript_granola_needs_reauth_from_status(tmp_path):
+    _granola_status(tmp_path, last_success=_ago(2), last_attempt=_ago(0.5),
+                    error_kind="needs_reauth", last_error="granola_unavailable: not connected")
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["status"] == "needs_reauth"
+    assert "mcp-signup" in cap.get("detail", "")
+
+
+def test_probe_transcript_granola_transient_error_with_fresh_success_is_ok(tmp_path):
+    _granola_status(tmp_path, last_success=_ago(2), last_attempt=_ago(1),
+                    error_kind="error", last_error="listing timed out")
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["status"] == "ok"
+
+
+def test_probe_transcript_granola_never_succeeded_error_is_degraded(tmp_path):
+    _granola_status(tmp_path, last_attempt=_ago(1), error_kind="error",
+                    last_error="listing timed out after 180s")
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["status"] == "degraded"
+    assert "timed out" in cap["detail"]
+
+
+def test_probe_transcript_granola_legacy_ledger_stale_by_mtime(tmp_path):
+    import time
+    (tmp_path / "profile").mkdir()
+    (tmp_path / "profile" / "integrations.yaml").write_text("transcript:\n  provider: granola\n")
+    st = tmp_path / "profile" / "transcript"
+    st.mkdir(parents=True)
+    led = st / "granola_downloaded.json"
+    led.write_text("{}")
+    old = time.time() - 72 * 3600
+    os.utime(led, (old, old))
+    cap = doctor.probe_transcript(root=str(tmp_path))
+    assert cap["status"] == "stale"
+
+
 def test_detect_assembles_capabilities(tmp_path, monkeypatch):
     (tmp_path / "profile").mkdir()
     (tmp_path / "profile" / "integrations.yaml").write_text(
