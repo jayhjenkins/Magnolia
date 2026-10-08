@@ -251,13 +251,13 @@ For each document, extract:
 **Relevance**: 0.88
 
 **Content:**
-Trisha identified API permissions framework as the top priority for the new platform PM hire.
+The CEO identified an API permissions framework as the top priority for the new platform PM hire.
 Concern: sophisticated customers requesting full API access to build their own agents, bypassing
-the product. Stan AI already building on Vantaca APIs. Direction: be "very opinionated" about
+the product. A third-party vendor is already building on our APIs. Direction: be "very opinionated" about
 which APIs are externally usable vs. internal-only as the system becomes headless.
 
 **Key quotes:**
-> "That is like the one of the first things I would go tell Zach he needs to go figure out before we do anything else."
+> "That is like the one of the first things I would go tell the new PM they need to go figure out before we do anything else."
 
 ---
 

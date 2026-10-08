@@ -45,14 +45,13 @@ core:
     - workflow-doc-sync
     - quality-meeting-schema-validation
     - quality-documentation-sync
-    - metric-quarterly-rocks
-    - metric-scorecard-fetch
 
 pm:
   label: "Product Management"
   description: "PRDs, roadmaps, strategy, metrics, prioritization, tickets, and research."
   skills:
     - workflow-prd-creation
+    - workflow-context-brief
     - workflow-product-planning
     - workflow-roadmap-updating
     - workflow-product-strategy-creation
@@ -64,7 +63,6 @@ pm:
     - workflow-launch-announcement
     - workflow-tradeoff-decision
     - workflow-cs-prep
-    - workflow-velocity-estimate
     - workflow-metrics-definition
     - workflow-metric-diagnosis
     - workflow-dashboard-design
@@ -127,6 +125,8 @@ recruiting:
   skills:
     - hiring-assess-pm-candidate
     - hiring-assess-pm-practicum
+    - recruiting-setup-new-opening
+    - recruiting-prep-interview
     - recruiting-process-interview
     - recruiting-process-practicum
 

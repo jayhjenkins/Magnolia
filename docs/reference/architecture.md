@@ -2,6 +2,8 @@
 
 The current-state map of the Magnolia engine: the spine, its subsystems, and the seams between them. This is a map, not a spec — the canonical truth for each subsystem lives in code or a skill, which every section links under **Canonical source:**. The laws that hold it together live in [`invariants.md`](./invariants.md) (linked, not restated). History and rationale live in [`docs/plans/`](../plans/). When a section and the code disagree, the code wins.
 
+> `docs/plans/…` citations point at the maintainer's local design archive, which is gitignored and not in a fresh clone. The code is the canonical source.
+
 ## 1. The spine — engine / profile / content
 
 Three layers, one rule. The **engine** (skills, scripts, card registry, UI) is shared and de-personalized: you improve it, teammates pull it. **`profile/`** (gitignored, per-person) is the *only* place identity and integration choices live — who you are, which providers you use, your conventions. **`datasets/`** is per-person content (meetings, products, tasks, research). The rule: the engine reads identity only through `profile/`, never a literal (invariant #1).

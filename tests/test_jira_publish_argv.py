@@ -142,13 +142,13 @@ class TestResultValidation:
     def test_accepts_real_jira_key(self, jp, monkeypatch):
         _capture_argv(
             monkeypatch, jp,
-            '{"result":"JIRA_RESULT:VNT-12345|https://acme.atlassian.net/browse/VNT-12345"}')
+            '{"result":"JIRA_RESULT:PROJ-12345|https://acme.atlassian.net/browse/PROJ-12345"}')
         key, url = jp._run_jira_session(
             "Create this issue...",
             "mcp__claude_ai_Jira__createJiraIssue",
         )
-        assert key == "VNT-12345"
-        assert "VNT-12345" in url
+        assert key == "PROJ-12345"
+        assert "PROJ-12345" in url
 
     def test_accepts_project_key_format(self, jp, monkeypatch):
         _capture_argv(

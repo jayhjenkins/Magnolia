@@ -23,7 +23,7 @@ def test_actionable_query_uses_python_not_bash(monkeypatch):
 
 
 def test_human_decision_card_types_never_dispatched(monkeypatch):
-    """Regression for the 2026-07-30 VNT-100 incident: a stalled Jira receipt
+    """Regression for the 2026-07-30 PROJ-100 incident: a stalled Jira receipt
     (card_type: receipt, status stuck at "open") got swept by the background
     dispatch scheduler and redispatched to a worker with nothing to do,
     repeatedly. Card types that represent a human decision -- accept/reject,
@@ -76,9 +76,9 @@ def test_single_task_mode_skips_human_interactive_cards(tmp_path, monkeypatch):
     os.makedirs(tmp_path / "tasks" / "collab", exist_ok=True)
 
     tid, _ = task_lib.create_task(
-        "Commented on VNT-100", queue="collab", domain="ops",
+        "Commented on PROJ-100", queue="collab", domain="ops",
         creator="agent", card_type="receipt",
-        description="**[VNT-100](https://jira/VNT-100)**")
+        description="**[PROJ-100](https://jira/PROJ-100)**")
 
     monkeypatch.setattr(sys, "argv", ["task_dispatch", "--task", tid, "--dry-run"])
 

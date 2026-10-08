@@ -46,7 +46,7 @@ When invoked **interactively** via `/jira:create` (human is in the CLI session),
 <!-- JIRA_PRIORITY:High -->
 <!-- JIRA_LABELS: -->
 <!-- JIRA_RELEASE_NOTES:Internal Only -->
-<!-- JIRA_PARENT:VNT-12345 -->
+<!-- JIRA_PARENT:PROJ-12345 -->
 <!-- JIRA_FEATURE_NAME: -->
 <!-- JIRA_GTM_DATE: -->
 <!-- JIRA_EA_DATE: -->
@@ -65,7 +65,7 @@ Full description with context...
 - **Priority:** High
 - **Labels:** (none — Units land in "everything else" by default; set to `home_aidlc` only for Features/Epics or Units that mirror an AI DLC parent)
 - **Release Notes:** Internal Only
-- **Parent:** VNT-12345
+- **Parent:** PROJ-12345
 <!-- /JIRA_DRAFT -->
 ```
 
@@ -74,7 +74,7 @@ Full description with context...
 - `JIRA_PRIORITY`: `Highest`, `High`, `Medium`, `Low`, `Lowest` (or empty for default)
 - `JIRA_LABELS`: usually empty. The only label PM-OS applies is `home_aidlc`, and only on Features/Epics (see Swim Lane Rule below). For Bugs, Units, Regression Defects, Spikes, Hotfixes — leave this empty. Never invent topical labels (`calendar`, `compliance`, `resident-portal`, etc.) from the ticket subject — those create permanent noise in a taxonomy you don't own. Add a non-default label only when the user explicitly types it in their prompt.
 - `JIRA_RELEASE_NOTES`: `None`, `Internal Only`, or `External` (or empty)
-- `JIRA_PARENT`: parent issue key (e.g., `VNT-12345`) — typically for `Unit` linking to a `Feature` or `Epic`. Optional; leave empty to create unparented.
+- `JIRA_PARENT`: parent issue key (e.g., `PROJ-12345`) — typically for `Unit` linking to a `Feature` or `Epic`. Optional; leave empty to create unparented.
 - `JIRA_FEATURE_NAME`: short label for the Feature (Feature only — also accepted as the legacy `JIRA_EPIC_NAME` for compatibility)
 - `JIRA_GTM_DATE`: `YYYY-MM-DD`, or empty / `TBD` to leave blank (Feature / Epic only)
 - `JIRA_EA_DATE`: `YYYY-MM-DD`, or empty / `TBD` to leave blank (Feature / Epic only). Early-access date — typically before GTM. Sam's process accepts incomplete dates so long as the field can be filled in later in the Jira UI.
@@ -138,7 +138,7 @@ All values below are hardcoded from the Vantaca Jira instance. The migration to 
 | Regression Area | `customfield_10293` | multiselect | 260+ product area options — set in Jira UI, not in PM-OS drafts |
 | Priority | `priority` | priority | Standard Jira priorities |
 | Labels | `labels` | array of string | Swim lane assignment. `home_aidlc` → AI DLC automated lane (Features/Epics only). Empty → "everything else" column (bugs, ad-hoc work). No auto-prepend; the draft's labels are submitted as-is. |
-| Parent | `parent` | issue link | Top-level field on Unit/Sub-task — value is `{"key": "VNT-XXXXX"}` |
+| Parent | `parent` | issue link | Top-level field on Unit/Sub-task — value is `{"key": "PROJ-XXXXX"}` |
 | Assignee | `assignee` | account object | `{"accountId": "..."}`. **Interactive mode:** Features get the profile `default_assignee` (`project_management.jira`) unless overridden; leave empty if unset. **Draft mode:** leave the draft assignee blank — `jira_publish.py` fills the profile `default_assignee` at publish time. Non-Feature types: leave unset unless the user specifies. |
 
 ### Swim Lane Rule
@@ -245,8 +245,8 @@ mcp__claude_ai_Jira__createJiraIssue(
 ### Step 2.4: Report Result
 
 Display:
-- Issue key (e.g., `VNT-1234`)
-- Direct link: `https://vantaca.atlassian.net/browse/VNT-1234`
+- Issue key (e.g., `PROJ-1234`)
+- Direct link: `https://vantaca.atlassian.net/browse/PROJ-1234`
 - Type: `Bug` or `Regression Defect`
 - Status: Refinement (default)
 - Reminder: "To move to To Do, you'll need to set Release Notes, Regression Area, and Components in Jira (component is already set)."
@@ -308,8 +308,8 @@ mcp__claude_ai_Jira__createJiraIssue(
 ### Step 3.4: Report Result
 
 Display:
-- Feature key (e.g., `VNT-5678`)
-- Direct link: `https://vantaca.atlassian.net/browse/VNT-5678`
+- Feature key (e.g., `PROJ-5678`)
+- Direct link: `https://vantaca.atlassian.net/browse/PROJ-5678`
 - Feature Name: displayed
 - Spec Reference: displayed (if set) — confirm it renders as a clickable URL in Jira
 - GTM Date: displayed (if set)
@@ -329,7 +329,7 @@ Ask for (skip any already provided):
 
 1. **Summary** (required): One-line title
 2. **Description** (required): What is this Unit doing? Include acceptance criteria when known.
-3. **Parent issue key** (optional, recommended): The Feature or Epic this Unit belongs under (e.g., `VNT-42920`). Leave blank if not yet known — the Unit will be created unparented and you can wire it in Jira.
+3. **Parent issue key** (optional, recommended): The Feature or Epic this Unit belongs under (e.g., `PROJ-42920`). Leave blank if not yet known — the Unit will be created unparented and you can wire it in Jira.
 
 ### Step 4.2: Gather Optional Info
 
@@ -353,7 +353,7 @@ mcp__claude_ai_Jira__createJiraIssue(
     "components": [{"id": "10011"}],
     "labels": [],  // Units default to "everything else" — set to ["home_aidlc"] only if parented to a home_aidlc Feature
     // Include only if parent provided:
-    "parent": {"key": "<VNT-XXXXX>"},
+    "parent": {"key": "<PROJ-XXXXX>"},
     // Include only if user provided values:
     "priority": {"name": "<priority>"},
     "customfield_10499": {"value": "<release notes choice>"}

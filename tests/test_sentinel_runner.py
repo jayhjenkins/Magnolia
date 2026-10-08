@@ -808,13 +808,13 @@ def test_adapter_sources_exempt_from_normalized_dedup(tmp_path, monkeypatch):
 
     program_lib.append_observation(
         pid1, kind="status-signal", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-123",
+        source="adapter:project_management:PROJ-123",
         claim="Tracker reports status 'In Development'.",
         root=str(tmp_path))
 
     appended = program_lib.append_observation(
         pid1, kind="status-signal", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-123",
+        source="adapter:project_management:PROJ-123",
         claim="Tracker reports status 'PR Review'.",
         root=str(tmp_path))
     assert appended, "Adapter sources with different claims should both record"

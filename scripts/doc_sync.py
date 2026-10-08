@@ -187,7 +187,7 @@ def save_manifest(manifest):
     tmp = MANIFEST_PATH.with_suffix(".tmp")
     with open(tmp, "w") as f:
         json.dump(manifest, f, indent=2)
-    tmp.rename(MANIFEST_PATH)
+    tmp.replace(MANIFEST_PATH)
 
 
 def file_hash(filepath):

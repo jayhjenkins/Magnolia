@@ -437,9 +437,10 @@ def run_claude(prompt):
     """Call the headless LLM judge. Returns assistant text or None."""
     cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, JUDGE_MODEL)
     env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
     try:
         proc = subprocess.run(
-            cmd, cwd=PM_OS_DIR, env=env, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT
+            cmd, cwd=PM_OS_DIR, env=env, capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(), timeout=CLAUDE_TIMEOUT
         )
     except FileNotFoundError:
         log("CLI not found on PATH -- skipping (completion is unaffected)")

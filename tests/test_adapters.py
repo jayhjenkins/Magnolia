@@ -78,3 +78,15 @@ def test_granola_sync_wraps_runner_failure(tmp_path, monkeypatch):
     assert result["status"] == "error"
     assert result["provider"] == "granola"
     assert "mcp unauthorized" in result["error"]
+
+
+def test_granola_sync_surfaces_runner_error_result(tmp_path, monkeypatch):
+    # granola_sync.main reports a failed listing as a result dict (it records
+    # state rather than raising) - the adapter must not mask it as "ok".
+    from adapters.transcript import granola
+    import transcript_sync
+    monkeypatch.setattr(transcript_sync, "_run_granola",
+                        lambda root=None: {"status": "error", "provider": "granola",
+                                           "error": "granola_unavailable"})
+    result = granola.sync(root=str(tmp_path))
+    assert result["status"] == "error" and "granola_unavailable" in result["error"]

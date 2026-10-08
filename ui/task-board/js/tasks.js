@@ -287,7 +287,6 @@ async function openTask(taskId, keepChat) {
           meta.forEach(([k, v]) => html += `<div class="dt-sum-item"><span class="dt-sum-k">${k}</span><span class="dt-sum-v">${escapeHtml(v)}</span></div>`);
           html += `</div>`;
         }
-        html += `<div class="dt-sec-hint" style="margin-top:11px;">Project VNT · Vantaca HXP · Board AI DLC (1096) · Refinement</div>`;
         html += `</div>`;
       }
     }

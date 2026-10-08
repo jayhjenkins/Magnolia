@@ -5,6 +5,7 @@ Resolves the active profile dir as profile/ if present, else profile.example/.
 """
 import json
 import os
+import shutil
 import tempfile
 from ruamel.yaml import YAML
 
@@ -25,6 +26,43 @@ def profile_dir(root=None):
     if os.path.isdir(live):
         return live
     return os.path.join(root, "profile.example")
+
+
+# Seed files that stay in profile.example/ (docs about the template, not profile data).
+_BOOTSTRAP_SKIP = {"README.md"}
+
+
+def bootstrap_profile(root=None):
+    """Create the live profile/ and seed it from profile.example/ - idempotently.
+
+    Copies every file in profile.example/ (recursively, e.g. voice/*.md) that is
+    MISSING from profile/; never overwrites a file that already exists, so it is
+    safe to run on every launch and repairs a half-made profile (e.g. one that a
+    first launch created holding only config.yaml). Must run before anything
+    writes into profile/, so a fresh install gets the template defaults
+    (integrations, voice, active_skill_packs, models, harness).
+
+    Returns the list of relative paths copied ([] when nothing was missing)."""
+    root = root or PM_OS_DIR
+    src_root = os.path.join(root, "profile.example")
+    dst_root = os.path.join(root, "profile")
+    os.makedirs(dst_root, exist_ok=True)
+    copied = []
+    if not os.path.isdir(src_root):
+        return copied
+    for dirpath, _dirnames, filenames in os.walk(src_root):
+        rel_dir = os.path.relpath(dirpath, src_root)
+        for name in sorted(filenames):
+            rel = os.path.normpath(os.path.join(rel_dir, name))
+            if rel in _BOOTSTRAP_SKIP:
+                continue
+            dst = os.path.join(dst_root, rel)
+            if os.path.exists(dst):
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(os.path.join(dirpath, name), dst)
+            copied.append(rel.replace(os.sep, "/"))
+    return copied
 
 
 def _load_yaml(name, root=None):
@@ -61,6 +99,26 @@ def company(root=None):
 
 def persona(root=None):
     return profile(root).get("persona") or "pm"
+
+
+def role(root=None):
+    """The operator's role/title (e.g. "Senior Product Manager"), or ""."""
+    return profile(root).get("role") or ""
+
+
+def team(root=None):
+    """The operator's team name, or ""."""
+    return profile(root).get("team") or ""
+
+
+def products(root=None):
+    """The products / product areas the operator owns, as a list of strings.
+
+    Accepts a YAML list or a single comma-separated string; [] when unset."""
+    val = profile(root).get("products") or []
+    if isinstance(val, str):
+        val = val.split(",")
+    return [str(v).strip() for v in val if str(v).strip()]
 
 
 def integration(name, root=None):
@@ -227,11 +285,13 @@ def _update_yaml(name, mutate, root=None):
 def write_identity(data, root=None):
     """Update identity fields in profile.yaml from data, preserving everything else.
 
-    Only display_name/email/company/timezone are written (when present in data);
-    unknown keys are ignored and existing keys like persona are never clobbered.
+    Only display_name/email/company/timezone/role/team/products are written
+    (when present in data); unknown keys are ignored and existing keys like
+    persona are never clobbered.
     """
     def mutate(doc):
-        for key in ("display_name", "email", "company", "timezone"):
+        for key in ("display_name", "email", "company", "timezone",
+                    "role", "team", "products"):
             if key in data:
                 doc[key] = data[key]
     _update_yaml("profile.yaml", mutate, root)
@@ -432,12 +492,15 @@ def configured_server_port(root=None):
 def set_server_port(p, root=None):
     """Persist server.port = int(p) into the LIVE profile config.
 
-    Ensures the live profile/ dir exists FIRST: _update_yaml writes through
-    profile_dir(), which falls back to the TRACKED profile.example/ when no
-    live profile/ exists (the same trap mark_onboarded guards). Without this
-    a fresh install would dirty the shipped template. Preserves any existing
-    server subkeys plus all sibling top-level keys + comments."""
-    os.makedirs(os.path.join(root or PM_OS_DIR, "profile"), exist_ok=True)
+    Bootstraps the live profile/ FIRST (bootstrap_profile: seed any missing
+    template files from profile.example/, never overwriting). This is the first
+    write a fresh install makes, so seeding here means profile/ never ends up
+    holding config.yaml alone. It also keeps the write off the TRACKED
+    profile.example/ (_update_yaml writes through profile_dir(), which falls
+    back to the template when no live profile/ exists - the same trap
+    mark_onboarded guards). Preserves any existing server subkeys plus all
+    sibling top-level keys + comments."""
+    bootstrap_profile(root)
 
     def mutate(doc):
         server = doc.get("server") or {}
@@ -514,6 +577,9 @@ def resolve_model(worker_tier, posture=None, task_override=None, root=None,
 
 if __name__ == "__main__":
     import sys
+    if "--bootstrap" in sys.argv:
+        for rel in bootstrap_profile():
+            print(f"seeded profile/{rel}")
     if "--display-name" in sys.argv:
         print(display_name())
     if "--pendo-subid" in sys.argv:

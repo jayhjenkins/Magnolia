@@ -27,7 +27,7 @@ def test_browse_base_built_from_profile_cloud_id(profile_root, monkeypatch):
 
 def test_fallback_url_parse_uses_profile_project_key(profile_root, monkeypatch):
     """The fallback issue-key/URL parser must match the profile's project key
-    and cloud_id, proving it is no longer tied to VNT/vantaca."""
+    and cloud_id, proving it is no longer tied to one team."""
     import profile_lib
     monkeypatch.setattr(profile_lib, "PM_OS_DIR", profile_root)
     import jira_publish

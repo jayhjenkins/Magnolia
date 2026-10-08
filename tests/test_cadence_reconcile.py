@@ -2992,7 +2992,7 @@ def test_adapter_sourced_evidence_does_not_trigger_proposal(tmp_path):
     pid = _seed_rock_program(
         root, phase="define",
         extra_obs=dict(kind="status-signal", sentinel="tracker-truth",
-                       source="adapter:project_management:VNT-123",
+                       source="adapter:project_management:PROJ-123",
                        claim="Tracker reports status 'In Progress' for 'My Rock'."),
     )
     reconcile.reconcile_program(
@@ -3088,7 +3088,7 @@ def test_proposals_only_skips_cycle_programs(tmp_path):
 # ─── Inc 3: tracker-status-mismatch proposals ────────────────────────────────
 
 
-def _seed_rock_with_tracker(root, phase="define", tracker_key="VNT-123",
+def _seed_rock_with_tracker(root, phase="define", tracker_key="PROJ-123",
                             last_cycle=OTHER_PERIOD, extra_obs=None):
     pid, _ = pl.create_program(
         type="eos-rock", title="Q3 Rock", owner_role="pm",
@@ -3113,9 +3113,9 @@ def _seed_rock_with_tracker(root, phase="define", tracker_key="VNT-123",
 
 def test_tracker_inactive_with_activity_emits_mismatch_proposal(tmp_path):
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-46117", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-46117", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
-             source="adapter:project_management:VNT-46117",
+             source="adapter:project_management:PROJ-46117",
              claim="Tracker reports status 'Next' for 'Board Frustration UX'.",
              date="2026-06-15"),
         dict(kind="status-signal", sentinel="movement-watch",
@@ -3130,7 +3130,7 @@ def test_tracker_inactive_with_activity_emits_mismatch_proposal(tmp_path):
              if c.get("task_type") == "cadence-propose-update"
              and c.get("proposal", {}).get("op") == "update-tracker"]
     assert len(cards) == 1
-    assert cards[0]["proposal"]["tracker_key"] == "VNT-46117"
+    assert cards[0]["proposal"]["tracker_key"] == "PROJ-46117"
     assert cards[0]["proposal"]["current_status"] == "Next"
     assert len(cards[0]["proposal"]["evidence_claims"]) >= 1
     assert cards[0]["id"] in result["emitted"]
@@ -3138,9 +3138,9 @@ def test_tracker_inactive_with_activity_emits_mismatch_proposal(tmp_path):
 
 def test_tracker_active_no_mismatch(tmp_path):
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-123", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
-             source="adapter:project_management:VNT-123",
+             source="adapter:project_management:PROJ-123",
              claim="Tracker reports status 'In Progress' for 'My Rock'."),
         dict(kind="status-signal", sentinel="movement-watch",
              source="datasets/meetings/2026-06-15_standup.md",
@@ -3172,7 +3172,7 @@ def test_no_tracker_binding_no_mismatch(tmp_path):
 
 def test_no_tracker_truth_observations_no_mismatch(tmp_path):
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-123", extra_obs=[
         dict(kind="status-signal", sentinel="movement-watch",
              source="datasets/meetings/2026-06-15_standup.md",
              claim="Active work."),
@@ -3187,9 +3187,9 @@ def test_no_tracker_truth_observations_no_mismatch(tmp_path):
 
 def test_tracker_mismatch_dedup(tmp_path):
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-123", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
-             source="adapter:project_management:VNT-123",
+             source="adapter:project_management:PROJ-123",
              claim="Tracker reports status 'Next' for 'My Rock'.",
              date="2026-06-15"),
         dict(kind="status-signal", sentinel="movement-watch",
@@ -3208,9 +3208,9 @@ def test_tracker_mismatch_dedup(tmp_path):
 
 def test_tracker_mismatch_proposal_description(tmp_path):
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-999", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-999", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
-             source="adapter:project_management:VNT-999",
+             source="adapter:project_management:PROJ-999",
              claim="Tracker reports status 'Backlog' for 'Test'.",
              date="2026-06-14"),
         dict(kind="status-signal", sentinel="movement-watch",
@@ -3226,7 +3226,7 @@ def test_tracker_mismatch_proposal_description(tmp_path):
     assert len(cards) == 1
     full_task = task_lib.read_task(cards[0]["id"])
     body = full_task.get("body", "")
-    assert "VNT-999" in body
+    assert "PROJ-999" in body
     assert "Backlog" in body
     assert "as of 2026-06-14" in body
 
@@ -3234,9 +3234,9 @@ def test_tracker_mismatch_proposal_description(tmp_path):
 def test_tracker_mismatch_mutation_includes_observed_date(tmp_path):
     """_propose_tracker_update returns tracker_observed in the mutation."""
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-111", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-111", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
-             source="adapter:project_management:VNT-111",
+             source="adapter:project_management:PROJ-111",
              claim="Tracker reports status 'Next' for 'Test'.",
              date="2026-07-20"),
         dict(kind="status-signal", sentinel="movement-watch",
@@ -3323,9 +3323,9 @@ def test_rejection_doesnt_block_different_ops(tmp_path, monkeypatch):
     """Rejecting advance-phase doesn't suppress update-tracker."""
     monkeypatch.setattr(task_lib, "_now_iso", lambda: "2026-06-16T00:00:00+00:00")
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-123", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-123", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
-             source="adapter:project_management:VNT-123",
+             source="adapter:project_management:PROJ-123",
              claim="Tracker reports status 'Next' for 'My Rock'.",
              date="2026-06-15"),
         dict(kind="completion", sentinel="movement-watch",
@@ -3352,9 +3352,9 @@ def test_rejected_tracker_mismatch_suppressed(tmp_path, monkeypatch):
     """A cancelled tracker-mismatch proposal is suppressed without new evidence."""
     monkeypatch.setattr(task_lib, "_now_iso", lambda: "2026-06-16T00:00:00+00:00")
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-456", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-456", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
-             source="adapter:project_management:VNT-456",
+             source="adapter:project_management:PROJ-456",
              claim="Tracker reports status 'Next' for 'Test'.",
              date="2026-06-15"),
         dict(kind="status-signal", sentinel="movement-watch",
@@ -3489,9 +3489,9 @@ def test_tracker_mismatch_calls_llm_gate(tmp_path, monkeypatch):
         return True, "approved"
     monkeypatch.setattr(reconcile, "_llm_evaluate_tracker_proposal", _tracking_eval)
     root = str(tmp_path)
-    pid = _seed_rock_with_tracker(root, tracker_key="VNT-789", extra_obs=[
+    pid = _seed_rock_with_tracker(root, tracker_key="PROJ-789", extra_obs=[
         dict(kind="status-signal", sentinel="tracker-truth",
-             source="adapter:project_management:VNT-789",
+             source="adapter:project_management:PROJ-789",
              claim="Tracker reports status 'Next' for 'Test'.",
              date="2026-06-15"),
         dict(kind="status-signal", sentinel="movement-watch",
@@ -3583,7 +3583,7 @@ def test_gather_observation_claims_includes_risks_and_blockers():
         "source: meetings/sync.md\n"
         "claim: Engineering blocked on QA.\nconfidence: 0.90\n\n"
         "### 2026-08-04 - sentinel:tracker-truth [status-signal]\n"
-        "source: adapter:project_management:VNT-123\n"
+        "source: adapter:project_management:PROJ-123\n"
         "claim: Tracker reports status Next.\n"
     )
     claims = reconcile._gather_observation_claims(body)
@@ -3679,7 +3679,7 @@ def test_llm_eval_tracker_fail_closed_on_timeout(monkeypatch):
                         _REAL_llm_evaluate_tracker_proposal)
     monkeypatch.setattr(sp, "run", _timeout_run)
     approved, reason = reconcile._llm_evaluate_tracker_proposal(
-        "Test Program", "VNT-12345", "Backlog",
+        "Test Program", "PROJ-12345", "Backlog",
         ["active work happening"])
     assert approved is False
     assert "fail-closed" in reason
@@ -3832,7 +3832,7 @@ def test_propose_date_update_fires_on_overdue_checkpoint(tmp_path):
             "last_cycle": OTHER_PERIOD,
             "bindings": [
                 {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "VNT-99999",
+                 "kind": "project_management", "anchor": "PROJ-99999",
                  "mode": "read", "health": "ok"},
             ],
             "checkpoints": [
@@ -3846,7 +3846,7 @@ def test_propose_date_update_fires_on_overdue_checkpoint(tmp_path):
     pl.append_observation(
         program_id, root=root,
         kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-99999",
+        source="adapter:project_management:PROJ-99999",
         claim="EA date is 2026-06-01.", date="2026-06-10",
     )
     program = pl.read_program(program_id, root=root)
@@ -3858,7 +3858,7 @@ def test_propose_date_update_fires_on_overdue_checkpoint(tmp_path):
 
     assert result is not None
     assert result["op"] == "update-tracker-date"
-    assert result["tracker_key"] == "VNT-99999"
+    assert result["tracker_key"] == "PROJ-99999"
     assert result["field"] == "ea_date"
     assert result["overdue_days"] == 15  # June 16 - June 1
 
@@ -3902,7 +3902,7 @@ def test_propose_date_update_none_when_dates_aligned(tmp_path):
             "last_cycle": OTHER_PERIOD,
             "bindings": [
                 {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "VNT-88888",
+                 "kind": "project_management", "anchor": "PROJ-88888",
                  "mode": "read", "health": "ok"},
             ],
             "checkpoints": [
@@ -3945,7 +3945,7 @@ def test_phase_coherence_ga_imminent_still_in_execution(tmp_path):
             "last_cycle": OTHER_PERIOD,
             "bindings": [
                 {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "VNT-43453",
+                 "kind": "project_management", "anchor": "PROJ-43453",
                  "mode": "read", "health": "ok"},
             ],
             "checkpoints": [],
@@ -3955,13 +3955,13 @@ def test_phase_coherence_ga_imminent_still_in_execution(tmp_path):
     pl.append_observation(
         program_id, root=root,
         kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-43453",
+        source="adapter:project_management:PROJ-43453",
         claim="EA date is 2026-06-10.", date="2026-06-05",
     )
     pl.append_observation(
         program_id, root=root,
         kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-43453",
+        source="adapter:project_management:PROJ-43453",
         claim="GA date is 2026-06-20.", date="2026-06-05",
     )
     program = pl.read_program(program_id, root=root)
@@ -3994,7 +3994,7 @@ def test_phase_coherence_ea_overdue_still_in_execution(tmp_path):
             "last_cycle": OTHER_PERIOD,
             "bindings": [
                 {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "VNT-11111",
+                 "kind": "project_management", "anchor": "PROJ-11111",
                  "mode": "read", "health": "ok"},
             ],
             "checkpoints": [],
@@ -4004,7 +4004,7 @@ def test_phase_coherence_ea_overdue_still_in_execution(tmp_path):
     pl.append_observation(
         program_id, root=root,
         kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-11111",
+        source="adapter:project_management:PROJ-11111",
         claim="EA date is 2026-06-01.", date="2026-06-01",
     )
     program = pl.read_program(program_id, root=root)
@@ -4034,7 +4034,7 @@ def test_phase_coherence_no_fire_when_shipped(tmp_path):
             "last_cycle": OTHER_PERIOD,
             "bindings": [
                 {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "VNT-22222",
+                 "kind": "project_management", "anchor": "PROJ-22222",
                  "mode": "read", "health": "ok"},
             ],
             "checkpoints": [],
@@ -4044,13 +4044,13 @@ def test_phase_coherence_no_fire_when_shipped(tmp_path):
     pl.append_observation(
         program_id, root=root,
         kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-22222",
+        source="adapter:project_management:PROJ-22222",
         claim="EA date is 2026-06-01.", date="2026-06-01",
     )
     pl.append_observation(
         program_id, root=root,
         kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-22222",
+        source="adapter:project_management:PROJ-22222",
         claim="GA date is 2026-06-20.", date="2026-06-01",
     )
     program = pl.read_program(program_id, root=root)
@@ -4076,7 +4076,7 @@ def test_phase_coherence_no_fire_without_jira_dates(tmp_path):
             "last_cycle": OTHER_PERIOD,
             "bindings": [
                 {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "VNT-33333",
+                 "kind": "project_management", "anchor": "PROJ-33333",
                  "mode": "read", "health": "ok"},
             ],
             "checkpoints": [],
@@ -4106,7 +4106,7 @@ def test_phase_coherence_ga_far_away_no_fire(tmp_path):
             "last_cycle": OTHER_PERIOD,
             "bindings": [
                 {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "VNT-44444",
+                 "kind": "project_management", "anchor": "PROJ-44444",
                  "mode": "read", "health": "ok"},
             ],
             "checkpoints": [],
@@ -4116,7 +4116,7 @@ def test_phase_coherence_ga_far_away_no_fire(tmp_path):
     pl.append_observation(
         program_id, root=root,
         kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:VNT-44444",
+        source="adapter:project_management:PROJ-44444",
         claim="GA date is 2026-08-01.", date="2026-06-01",
     )
     program = pl.read_program(program_id, root=root)

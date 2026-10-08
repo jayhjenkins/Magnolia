@@ -43,7 +43,7 @@ datasets/product/packages/{YYYY}/{slug}/
 
 1. If `--skip-discover` was provided, verify an existing Context Brief exists in the package folder and skip to Phase 2
 2. If `--topic` was provided, use it as the starting problem statement
-3. Use the skills as appropriate in the /skills/context-assembly repo (typically, you'll start with the research-gathering.md skill and expand as needed from there) to produce the Context Brief through interactive conversation with the PM or autonomously with your context aggregation and MCP tools.
+3. Read and execute `.claude/skills/workflow-context-brief/SKILL.md` to produce the Context Brief through interactive conversation with the PM. It gathers evidence through the `context-*` skills (`context-search`, `context-research-gathering`, and `context-pendo-analytics` / `context-databricks-analytics` when connected). Template: `datasets/product/templates/context-brief.md`
 
 **Output**: `{package}/context-brief.md`
 

@@ -272,3 +272,79 @@ def test_reveal_file_cmd_windows(monkeypatch):
 def test_reveal_file_cmd_linux_opens_parent(monkeypatch):
     monkeypatch.setattr(platform_lib, "os_kind", lambda: "linux")
     assert platform_lib.reveal_file_cmd("/x/y.html") == ["xdg-open", "/x"]
+
+
+def test_detached_popen_kwargs_posix_unchanged(monkeypatch):
+    # macOS/Linux behavior stays exactly as before: no extra Popen kwargs.
+    for kind in ("darwin", "linux"):
+        monkeypatch.setattr(platform_lib, "os_kind", lambda k=kind: k)
+        assert platform_lib.detached_popen_kwargs() == {}
+        assert platform_lib.detached_popen_kwargs(breakaway=True) == {}
+
+
+def test_detached_popen_kwargs_windows_flags(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    flags = platform_lib.detached_popen_kwargs()["creationflags"]
+    assert flags & 0x00000200          # CREATE_NEW_PROCESS_GROUP
+    assert flags & 0x08000000          # CREATE_NO_WINDOW (own hidden console)
+    assert not flags & 0x00000008      # not DETACHED_PROCESS (grandchildren would pop windows)
+    assert not flags & 0x01000000
+    assert platform_lib.detached_popen_kwargs(breakaway=True)["creationflags"] & 0x01000000
+
+
+def test_popen_detached_windows_falls_back_without_breakaway(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "windows")
+    calls = []
+
+    def fake_popen(cmd, **kw):
+        calls.append(kw["creationflags"])
+        if kw["creationflags"] & 0x01000000:
+            raise PermissionError("[WinError 5] Access is denied")  # job forbids breakaway
+        return "proc"
+
+    monkeypatch.setattr(platform_lib.subprocess, "Popen", fake_popen)
+    assert platform_lib.popen_detached(["x"], cwd="/") == "proc"
+    assert len(calls) == 2 and not calls[1] & 0x01000000
+
+
+def test_popen_detached_posix_is_plain_popen(monkeypatch):
+    monkeypatch.setattr(platform_lib, "os_kind", lambda: "darwin")
+    seen = {}
+    monkeypatch.setattr(platform_lib.subprocess, "Popen",
+                        lambda cmd, **kw: seen.update(cmd=cmd, kw=kw) or "proc")
+    assert platform_lib.popen_detached(["x"], cwd="/tmp") == "proc"
+    assert seen["kw"] == {"cwd": "/tmp"}
+
+
+# --- text_kwargs: decode child output as UTF-8, never the locale (cp1252) ---
+
+def test_text_kwargs_decode_utf8_not_locale():
+    assert platform_lib.text_kwargs() == {"text": True, "encoding": "utf-8",
+                                          "errors": "replace"}
+
+
+def test_text_kwargs_roundtrip_non_cp1252_text():
+    # Curly quotes, an em dash, CJK and an emoji. Their UTF-8 bytes include
+    # 0x81/0x8d/0x9d, which cp1252 cannot decode (UnicodeDecodeError on Windows).
+    import subprocess
+    s = "\u201ccurly\u201d \u2014 \u65e5\u672c \U0001f600"
+    code = "import sys; sys.stdout.buffer.write(%r.encode('utf-8'))" % s
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         **platform_lib.text_kwargs())
+    assert out.stdout == s
+
+
+def test_text_kwargs_replaces_invalid_bytes_instead_of_raising():
+    import subprocess
+    code = "import sys; sys.stdout.buffer.write(b'ok \\x81\\x8d\\xff end')"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         **platform_lib.text_kwargs())
+    assert out.stdout.startswith("ok ") and out.stdout.endswith(" end")
+
+
+def test_is_cmd_shim():
+    assert platform_lib.is_cmd_shim(r"C:\Users\x\AppData\Roaming\npm\claude.cmd")
+    assert platform_lib.is_cmd_shim("C:/npm/CLAUDE.BAT")
+    assert not platform_lib.is_cmd_shim(r"C:\Program Files\claude\claude.exe")
+    assert not platform_lib.is_cmd_shim("/opt/homebrew/bin/claude")
+    assert not platform_lib.is_cmd_shim(None)

@@ -11,6 +11,13 @@
 # transcript provider in the Engine tab. Installing the LaunchAgent just arms
 # the hourly trigger; it is otherwise a cheap no-op.
 #
+# OPTIONAL NOW: the board server (task_server.py) schedules the transcript sync
+# itself, hourly, on macOS and Windows (transcript_sync.TranscriptScheduler).
+# You only need this LaunchAgent if you want syncs while the board server is
+# not running. When this plist is installed the server's scheduler detects it
+# and stands down, so the feed never runs twice. To hand scheduling back to the
+# server, unload and remove the plist (see the uninstall note printed below).
+#
 set -euo pipefail
 
 # 1. Repo root: scripts/ is one level under the repo root.

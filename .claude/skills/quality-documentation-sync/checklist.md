@@ -8,7 +8,7 @@ Use this checklist when creating or modifying skills to ensure all documentation
 |------------|-------------------|-----------|---------------------|-----------|-----------|---------------------|
 | **Meta Skills** | ✓ Required | ✓ Required | ⚬ If architectural | ⚬ If user-facing | ⚬ If user needs | ✓ quality-gates.mdc (if QG) |
 | **Quality Gates** | ✓ Required | ✓ Required | ⚬ If architectural | ✓ Required | ⚬ Brief mention | ✓ quality-gates.mdc |
-| **Context Assembly** | ✓ Required | ✓ Required | ⚬ If architectural | ⚬ If user-facing | ⚬ If user needs | ✓ context-assembly.mdc |
+| **Context (`context-*`)** | ✓ Required | ✓ Required | ⚬ If architectural | ⚬ If user-facing | ⚬ If user needs | ✓ context.mdc |
 | **Workflows** | ✓ Required | ✓ Required | ✓ Required | ✓ Required | ✓ Required | ✓ {domain}-workflows.mdc |
 
 Legend:
@@ -33,8 +33,8 @@ Legend:
 - [ ] Brief description of validation purpose
 - [ ] Pass/fail criteria mentioned
 
-**For Context Assembly:**
-- [ ] Added to "Context Assembly" list (line ~93-97)
+**For Context (`context-*`):**
+- [ ] Added to "Context" list (line ~93-97)
 - [ ] Brief description of what context is gathered
 - [ ] Input/output format noted
 
@@ -57,8 +57,8 @@ Legend:
 - [ ] Added to "Quality Gates" category (line ~19)
 - [ ] Validation purpose described
 
-**For Context Assembly:**
-- [ ] Added to "Context Assembly" category (line ~20)
+**For Context (`context-*`):**
+- [ ] Added to "Context" category (line ~20)
 - [ ] Context gathering purpose described
 
 **For Workflows:**
@@ -130,7 +130,7 @@ Legend:
 - `strategy-workflows.mdc` — Strategy sessions, decision memos
 - `research-workflows.mdc` — Research processing, context gathering
 - `quality-gates.mdc` — Quality validation rules
-- `context-assembly.mdc` — Context gathering patterns
+- `context.mdc` — Context gathering patterns
 
 **For Workflows:**
 - [ ] Added workflow section with complete description
@@ -146,8 +146,8 @@ Legend:
 - [ ] Iron laws stated
 - [ ] Anti-rationalization blocks included
 
-**For Context Assembly:**
-- [ ] Added to `context-assembly.mdc`
+**For Context (`context-*`):**
+- [ ] Added to `context.mdc`
 - [ ] Input sources defined
 - [ ] Output format specified
 - [ ] Normalization rules documented

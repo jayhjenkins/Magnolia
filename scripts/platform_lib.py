@@ -107,6 +107,26 @@ def resolve_claude(path=None):
     return "claude"
 
 
+def text_kwargs():
+    """subprocess kwargs to decode a child's output as UTF-8.
+
+    `text=True` alone decodes with the locale encoding — cp1252 on Windows,
+    which raises UnicodeDecodeError on curly quotes / em dashes / emoji that
+    claude routinely emits. errors="replace" means a stray bad byte degrades to
+    U+FFFD instead of crashing the caller."""
+    return {"text": True, "encoding": "utf-8", "errors": "replace"}
+
+
+def is_cmd_shim(path):
+    """True if `path` is a Windows batch shim (.cmd/.bat), e.g. npm's claude.cmd.
+
+    Arguments to a batch shim are re-parsed by cmd.exe, which mangles long
+    multi-line prompts (newlines truncate, & | < > ^ % are interpreted)."""
+    if not path:
+        return False
+    return str(path).lower().endswith((".cmd", ".bat"))
+
+
 def resolve_codex(path=None):
     """Absolute path to the codex CLI, or None if not installed.
 
@@ -201,6 +221,46 @@ def process_group_kwargs():
     if os_kind() == "windows":
         return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)}
     return {"start_new_session": True}
+
+
+# Windows creation flags (literal fallbacks: the subprocess constants only exist
+# on Windows builds of Python).
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_NO_WINDOW = 0x08000000
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
+def detached_popen_kwargs(breakaway=False):
+    """Popen kwargs so a long-lived background child (the board server) outlives
+    the terminal that launched it.
+
+    Windows: closing a console window kills every process attached to it, so the
+    child gets its own process group and its own hidden console
+    (CREATE_NO_WINDOW, not DETACHED_PROCESS: grandchildren like `claude` then
+    inherit the hidden console instead of each popping a visible window).
+    `breakaway` adds CREATE_BREAKAWAY_FROM_JOB for terminals that wrap their
+    shell in a kill-on-close job object. POSIX: {} (behavior unchanged).
+    """
+    if os_kind() != "windows":
+        return {}
+    flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", _CREATE_NEW_PROCESS_GROUP)
+             | getattr(subprocess, "CREATE_NO_WINDOW", _CREATE_NO_WINDOW))
+    if breakaway:
+        flags |= getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", _CREATE_BREAKAWAY_FROM_JOB)
+    return {"creationflags": flags}
+
+
+def popen_detached(cmd, **kwargs):
+    """subprocess.Popen a long-lived background child detached from this terminal.
+
+    On Windows, first try breaking away from the parent's job object; if the job
+    forbids breakaway (Popen raises OSError / access denied), retry without it."""
+    if os_kind() == "windows":
+        try:
+            return subprocess.Popen(cmd, **detached_popen_kwargs(breakaway=True), **kwargs)
+        except OSError:
+            return subprocess.Popen(cmd, **detached_popen_kwargs(breakaway=False), **kwargs)
+    return subprocess.Popen(cmd, **kwargs)
 
 
 def kill_process_group(proc):

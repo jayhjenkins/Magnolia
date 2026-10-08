@@ -11,7 +11,7 @@ Turn a bare Jira bug link into a structured Severity 1-4 verdict against Vantaca
 
 ## When to Use
 
-- User gives a Jira URL (`https://vantaca.atlassian.net/browse/VNT-XXXXX`) or bare key and asks for a severity read.
+- User gives a Jira URL (`https://vantaca.atlassian.net/browse/PROJ-XXXXX`) or bare key and asks for a severity read.
 
 **When NOT to use:** the issue type isn't Bug/Security Defect (e.g. Feature, Unit, Epic) — the rubric is written for client-reported defects. Flag this and confirm with the user before applying it anyway.
 

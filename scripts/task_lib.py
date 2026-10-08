@@ -165,12 +165,31 @@ def _sharepoint_url_from_docx(docx_path):
         return None
 
 
+def _seed_counter():
+    """Create _counter on a fresh clone (it's gitignored), resuming past any
+    TASK-NNNN files already on disk so ids never collide."""
+    highest = 0
+    for root, _dirs, files in os.walk(TASKS_DIR):
+        for name in files:
+            m = re.match(r"TASK-(\d+)", name)
+            if m:
+                highest = max(highest, int(m.group(1)))
+    os.makedirs(TASKS_DIR, exist_ok=True)
+    try:
+        with open(COUNTER_FILE, "x") as f:
+            f.write(str(highest + 1))
+    except FileExistsError:
+        pass  # another process seeded it first
+
+
 def _next_id():
     """Atomically read, increment, and return next task ID.
 
     Locks _counter for concurrency safety (cross-platform via platform_lib).
     Returns string like 'TASK-0042'.
     """
+    if not os.path.exists(COUNTER_FILE):
+        _seed_counter()
     fd = open(COUNTER_FILE, "r+")
     try:
         platform_lib.lock(fd)

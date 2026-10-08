@@ -126,12 +126,29 @@ datasets/scorecard/*/*
 # Per-person profile is gitignored; the .example template is tracked.
 /profile/
 
-# Docs folder: exclude scratch/implementation notes, but track design plans
-# and the durable reference layer (invariants, conventions, architecture).
+# Docs folder: track only the durable reference layer and install docs.
+# docs/plans/ (design history) is the operator's local archive and never syncs.
 docs/*
-!docs/plans/
 !docs/reference/
 !docs/INSTALL.md
 !docs/INSTALL-macos.md
 !docs/INSTALL-windows.md
 !docs/INSTALL-smoke-checklist.md
+
+# Private scratch / personal notes (never tracked)
+private/
+
+# Operator-personal scorecard / rocks / activation-metric machinery. Lives only
+# on the owner's machine; the shared engine must never depend on it.
+/.claude/skills/metric-quarterly-rocks/
+/.claude/skills/metric-scorecard-fetch/
+/.claude/skills/workflow-pm-agent-activation-metric/
+/.claude/commands/update-rocks.md
+/.claude/commands/scorecard-update.md
+/.claude/commands/pm-agent-activation.md
+/scripts/build_scorecard_dashboard.py
+/requirements-rocks.txt
+
+# Personal editor + doc-sync state (per machine, never shared)
+.obsidian/
+scripts/_sync_manifest.json

@@ -27,7 +27,10 @@ Full laws + enforcing commands: [`docs/reference/invariants.md`](docs/reference/
 | `.claude/` config (skills, packs, commands, hooks) | [`.claude/CLAUDE.md`](.claude/CLAUDE.md) |
 | Board UI internals (server, routes, JS, Moods) | [`ui/task-board/CLAUDE.md`](ui/task-board/CLAUDE.md) |
 | Profile schema & API | [`profile/README.md`](profile/README.md) |
-| Project history / past design decisions | [`docs/plans/`](docs/plans/) (archive) |
+| Project history / past design decisions | `docs/plans/` — the maintainer's local design archive; gitignored, not in a fresh clone |
+| Start a product package (Phase 1 discovery → `context-brief.md`) | the **`workflow-context-brief`** skill (`/context-brief`; Phase 1 of `/ship-it` and `/prep`) |
+
+Skill and command instructions invoke Python as `python3` (on Windows the installer provides a `python3` shim).
 
 ## Workspace Layout
 
@@ -35,7 +38,7 @@ Full laws + enforcing commands: [`docs/reference/invariants.md`](docs/reference/
 - `datasets/marketing/` — Content pipeline (briefs, outlines, drafts, verify, snippets)
 - `datasets/research/` — External sources organized by strategic topic
 - `datasets/strategy/` — Strategy sessions and formal memos
-- `datasets/meetings/` — Meeting transcripts (Customers/, Internal/) with YAML frontmatter
+- `datasets/meetings/` — Synced meeting transcripts (`.txt`, `{domain}/YYYY-MM/`) with YAML frontmatter
 - `datasets/tasks/` — Unified task queues (human, agent, collab, waiting)
 - `datasets/programs/` — Cadence program instances (`PROG-NNNN.md`); `archive/` holds retired programs (version-suffixed)
 - `datasets/cron/` — Recurring job definitions
@@ -64,35 +67,21 @@ Two MCP servers supplement local datasets. Steps that use them are optional and 
 
 ## Meeting File Schema
 
-Every meeting markdown begins with:
+Synced transcripts are **`.txt`** files. `granola_sync.py` / `otter_sync.py` write them (named `YYYY-MM-DD_HH-MM_{title}[_{id8}].txt`) into the profile's transcript target (default `datasets/meetings/`); `otter_classify.py` (via `transcript_post.py`) then prepends YAML frontmatter and moves the file to `{target}/{domain}/YYYY-MM/`. Frontmatter fields (empty ones omitted):
 
 ```yaml
 ---
+title: "Meeting title"
 date: "YYYY-MM-DD"
-type: "sales | product | customersuccess | onboarding | strategy | ops | marketing | general"
-customer: "Company Name"
-companies: ["Company A","Company B"]
-participants: ["Person Name"]
-granola_folder: "Sales"
-granola_url: "https://…"
-meeting_note_id: "uuid"
-tags: ["2026Q2","keyword"]
+duration_minutes: 30
+domain: "customer"            # classifier domain path, e.g. customer, strategy, product/<area>, general
+participants:
+  - "Person Name"
+participant_emails:
+  "Person Name": "person@example.com"
+otter_id: "…"                 # source meeting id (Otter or Granola)
 ---
 ```
-
-**Naming**: `YYYY-MM-DD_{type}_{titleSlug}_{companyOrFunctionSlug}_{participantsSlug}.md`
-
-**Sections**: `## ⬇️ AI Summary` · `## ⬇️ Action Items` · `## ⬇️ Full Transcript` · `## ⬇️ Links`
-
-## Headless Automation
-
-Run meeting-to-backlog automation directly:
-
-```bash
-./run-meetings-to-backlog.sh
-```
-
-Headless env vars: `CLAUDE_CODE_AUTO_APPROVE_FILE_READS=true`, `CLAUDE_CODE_AUTO_APPROVE_FILE_WRITES=true`, `CLAUDE_CODE_HEADLESS=true`. Logs land in `logs/meetings-to-backlog-YYYYMMDD_HHMMSS.log`.
 
 ## Task system, cron, observability
 

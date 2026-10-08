@@ -66,7 +66,7 @@ YYYY-MM-DD_{type}_{titleSlug}_{companyOrFunctionSlug}_{participantsSlug}.md
 **Examples:**
 ```
 2025-10-15_sales_discovery-call_prettyboy_jenna-mike.md
-2025-10-14_product_feature-planning_internal_jay-sarah.md
+2025-10-14_product_feature-planning_internal_alex-sarah.md
 2025-10-13_customersuccess_qbr_compoundstudio_alex.md
 ```
 
@@ -116,7 +116,7 @@ datasets/meetings/
 **Examples:**
 ```
 datasets/meetings/Customers/PrettyBoy/2025/10-15_sales_discovery-call_prettyboy_jenna-mike.md
-datasets/meetings/Internal/Product/2025/10-14_product_feature-planning_internal_jay-sarah.md
+datasets/meetings/Internal/Product/2025/10-14_product_feature-planning_internal_alex-sarah.md
 ```
 
 ## Validation Process

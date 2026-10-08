@@ -17,7 +17,7 @@ def test_attempt_update_already_done(monkeypatch):
                         lambda tid: {"frontmatter": {"status": "done"}, "body": ""})
     monkeypatch.setattr(shipper.task_lib, "update_task",
                         lambda tid, **kw: None)
-    status, payload = shipper._attempt_update("T-1", {"issue_key": "VNT-1", "action": "comment"})
+    status, payload = shipper._attempt_update("T-1", {"issue_key": "PROJ-1", "action": "comment"})
     assert status == "already_updated"
     assert payload is None
 
@@ -28,7 +28,7 @@ def test_attempt_update_success(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "read_task",
                         lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
     monkeypatch.setattr(shipper.adapters, "update_issue",
-                        lambda family, update, root=None: ("VNT-100", "https://jira/VNT-100"))
+                        lambda family, update, root=None: ("PROJ-100", "https://jira/PROJ-100"))
     monkeypatch.setattr(shipper.task_lib, "update_task",
                         lambda tid, **kw: None)
     monkeypatch.setattr(shipper.task_lib, "complete_task",
@@ -37,10 +37,10 @@ def test_attempt_update_success(monkeypatch):
                         lambda *a, **kw: None)
     monkeypatch.setattr(shipper, "_emit_jira_receipt",
                         lambda *a, **kw: None)
-    update = {"issue_key": "VNT-100", "action": "comment"}
+    update = {"issue_key": "PROJ-100", "action": "comment"}
     status, payload = shipper._attempt_update("T-1", update)
     assert status == "ok"
-    assert payload == ("VNT-100", "https://jira/VNT-100")
+    assert payload == ("PROJ-100", "https://jira/PROJ-100")
     assert completed["id"] == "T-1"
 
 
@@ -58,12 +58,12 @@ def test_emit_jira_receipt_creates_card(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "update_task", track_update)
     monkeypatch.setattr(shipper.task_lib, "complete_task",
                         lambda tid, **kw: completed.setdefault("id", tid))
-    receipt_id = shipper._emit_jira_receipt("TASK-10", "VNT-100", "https://jira/VNT-100", "Created")
+    receipt_id = shipper._emit_jira_receipt("TASK-10", "PROJ-100", "https://jira/PROJ-100", "Created")
     assert receipt_id == "TASK-99"
     assert "TASK-99" in updated
     assert updated["TASK-99"]["receipt_kind"] == "jira"
-    assert updated["TASK-99"]["issue_key"] == "VNT-100"
-    assert updated["TASK-99"]["issue_url"] == "https://jira/VNT-100"
+    assert updated["TASK-99"]["issue_key"] == "PROJ-100"
+    assert updated["TASK-99"]["issue_url"] == "https://jira/PROJ-100"
     assert completed["id"] == "TASK-99"
 
 
@@ -83,9 +83,9 @@ def test_emit_jira_receipt_includes_source_title(monkeypatch):
                         lambda *a, **kw: None)
     monkeypatch.setattr(shipper.task_lib, "complete_task",
                         lambda *a, **kw: None)
-    shipper._emit_jira_receipt("TASK-10", "VNT-100", "https://jira/VNT-100", "Updated")
+    shipper._emit_jira_receipt("TASK-10", "PROJ-100", "https://jira/PROJ-100", "Updated")
     assert "Original Request" in created_desc
-    assert "VNT-100" in created_title
+    assert "PROJ-100" in created_title
 
 
 # ─── Pre-transition drift verification ────────────────────────────────────
@@ -105,7 +105,7 @@ def test_drift_resolved_skips_transition(monkeypatch):
     monkeypatch.setattr(shipper.jira_publish, "fetch_issue",
                         lambda key: {"status": "In Progress", "title": "Test"})
     update = {
-        "issue_key": "VNT-100",
+        "issue_key": "PROJ-100",
         "action": "transition",
         "target_status": "In Progress",
         "expected_status": "Next",
@@ -123,7 +123,7 @@ def test_no_drift_proceeds_with_transition(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "read_task",
                         lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
     monkeypatch.setattr(shipper.adapters, "update_issue",
-                        lambda family, update, root=None: ("VNT-100", "https://jira/VNT-100"))
+                        lambda family, update, root=None: ("PROJ-100", "https://jira/PROJ-100"))
     monkeypatch.setattr(shipper.task_lib, "update_task",
                         lambda tid, **kw: None)
     monkeypatch.setattr(shipper.task_lib, "complete_task",
@@ -135,14 +135,14 @@ def test_no_drift_proceeds_with_transition(monkeypatch):
     monkeypatch.setattr(shipper.jira_publish, "fetch_issue",
                         lambda key: {"status": "Next", "title": "Test"})
     update = {
-        "issue_key": "VNT-100",
+        "issue_key": "PROJ-100",
         "action": "transition",
         "target_status": "In Progress",
         "expected_status": "Next",
     }
     status, payload = shipper._attempt_update("T-1", update)
     assert status == "ok"
-    assert payload == ("VNT-100", "https://jira/VNT-100")
+    assert payload == ("PROJ-100", "https://jira/PROJ-100")
 
 
 def test_drift_check_fails_open(monkeypatch):
@@ -151,7 +151,7 @@ def test_drift_check_fails_open(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "read_task",
                         lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
     monkeypatch.setattr(shipper.adapters, "update_issue",
-                        lambda family, update, root=None: ("VNT-100", "https://jira/VNT-100"))
+                        lambda family, update, root=None: ("PROJ-100", "https://jira/PROJ-100"))
     monkeypatch.setattr(shipper.task_lib, "update_task",
                         lambda tid, **kw: None)
     monkeypatch.setattr(shipper.task_lib, "complete_task",
@@ -164,7 +164,7 @@ def test_drift_check_fails_open(monkeypatch):
         raise RuntimeError("Jira unreachable")
     monkeypatch.setattr(shipper.jira_publish, "fetch_issue", fetch_boom)
     update = {
-        "issue_key": "VNT-100",
+        "issue_key": "PROJ-100",
         "action": "transition",
         "target_status": "In Progress",
         "expected_status": "Next",
@@ -180,7 +180,7 @@ def test_no_expected_status_skips_drift_check(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "read_task",
                         lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
     monkeypatch.setattr(shipper.adapters, "update_issue",
-                        lambda family, update, root=None: ("VNT-100", "https://jira/VNT-100"))
+                        lambda family, update, root=None: ("PROJ-100", "https://jira/PROJ-100"))
     monkeypatch.setattr(shipper.task_lib, "update_task",
                         lambda tid, **kw: None)
     monkeypatch.setattr(shipper.task_lib, "complete_task",
@@ -194,7 +194,7 @@ def test_no_expected_status_skips_drift_check(monkeypatch):
         return {"status": "Done", "title": "Test"}
     monkeypatch.setattr(shipper.jira_publish, "fetch_issue", fetch_track)
     update = {
-        "issue_key": "VNT-100",
+        "issue_key": "PROJ-100",
         "action": "transition",
         "target_status": "In Progress",
     }
@@ -210,7 +210,7 @@ def test_parse_jira_update_expected_status():
     """parse_jira_update extracts JIRA_EXPECTED_STATUS when present."""
     body = (
         "<!-- JIRA_UPDATE -->\n"
-        "<!-- JIRA_ISSUE_KEY:VNT-100 -->\n"
+        "<!-- JIRA_ISSUE_KEY:PROJ-100 -->\n"
         "<!-- JIRA_ACTION:transition -->\n"
         "<!-- JIRA_TARGET_STATUS:In Progress -->\n"
         "<!-- JIRA_EXPECTED_STATUS:Next -->\n"
@@ -230,7 +230,7 @@ def test_parse_jira_update_no_expected_status():
     """parse_jira_update returns empty expected_status for legacy blocks."""
     body = (
         "<!-- JIRA_UPDATE -->\n"
-        "<!-- JIRA_ISSUE_KEY:VNT-100 -->\n"
+        "<!-- JIRA_ISSUE_KEY:PROJ-100 -->\n"
         "<!-- JIRA_ACTION:comment -->\n"
         "<!-- JIRA_PRIORITY: -->\n"
         "<!-- JIRA_SUMMARY: -->\n"
@@ -252,7 +252,7 @@ def test_attempt_update_transition_success(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "read_task",
                         lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
     monkeypatch.setattr(shipper.adapters, "update_issue",
-                        lambda family, update, root=None: ("VNT-200", "https://jira/VNT-200"))
+                        lambda family, update, root=None: ("PROJ-200", "https://jira/PROJ-200"))
     monkeypatch.setattr(shipper.task_lib, "update_task",
                         lambda tid, **kw: None)
     monkeypatch.setattr(shipper.task_lib, "complete_task",
@@ -261,11 +261,11 @@ def test_attempt_update_transition_success(monkeypatch):
                         lambda *a, **kw: None)
     monkeypatch.setattr(shipper, "_emit_jira_receipt",
                         lambda *a, **kw: None)
-    update = {"issue_key": "VNT-200", "action": "transition",
+    update = {"issue_key": "PROJ-200", "action": "transition",
               "target_status": "In Progress"}
     status, payload = shipper._attempt_update("T-1", update)
     assert status == "ok"
-    assert payload == ("VNT-200", "https://jira/VNT-200")
+    assert payload == ("PROJ-200", "https://jira/PROJ-200")
     assert completed["id"] == "T-1"
 
 
@@ -275,7 +275,7 @@ def test_attempt_update_transition_and_comment_success(monkeypatch):
     monkeypatch.setattr(shipper.task_lib, "read_task",
                         lambda tid: {"frontmatter": {"status": "open"}, "body": ""})
     monkeypatch.setattr(shipper.adapters, "update_issue",
-                        lambda family, update, root=None: ("VNT-300", "https://jira/VNT-300"))
+                        lambda family, update, root=None: ("PROJ-300", "https://jira/PROJ-300"))
     monkeypatch.setattr(shipper.task_lib, "update_task",
                         lambda tid, **kw: None)
     monkeypatch.setattr(shipper.task_lib, "complete_task",
@@ -284,28 +284,28 @@ def test_attempt_update_transition_and_comment_success(monkeypatch):
                         lambda *a, **kw: None)
     monkeypatch.setattr(shipper, "_emit_jira_receipt",
                         lambda *a, **kw: None)
-    update = {"issue_key": "VNT-300", "action": "transition_and_comment",
+    update = {"issue_key": "PROJ-300", "action": "transition_and_comment",
               "target_status": "Done", "comment": "Moving to done."}
     status, payload = shipper._attempt_update("T-1", update)
     assert status == "ok"
-    assert payload == ("VNT-300", "https://jira/VNT-300")
+    assert payload == ("PROJ-300", "https://jira/PROJ-300")
 
 
 def test_parse_jira_update_transition_action():
     """parse_jira_update correctly extracts transition action and target_status."""
     body = (
         "<!-- JIRA_UPDATE -->\n"
-        "<!-- JIRA_ISSUE_KEY:VNT-43885 -->\n"
+        "<!-- JIRA_ISSUE_KEY:PROJ-43885 -->\n"
         "<!-- JIRA_ACTION:transition -->\n"
         "<!-- JIRA_TARGET_STATUS:In Progress -->\n"
         "<!-- JIRA_PRIORITY: -->\n"
         "<!-- JIRA_SUMMARY: -->\n"
         "<!-- JIRA_LABELS: -->\n\n"
-        "### Fields\n- **Issue:** VNT-43885\n"
+        "### Fields\n- **Issue:** PROJ-43885\n"
         "<!-- /JIRA_UPDATE -->"
     )
     result = jira_publish.parse_jira_update(body)
     assert result is not None
     assert result["action"] == "transition"
-    assert result["issue_key"] == "VNT-43885"
+    assert result["issue_key"] == "PROJ-43885"
     assert result["target_status"] == "In Progress"

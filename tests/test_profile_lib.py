@@ -423,3 +423,106 @@ def test_resolve_model_min_tier_ignored_when_task_override():
     assert profile_lib.resolve_model("standard", posture="low",
                                      task_override="haiku",
                                      min_tier="standard") == "haiku"
+
+
+# --- bootstrap_profile: seed profile/ from profile.example/ (idempotent) ------
+
+def _mk_example(tmp_path):
+    ex = tmp_path / "profile.example"
+    (ex / "voice").mkdir(parents=True)
+    (ex / "README.md").write_text("template docs\n")
+    (ex / "profile.yaml").write_text('display_name: "Your Name"\n')
+    (ex / "integrations.yaml").write_text('transcript:\n  provider: "none"\n')
+    (ex / "config.yaml").write_text('active_skill_packs: ["core"]\nharness: "claude"\n')
+    (ex / "voice" / "teams.md").write_text("teams placeholder\n")
+    (ex / "voice" / "html.md").write_text("html placeholder\n")
+    return ex
+
+
+def test_bootstrap_profile_seeds_fresh_profile(tmp_path):
+    _mk_example(tmp_path)
+    copied = profile_lib.bootstrap_profile(root=str(tmp_path))
+    prof = tmp_path / "profile"
+    assert set(copied) == {"profile.yaml", "integrations.yaml", "config.yaml",
+                           "voice/teams.md", "voice/html.md"}
+    assert (prof / "voice" / "html.md").read_text() == "html placeholder\n"
+    assert not (prof / "README.md").exists()   # template docs stay in the template
+
+
+def test_bootstrap_profile_never_overwrites_and_is_idempotent(tmp_path):
+    _mk_example(tmp_path)
+    prof = tmp_path / "profile"
+    prof.mkdir()
+    (prof / "config.yaml").write_text("server:\n  port: 8761\n")
+    copied = profile_lib.bootstrap_profile(root=str(tmp_path))
+    assert "config.yaml" not in copied
+    assert (prof / "config.yaml").read_text() == "server:\n  port: 8761\n"
+    assert (prof / "integrations.yaml").exists()
+    assert profile_lib.bootstrap_profile(root=str(tmp_path)) == []
+
+
+def test_set_server_port_bootstraps_missing_template_files(tmp_path):
+    # Regression: the first launch's set_server_port used to create profile/
+    # holding ONLY config.yaml, so onboarding's "copy if absent" never fired and
+    # integrations/voice/packs/models/harness defaults were lost.
+    ex = _mk_example(tmp_path)
+    profile_lib.set_server_port(8770, root=str(tmp_path))
+    prof = tmp_path / "profile"
+    for rel in ("profile.yaml", "integrations.yaml", "voice/teams.md", "voice/html.md"):
+        assert (prof / rel).exists(), rel
+    cfg = profile_lib.config(root=str(tmp_path))
+    assert cfg["server"]["port"] == 8770
+    assert cfg["active_skill_packs"] == ["core"]
+    assert cfg["harness"] == "claude"
+    # the tracked template is untouched
+    assert "server" not in (ex / "config.yaml").read_text()
+
+
+def test_shipped_example_config_does_not_pin_a_port():
+    # A seeded config must not look like a deliberate port choice, or the
+    # launcher would skip its free-port hunt (configured_server_port).
+    from ruamel.yaml import YAML
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "profile.example", "config.yaml"), encoding="utf-8") as f:
+        cfg = YAML(typ="safe").load(f) or {}
+    assert "port" not in (cfg.get("server") or {})
+
+
+def test_shipped_example_seeds_role_team_products():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    from ruamel.yaml import YAML
+    with open(os.path.join(root, "profile.example", "profile.yaml"), encoding="utf-8") as f:
+        prof = YAML(typ="safe").load(f) or {}
+    assert {"role", "team", "products"} <= set(prof)
+
+
+# --- role / team / products identity fields -----------------------------------
+
+def test_role_team_products_accessors(tmp_path):
+    prof = tmp_path / "profile"
+    prof.mkdir()
+    (prof / "profile.yaml").write_text(
+        'role: "Senior PM"\nteam: "Payments"\nproducts: ["Billing", "Mobile app"]\n')
+    root = str(tmp_path)
+    assert profile_lib.role(root=root) == "Senior PM"
+    assert profile_lib.team(root=root) == "Payments"
+    assert profile_lib.products(root=root) == ["Billing", "Mobile app"]
+
+
+def test_role_team_products_defaults_and_string_products(tmp_path):
+    prof = tmp_path / "profile"
+    prof.mkdir()
+    (prof / "profile.yaml").write_text('products: "Billing, Mobile app"\n')
+    root = str(tmp_path)
+    assert profile_lib.role(root=root) == ""
+    assert profile_lib.team(root=root) == ""
+    assert profile_lib.products(root=root) == ["Billing", "Mobile app"]
+
+
+def test_write_identity_writes_role_team_products(profile_root):
+    profile_lib.write_identity({"role": "PM", "team": "Core", "products": ["Search"]},
+                               root=profile_root)
+    assert profile_lib.role(root=profile_root) == "PM"
+    assert profile_lib.team(root=profile_root) == "Core"
+    assert profile_lib.products(root=profile_root) == ["Search"]
+    assert profile_lib.persona(root=profile_root) == "pm"   # untouched

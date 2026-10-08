@@ -9,7 +9,7 @@ import jira_publish
 def test_parse_jira_update_comment():
     body = """Some text before
 <!-- JIRA_UPDATE -->
-<!-- JIRA_ISSUE_KEY:VNT-45655 -->
+<!-- JIRA_ISSUE_KEY:PROJ-45655 -->
 <!-- JIRA_ACTION:comment -->
 
 ### Comment
@@ -19,7 +19,7 @@ Bug details from email thread. Invoice totals not subtracting credits.
 More text after"""
     u = jira_publish.parse_jira_update(body)
     assert u is not None
-    assert u["issue_key"] == "VNT-45655"
+    assert u["issue_key"] == "PROJ-45655"
     assert u["action"] == "comment"
     assert "Invoice totals" in u["comment_body"]
     assert u["description"] == ""
@@ -27,7 +27,7 @@ More text after"""
 
 def test_parse_jira_update_edit():
     body = """<!-- JIRA_UPDATE -->
-<!-- JIRA_ISSUE_KEY:VNT-12345 -->
+<!-- JIRA_ISSUE_KEY:PROJ-12345 -->
 <!-- JIRA_ACTION:edit -->
 <!-- JIRA_PRIORITY:High -->
 <!-- JIRA_SUMMARY:Updated title here -->
@@ -39,7 +39,7 @@ Updated description with full details.
 <!-- /JIRA_UPDATE -->"""
     u = jira_publish.parse_jira_update(body)
     assert u is not None
-    assert u["issue_key"] == "VNT-12345"
+    assert u["issue_key"] == "PROJ-12345"
     assert u["action"] == "edit"
     assert u["priority"] == "High"
     assert u["summary"] == "Updated title here"
@@ -50,7 +50,7 @@ Updated description with full details.
 
 def test_parse_jira_update_comment_and_edit():
     body = """<!-- JIRA_UPDATE -->
-<!-- JIRA_ISSUE_KEY:VNT-99999 -->
+<!-- JIRA_ISSUE_KEY:PROJ-99999 -->
 <!-- JIRA_ACTION:comment_and_edit -->
 <!-- JIRA_PRIORITY:Highest -->
 
@@ -63,7 +63,7 @@ Full bug report with repro steps.
 <!-- /JIRA_UPDATE -->"""
     u = jira_publish.parse_jira_update(body)
     assert u is not None
-    assert u["issue_key"] == "VNT-99999"
+    assert u["issue_key"] == "PROJ-99999"
     assert u["action"] == "comment_and_edit"
     assert u["priority"] == "Highest"
     assert "severity assessment" in u["comment_body"]
@@ -89,7 +89,7 @@ def test_parse_jira_update_no_block():
 
 def test_parse_jira_update_defaults_action_to_comment():
     body = """<!-- JIRA_UPDATE -->
-<!-- JIRA_ISSUE_KEY:VNT-100 -->
+<!-- JIRA_ISSUE_KEY:PROJ-100 -->
 
 ### Comment
 A comment without explicit action.

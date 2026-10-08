@@ -132,11 +132,13 @@ def call_claude(system: str, user: str, model: str = PARSER_MODEL, timeout: int 
         user or system, model,
         system_prompt=system if user else None,
     )
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
 
     result = subprocess.run(
         cmd,
         capture_output=True,
-        text=True,
+        input=prompt_stdin,
+        **platform_lib.text_kwargs(),
         env=env,
         timeout=timeout,
     )
@@ -320,7 +322,7 @@ def main():
     result = subprocess.run(
         [sys.executable, os.path.join(pm_os_dir, "scripts", "task_cli.py"), "add"] + cli_args,
         capture_output=True,
-        text=True,
+        **platform_lib.text_kwargs(),
         cwd=pm_os_dir,
     )
 

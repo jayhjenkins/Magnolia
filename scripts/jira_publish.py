@@ -782,6 +782,7 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
             permission_mode="bypassPermissions",
         )
     env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
 
     try:
         result = subprocess.run(
@@ -789,7 +790,7 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
             cwd=PM_OS_DIR,
             env=env,
             capture_output=True,
-            text=True,
+            input=prompt_stdin, **platform_lib.text_kwargs(),
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -858,6 +859,7 @@ If the issue is not found: JIRA_READ:NOT_FOUND"""
             permission_mode="bypassPermissions",
         )
     env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
 
     try:
         result = subprocess.run(
@@ -865,7 +867,7 @@ If the issue is not found: JIRA_READ:NOT_FOUND"""
             cwd=PM_OS_DIR,
             env=env,
             capture_output=True,
-            text=True,
+            input=prompt_stdin, **platform_lib.text_kwargs(),
             timeout=120,
         )
     except subprocess.TimeoutExpired:

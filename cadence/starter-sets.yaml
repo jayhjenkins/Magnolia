@@ -1,9 +1,11 @@
 # Cadence starter sets — curated program-type bundles the onboarding concierge
 # offers ONCE at setup. NEVER consulted at runtime: a program type is "live" iff
 # the operator has >=1 active program of it. Each bundle maps to one leading
-# question in the onboarding conversation (meta-onboard step 8, Phase A).
+# question in the onboarding conversation (its `question:`, asked by the
+# meta-onboard Cadence step). Extra keys are ignored by the validator.
 sets:
   roadmap:
+    question: "Do you keep a roadmap of features or epics you want tracked from discovery to shipped?"
     label: "Roadmap tracking"
     description: >
       Track product initiatives through their lifecycle — from discovery through
@@ -14,6 +16,7 @@ sets:
       - roadmap-initiative
 
   weekly:
+    question: "Do you run a weekly planning rhythm -- a top-priorities list for the week, or prep for a regular team sync?"
     label: "Weekly priorities"
     description: >
       A standing weekly-cycle program that surfaces your top priorities each
@@ -23,6 +26,7 @@ sets:
       - weekly-priorities
 
   eng-sync:
+    question: "Do you have a regular sync with engineering leads you would like to walk into prepared?"
     label: "Eng sync prep"
     description: >
       Specialized weekly prep for engineering-facing syncs — pulls recent
@@ -32,6 +36,7 @@ sets:
       - eng-sync-prep
 
   outcomes:
+    question: "When something ships, do you want me to track whether it actually moved the success metrics?"
     label: "Outcome validation"
     description: >
       After something ships, did it actually work? A target-model program that
@@ -42,11 +47,15 @@ sets:
       - did-it-work
 
   eos:
+    question: "Does your team run EOS (Traction) -- L10 meetings, quarterly rocks, a weekly scorecard, an issues list?"
     label: "EOS facilitation"
     description: >
-      Seed the standing EOS programs for a team running EOS: L10 meeting prep
-      and quarterly rocks. The EOS sheet stays manual-on-purpose (read-only);
-      these programs read, prepare, and nudge — they never write to the sheet.
+      Seed the standing EOS programs for a team running EOS: L10 meeting prep,
+      quarterly rocks, the weekly scorecard cycle, and the issues list. The EOS
+      sheet stays manual-on-purpose (read-only); these programs read, prepare,
+      and nudge — they never write to the sheet.
     types:
       - eos-l10-prep
       - eos-rock
+      - eos-cycle
+      - eos-issues

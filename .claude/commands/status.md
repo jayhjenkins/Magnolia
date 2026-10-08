@@ -47,6 +47,7 @@ For each artifact:
 
 ## Step 5: Suggest Next Action
 
+- If the Context Brief is missing → "Run `/context-brief` (`workflow-context-brief` skill) or `/project:prep`"
 - If Phases 1-3 incomplete → "Run `/project:prep` to complete upstream artifacts"
 - If Phases 1-3 complete, 4-6 incomplete → "Run `/project:build` to generate PRD and validate"
 - If all phases complete → "Product package complete. Review and iterate as needed."

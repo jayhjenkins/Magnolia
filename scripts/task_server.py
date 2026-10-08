@@ -57,6 +57,7 @@ from adapters import NeedsConfirmation
 from cron_scheduler import CronScheduler
 from cadence.scheduler import CadenceScheduler
 from dispatch_scheduler import DispatchScheduler
+from transcript_sync import TranscriptScheduler
 import shipper
 from shipper import (
     _message_draft_from_task, _attempt_send_message, _record_manual_send,
@@ -4237,6 +4238,11 @@ def main():
     dispatch_scheduler = DispatchScheduler(dispatch_fn=_spawn_task_dispatch)
     dispatch_scheduler.start()
 
+    # Hourly transcript sync (Otter/Granola per profile) on every OS. Runs the
+    # sync as a subprocess; stands down if a launchd agent already runs the feed.
+    transcript_scheduler = TranscriptScheduler()
+    transcript_scheduler.start()
+
     print(f"PM-OS Task Server running at http://127.0.0.1:{PORT}")
     print(f"  API:    http://127.0.0.1:{PORT}/api/tasks")
     print(f"  Cron:   http://127.0.0.1:{PORT}/api/cron")
@@ -4251,6 +4257,7 @@ def main():
         scheduler.stop()
         cadence_scheduler.stop()
         dispatch_scheduler.stop()
+        transcript_scheduler.stop()
         server.server_close()
 
 

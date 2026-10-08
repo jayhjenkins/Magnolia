@@ -85,14 +85,14 @@ These map to existing PM-OS workflows. When creating agent tasks, note the relev
 
 ### Route to `collab` with `--task-type send-message` when:
 
-- **The task is to communicate with a person** — "talk to Will about X", "share this with Brandon", "forward the issue to the responsible PM", "loop in / reach out to / ping someone". The primary action is conveying something to a person, not producing an artifact and not a full meeting.
+- **The task is to communicate with a person** — "talk to Will about X", "share this with Dana", "forward the issue to the responsible PM", "loop in / reach out to / ping someone". The primary action is conveying something to a person, not producing an artifact and not a full meeting.
 - This is the **lighter, communicative** case. "Talk to [person]" is a message, **not** a meeting — reserve `schedule-meeting` for the heavier, explicitly-framed engagements below.
 - Capture the **recipient(s)** and **what to convey** in `--description`. (No `meeting_*` fields.)
 - Distinct from "draft X and send to Y" (see the Important note above): that's an `agent` task where the operator sends the artifact afterward. A `send-message` task *is* the communication itself.
 
 ### Route to `collab` with `--task-type schedule-meeting` when:
 
-- **The operator needs to schedule a meeting** — the heavier, explicitly-framed case: "I'll set up a sync with Brandon", "let's find a time to meet", "schedule a call with the team", "working session", "demo this for the team". A lighter "talk to / share with / forward to [person]" is a **send-message**, not a meeting.
+- **The operator needs to schedule a meeting** — the heavier, explicitly-framed case: "I'll set up a sync with Dana", "let's find a time to meet", "schedule a call with the team", "working session", "demo this for the team". A lighter "talk to / share with / forward to [person]" is a **send-message**, not a meeting.
 - Extract: attendee names (agent resolves emails via MCP/calendar search), time preferences ("next week", "Thursday afternoon"), meeting purpose, suggested title
 - Use `--meeting-attendees` (comma-separated emails or names as placeholder), `--meeting-duration` (minutes), `--meeting-title`, `--meeting-description`
 - **Check the transcript's `participant_emails` frontmatter field first** — it maps participant names to corporate emails (resolved at ingest via Microsoft Graph). Use the email from there when available.
@@ -107,20 +107,20 @@ Write `--meeting-description` as a concise, calendar-appropriate sentence descri
 
 | Bad (task context as invite body) | Good (calendar-appropriate) |
 |---|---|
-| "At end of catch-up, Zach suggested standardizing a recurring touch base to stay aligned on Pay priorities" | "Recurring sync between the operator and Zach to stay aligned on Pay priorities and surface blockers early" |
-| "The operator mentioned wanting to check in with Autumn about CS escalation trends" | "Review CS escalation patterns and discuss product backlog priorities" |
+| "At end of catch-up, Dana suggested standardizing a recurring touch base to stay aligned on Payments priorities" | "Recurring sync between the operator and Dana to stay aligned on Payments priorities and surface blockers early" |
+| "The operator mentioned wanting to check in with Sam about CS escalation trends" | "Review CS escalation patterns and discuss product backlog priorities" |
 | "" *(empty)* | "Biweekly 1:1 to discuss Home product roadmap and team updates" |
 
 Example:
 ```bash
-./scripts/task.sh add "Schedule recurring Pay sync with Zach" \
+./scripts/task.sh add "Schedule recurring Payments sync with Dana" \
   -q collab -p medium -d product \
   --task-type schedule-meeting \
-  --meeting-attendees "zach.lastname@vantaca.com" \
+  --meeting-attendees "dana.lee@example.com" \
   --meeting-duration 30 \
-  --meeting-title "Operator x Zach - Pay Sync" \
-  --meeting-description "Recurring sync to stay aligned on Pay priorities and surface blockers early" \
-  --description "During catch-up on 3/18, Zach suggested standardizing a recurring touch base. Both agreed biweekly 30min would be right cadence." \
+  --meeting-title "Operator x Dana - Payments Sync" \
+  --meeting-description "Recurring sync to stay aligned on Payments priorities and surface blockers early" \
+  --description "During catch-up on 3/18, Dana suggested standardizing a recurring touch base. Both agreed biweekly 30min would be right cadence." \
   --source-meeting "datasets/meetings/internal/2026-03/..."
 ```
 
@@ -200,41 +200,41 @@ For each item that passes the filter, apply the queue logic:
 | The operator needs research, analysis, or a document produced | `agent` | "We need to understand competitor pricing" → agent researches + writes memo |
 | The meeting surfaces a concrete backlog item (bug, feature, enhancement) | `agent` + `--task-type ticket-creator` | Customer flagged a distance bug → ticket-creator drafts a Jira Unit |
 | The operator needs a decision made, with supporting analysis | `collab` | "We need to decide on API versioning" → agent writes tradeoff doc, the operator decides |
-| The operator needs to schedule a meeting | `collab` + `--task-type schedule-meeting` | "I'll set up a sync with Brandon" → agent finds availability, the operator picks a slot |
+| The operator needs to schedule a meeting | `collab` + `--task-type schedule-meeting` | "I'll set up a sync with Dana" → agent finds availability, the operator picks a slot |
 | The operator must physically do it (message, access, show up) | `human` | "I'll send a Slack message to the team" |
-| The operator asked someone for something, or was promised something | `waiting` | "Alyssa will send the VPN setup article" |
+| The operator asked someone for something, or was promised something | `waiting` | "Priya will send the VPN setup article" |
 
 ### 5. Create Tasks via CLI
 
 ```bash
 # Agent produces research artifact (note the relevant PM-OS skill)
-./scripts/task.sh add "Research Avid vendor payment solution and write competitive analysis" \
+./scripts/task.sh add "Research Acme vendor payment solution and write competitive analysis" \
   -q agent -p medium -d strategy \
-  --description "Discussed in vendor strategy meeting. Need to understand Avid's offering, pricing, and weaknesses. Use research-gathering skill. Output to datasets/research/sources/competitive-analysis/" \
-  --source-meeting "2026-02-18_Discuss-Vantaca-Vendor.txt"
+  --description "Discussed in vendor strategy meeting. Need to understand Acme's offering, pricing, and weaknesses. Use research-gathering skill. Output to datasets/research/sources/competitive-analysis/" \
+  --source-meeting "2026-02-18_Vendor-Strategy-Discussion.txt"
 
 # Decision that needs agent prep + the operator's judgment
-./scripts/task.sh add "Decide on email authoring tool (Unlayer vs GrapeJS)" \
+./scripts/task.sh add "Decide on email authoring tool (Option A vs Option B)" \
   -q collab -p high -d product \
   --description "Agent: gather cost data, feature comparison, and write tradeoff analysis using tradeoff-decision workflow. Operator: make final call." \
   --source-meeting "2026-02-25_Email-Authoring-Review.txt"
 
 # Only the operator can do this (physical/relationship action)
-./scripts/task.sh add "Schedule recurring sync with Brandon Walker" \
+./scripts/task.sh add "Schedule recurring sync with Dana Lee" \
   -q human -p medium -d product \
-  --source-meeting "2026-02-26_Operator-x-Brandon-HOAi-Sync.txt"
+  --source-meeting "2026-02-26_Operator-x-Dana-Sync.txt"
 
 # The operator is waiting on a deliverable from someone
-./scripts/task.sh add "Receive VPN setup article and SUP credentials from Alyssa" \
+./scripts/task.sh add "Receive VPN setup article and test credentials from Priya" \
   -q waiting -p high -d ops \
-  --waiting-on "Alyssa Caskey" \
-  --source-meeting "2026-02-25_HOAi-Vantaca-Product-Outcomes.txt"
+  --waiting-on "Priya Shah" \
+  --source-meeting "2026-02-25_Product-Outcomes-Review.txt"
 
 # Customer meeting surfaced a buildable item → Jira ticket
 ./scripts/task.sh add "Add resident opt-in category subscriptions to Community Feed" \
   -q agent -p medium -d product \
   --task-type ticket-creator \
-  --description "Robert Lieberman (Alliant/Bellatera) proposed letting residents opt into feed categories and get notified. Operator agreed this should be a Unit under VNT-42411." \
+  --description "A customer admin (Example Co) proposed letting residents opt into feed categories and get notified. Operator agreed this should be a Unit under the existing Community Feed feature (PROJ-1234)." \
   --source-meeting "datasets/meetings/customer/2026-08/..."
 ```
 
