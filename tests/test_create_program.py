@@ -88,7 +88,7 @@ def test_non_pipeline_type_has_no_phase(tmp_path, tasks_root, monkeypatch):
 def test_tracker_key_in_frontmatter_sets_bindings(tmp_path, tasks_root, monkeypatch):
     _pin_programs(tmp_path, monkeypatch)
     tid = _create_setup_card("roadmap-initiative", "Alpha launch",
-                             tracker_key="VNT-45655")
+                             tracker_key="PROJ-45655")
 
     handler = FakeHandler()
     task_server.handle_create_program(handler, tid)
@@ -96,13 +96,13 @@ def test_tracker_key_in_frontmatter_sets_bindings(tmp_path, tasks_root, monkeypa
     progs = program_lib.list_programs(status="active")
     fm = progs[0]["frontmatter"]
     assert fm["bindings"] == [
-        {"role": "truth", "kind": "project_management", "anchor": "VNT-45655"}
+        {"role": "truth", "kind": "project_management", "anchor": "PROJ-45655"}
     ]
 
 
 def test_tracker_key_extracted_from_body(tmp_path, tasks_root, monkeypatch):
     _pin_programs(tmp_path, monkeypatch)
-    body = "## Intent\nTracker: VNT-12345. Build the new feed."
+    body = "## Intent\nTracker: PROJ-12345. Build the new feed."
     tid = _create_setup_card("roadmap-initiative", "Alpha launch", body=body)
 
     handler = FakeHandler()
@@ -111,7 +111,7 @@ def test_tracker_key_extracted_from_body(tmp_path, tasks_root, monkeypatch):
     progs = program_lib.list_programs(status="active")
     fm = progs[0]["frontmatter"]
     bindings = fm.get("bindings") or []
-    assert any(b["anchor"] == "VNT-12345" for b in bindings)
+    assert any(b["anchor"] == "PROJ-12345" for b in bindings)
 
 
 def test_no_tracker_key_means_no_bindings(tmp_path, tasks_root, monkeypatch):
@@ -130,7 +130,7 @@ def test_no_tracker_key_means_no_bindings(tmp_path, tasks_root, monkeypatch):
 # --- _extract_tracker_key unit tests ----------------------------------------
 
 def test_extract_tracker_key_finds_jira_key():
-    assert task_server._extract_tracker_key("Tracker: VNT-42411") == "VNT-42411"
+    assert task_server._extract_tracker_key("Tracker: PROJ-42411") == "PROJ-42411"
 
 
 def test_extract_tracker_key_returns_none_for_no_key():
@@ -143,4 +143,4 @@ def test_extract_tracker_key_returns_none_for_empty():
 
 
 def test_extract_tracker_key_finds_first_key():
-    assert task_server._extract_tracker_key("VNT-100 and VNT-200") == "VNT-100"
+    assert task_server._extract_tracker_key("PROJ-100 and PROJ-200") == "PROJ-100"

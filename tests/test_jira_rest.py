@@ -69,7 +69,7 @@ class TestJiraClient:
         import requests as req_mod
         resp = type("R", (), {
             "status_code": 201,
-            "json": lambda self: {"key": "VNT-999", "id": "10001"},
+            "json": lambda self: {"key": "PROJ-999", "id": "10001"},
             "text": "",
         })()
         calls = []
@@ -80,12 +80,12 @@ class TestJiraClient:
 
         monkeypatch.setattr(req_mod, "post", fake_post)
         client = jp.JiraClient("acme.atlassian.net", "me@acme.com", "tok")
-        key, url = client.create_issue("VNT", "Bug", "Fix it", "desc", {"labels": ["a"]})
-        assert key == "VNT-999"
-        assert "VNT-999" in url
+        key, url = client.create_issue("PROJ", "Bug", "Fix it", "desc", {"labels": ["a"]})
+        assert key == "PROJ-999"
+        assert "PROJ-999" in url
         assert "/rest/api/3/issue" in calls[0]["url"]
         fields = calls[0]["json"]["fields"]
-        assert fields["project"] == {"key": "VNT"}
+        assert fields["project"] == {"key": "PROJ"}
         assert fields["issuetype"] == {"name": "Bug"}
         assert fields["labels"] == ["a"]
 
@@ -95,7 +95,7 @@ class TestJiraClient:
         monkeypatch.setattr(req_mod, "post", lambda *a, **k: resp)
         client = jp.JiraClient("acme.atlassian.net", "me@acme.com", "tok")
         with pytest.raises(RuntimeError, match="Jira create failed"):
-            client.create_issue("VNT", "Bug", "x", "y")
+            client.create_issue("PROJ", "Bug", "x", "y")
 
     def test_add_comment_success(self, jp, monkeypatch):
         import requests as req_mod
@@ -108,9 +108,9 @@ class TestJiraClient:
 
         monkeypatch.setattr(req_mod, "post", fake_post)
         client = jp.JiraClient("acme.atlassian.net", "me@acme.com", "tok")
-        key, url = client.add_comment("VNT-42", "A comment")
-        assert key == "VNT-42"
-        assert "VNT-42/comment" in calls[0]["url"]
+        key, url = client.add_comment("PROJ-42", "A comment")
+        assert key == "PROJ-42"
+        assert "PROJ-42/comment" in calls[0]["url"]
         assert calls[0]["json"]["body"]["type"] == "doc"
 
     def test_edit_issue_converts_description(self, jp, monkeypatch):
@@ -124,7 +124,7 @@ class TestJiraClient:
 
         monkeypatch.setattr(req_mod, "put", fake_put)
         client = jp.JiraClient("acme.atlassian.net", "me@acme.com", "tok")
-        client.edit_issue("VNT-42", {"summary": "New", "description": "md text"})
+        client.edit_issue("PROJ-42", {"summary": "New", "description": "md text"})
         fields = calls[0]["json"]["fields"]
         assert fields["summary"] == "New"
         assert fields["description"]["type"] == "doc"
@@ -152,8 +152,8 @@ class TestJiraClient:
         monkeypatch.setattr(req_mod, "get", fake_get)
         monkeypatch.setattr(req_mod, "post", fake_post)
         client = jp.JiraClient("acme.atlassian.net", "me@acme.com", "tok")
-        key, url = client.transition_issue("VNT-42", "Done")
-        assert key == "VNT-42"
+        key, url = client.transition_issue("PROJ-42", "Done")
+        assert key == "PROJ-42"
         assert calls[0]["transition"]["id"] == "41"
 
     def test_transition_no_match(self, jp, monkeypatch):
@@ -166,7 +166,7 @@ class TestJiraClient:
         monkeypatch.setattr(req_mod, "get", lambda *a, **k: resp)
         client = jp.JiraClient("acme.atlassian.net", "me@acme.com", "tok")
         with pytest.raises(RuntimeError, match="No matching transition"):
-            client.transition_issue("VNT-42", "Released")
+            client.transition_issue("PROJ-42", "Released")
 
     def test_get_issue_success(self, jp, monkeypatch):
         import requests as req_mod
@@ -177,7 +177,7 @@ class TestJiraClient:
         })()
         monkeypatch.setattr(req_mod, "get", lambda *a, **k: resp)
         client = jp.JiraClient("acme.atlassian.net", "me@acme.com", "tok")
-        fields = client.get_issue("VNT-42")
+        fields = client.get_issue("PROJ-42")
         assert fields["summary"] == "Test"
 
     def test_get_issue_404(self, jp, monkeypatch):
@@ -185,7 +185,7 @@ class TestJiraClient:
         resp = type("R", (), {"status_code": 404, "text": "Not Found"})()
         monkeypatch.setattr(req_mod, "get", lambda *a, **k: resp)
         client = jp.JiraClient("acme.atlassian.net", "me@acme.com", "tok")
-        assert client.get_issue("VNT-999") is None
+        assert client.get_issue("PROJ-999") is None
 
 
 class TestDispatchRouting:

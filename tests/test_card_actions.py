@@ -227,7 +227,7 @@ def test_accept_cadence_proposal_emits_jira_sync_when_tracker_bound(
     prog = program_lib.read_program(pid, root=str(tmp_path))
     fm = prog["frontmatter"]
     fm["bindings"] = [{"id": "tracker", "role": "truth",
-                       "kind": "project_management", "anchor": "VNT-42411",
+                       "kind": "project_management", "anchor": "PROJ-42411",
                        "mode": "read", "health": "ok"}]
     program_lib._write_program_file(prog["filepath"], fm, prog["body"])
     proposal = {"op": "advance-phase", "to": "planning",
@@ -238,7 +238,7 @@ def test_accept_cadence_proposal_emits_jira_sync_when_tracker_bound(
         proposal=proposal)
     task_server.apply_recommendation(tid)
     agent_tasks = [t for t in task_lib.list_tasks(queue="agent")
-                   if "VNT-42411" in t.get("title", "")]
+                   if "PROJ-42411" in t.get("title", "")]
     assert len(agent_tasks) == 1
     assert agent_tasks[0].get("task_type") == "ticket-creator"
 
@@ -257,7 +257,7 @@ def test_accept_cadence_proposal_no_jira_sync_without_binding(
         proposal=proposal)
     task_server.apply_recommendation(tid)
     agent_tasks = [t for t in task_lib.list_tasks(queue="agent")
-                   if "Jira" in t.get("title", "") or "VNT" in t.get("title", "")]
+                   if "Jira" in t.get("title", "") or "PROJ" in t.get("title", "")]
     assert len(agent_tasks) == 0
 
 
@@ -273,7 +273,7 @@ def test_advance_to_shipped_births_did_it_work(tasks_root, tmp_path, monkeypatch
     fm["phase_entered"] = {"discovery": "2026-05-01", "planning": "2026-05-20",
                            "execution": "2026-06-01"}
     fm["bindings"] = [{"id": "tracker", "role": "truth",
-                       "kind": "project_management", "anchor": "VNT-42411",
+                       "kind": "project_management", "anchor": "PROJ-42411",
                        "mode": "read", "health": "ok"}]
     fm["checkpoints"] = [
         {"id": "discovery-exit", "label": "Discovery exit",
@@ -294,7 +294,7 @@ def test_advance_to_shipped_births_did_it_work(tasks_root, tmp_path, monkeypatch
     diw_fm = diw[0]["frontmatter"]
     assert "Payments revamp" in diw_fm["title"]
     diw_bindings = diw_fm.get("bindings") or []
-    assert any(b.get("anchor") == "VNT-42411" for b in diw_bindings)
+    assert any(b.get("anchor") == "PROJ-42411" for b in diw_bindings)
 
 
 def test_advance_to_non_shipped_does_not_birth(tasks_root, tmp_path, monkeypatch):

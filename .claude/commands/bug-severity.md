@@ -16,11 +16,11 @@ Fetch a Jira bug via the Jira MCP and classify it against Vantaca's Ticket Sever
 
 ## Arguments
 
-- `/bug-severity <jira-url-or-key>` — required. Accepts a full `https://vantaca.atlassian.net/browse/VNT-XXXXX` link or a bare key like `VNT-45191`.
+- `/bug-severity <jira-url-or-key>` — required. Accepts a full `https://vantaca.atlassian.net/browse/PROJ-XXXXX` link or a bare key like `PROJ-45191`.
 
 ## Examples
 
 ```
-/bug-severity VNT-45191
-/bug-severity https://vantaca.atlassian.net/browse/VNT-45183
+/bug-severity PROJ-45191
+/bug-severity https://vantaca.atlassian.net/browse/PROJ-45183
 ```

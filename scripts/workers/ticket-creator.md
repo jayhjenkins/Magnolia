@@ -91,7 +91,7 @@ Task {task_id}. Follow these steps:
    Units almost always belong under a Feature or Epic. Before drafting, actively
    look for the parent — try these in order and stop at the first hit:
    1. **Explicit key.** Check if the task title, description, or source meeting
-      names an explicit Jira issue key (e.g., `VNT-46117`). If so, use it as
+      names an explicit Jira issue key (e.g., `PROJ-46117`). If so, use it as
       JIRA_PARENT.
    2. **Cadence program binding.** If the task names a project/feature/area
       (e.g., "Community Feed", "Board Frustration UX", "Elections"), grep
@@ -122,11 +122,11 @@ Task {task_id}. Follow these steps:
 
 6b. Detect existing issue reference:
    Check if the task title or description references an existing Jira issue key
-   (pattern: uppercase letters + hyphen + digits, e.g. `VNT-45655`, `ACM-123`,
+   (pattern: uppercase letters + hyphen + digits, e.g. `PROJ-45655`, `ACM-123`,
    `PROJ-9999`). Look for phrases like:
-   - "Update VNT-45655..."
-   - "Add comment to VNT-45655..."
-   - "...details for VNT-45655..."
+   - "Update PROJ-45655..."
+   - "Add comment to PROJ-45655..."
+   - "...details for PROJ-45655..."
    - Any mention of an issue key combined with intent to modify, update, or comment
 
    If an existing issue key is found AND the intent is to update/comment (not to
@@ -233,7 +233,7 @@ Task {task_id}. Follow these steps:
    ## Jira Update
 
    <!-- JIRA_UPDATE -->
-   <!-- JIRA_ISSUE_KEY:VNT-45655 -->
+   <!-- JIRA_ISSUE_KEY:PROJ-45655 -->
    <!-- JIRA_ACTION:comment -->
    <!-- JIRA_PRIORITY: -->
    <!-- JIRA_SUMMARY: -->
@@ -248,7 +248,7 @@ Task {task_id}. Follow these steps:
    Usually you will just add a comment, not rewrite the description.)
 
    ### Fields
-   - **Issue:** VNT-45655
+   - **Issue:** PROJ-45655
    - **Action:** Comment
    - **Priority:** (leave empty unless changing)
    <!-- /JIRA_UPDATE -->
@@ -258,7 +258,7 @@ Task {task_id}. Follow these steps:
    IMPORTANT FORMAT RULES:
    - The <!-- JIRA_UPDATE --> and <!-- /JIRA_UPDATE --> markers MUST be present
    - Each <!-- JIRA_FIELD:value --> comment MUST be on its own line
-   - JIRA_ISSUE_KEY must be the exact issue key from the task (e.g., `VNT-45655`)
+   - JIRA_ISSUE_KEY must be the exact issue key from the task (e.g., `PROJ-45655`)
    - JIRA_ACTION must be one of: comment, edit, comment_and_edit, transition, transition_and_comment
    - JIRA_PRIORITY: Highest, High, Medium, Low, Lowest (or leave empty if not changing)
    - JIRA_SUMMARY: new summary text (or leave empty if not changing)

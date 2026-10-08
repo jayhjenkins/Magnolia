@@ -14,11 +14,11 @@ def test_set_binding_adds_new_binding(tmp_path, monkeypatch):
     _pin(tmp_path, monkeypatch)
     pid, _ = program_lib.create_program(
         type="roadmap-initiative", title="Alpha", owner_role="product")
-    result = program_lib.set_binding(pid, "truth", "project_management", "VNT-123")
+    result = program_lib.set_binding(pid, "truth", "project_management", "PROJ-123")
     assert result is True
     fm = program_lib.read_program(pid)["frontmatter"]
     assert fm["bindings"] == [
-        {"role": "truth", "kind": "project_management", "anchor": "VNT-123"}
+        {"role": "truth", "kind": "project_management", "anchor": "PROJ-123"}
     ]
 
 
@@ -26,8 +26,8 @@ def test_set_binding_idempotent(tmp_path, monkeypatch):
     _pin(tmp_path, monkeypatch)
     pid, _ = program_lib.create_program(
         type="roadmap-initiative", title="Alpha", owner_role="product")
-    program_lib.set_binding(pid, "truth", "project_management", "VNT-123")
-    result = program_lib.set_binding(pid, "truth", "project_management", "VNT-123")
+    program_lib.set_binding(pid, "truth", "project_management", "PROJ-123")
+    result = program_lib.set_binding(pid, "truth", "project_management", "PROJ-123")
     assert result is False
     fm = program_lib.read_program(pid)["frontmatter"]
     assert len(fm["bindings"]) == 1
@@ -54,7 +54,7 @@ def test_set_binding_preserves_other_bindings(tmp_path, monkeypatch):
         frontmatter_extra={"bindings": [
             {"role": "surface", "kind": "eos_sheet", "anchor": "sheet-1"}
         ]})
-    program_lib.set_binding(pid, "truth", "project_management", "VNT-123")
+    program_lib.set_binding(pid, "truth", "project_management", "PROJ-123")
     fm = program_lib.read_program(pid)["frontmatter"]
     assert len(fm["bindings"]) == 2
 

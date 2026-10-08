@@ -53,4 +53,4 @@ Other:
 /jira:create --hotfix "Login loop on iOS 18.4"
 ```
 
-Result URLs follow the pattern `https://vantaca.atlassian.net/browse/VNT-XXXXX`.
+Result URLs follow the pattern `https://vantaca.atlassian.net/browse/PROJ-XXXXX`.
