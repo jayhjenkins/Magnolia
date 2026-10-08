@@ -2,6 +2,8 @@
 
 The agent-first map of Cadence, Magnolia's standing-loop subsystem. This is a **map, not a spec** — the canonical truth lives in code (each section links it under **Canonical source:**). The full design rationale and the 11-slice history live in [`docs/plans/2026-06-12-cadence-design-brief.md`](../plans/2026-06-12-cadence-design-brief.md); read this doc first, that one for the why. When this doc and the code disagree, the code wins.
 
+> `docs/plans/…` citations point at the maintainer's local design archive, which is gitignored and not in a fresh clone. The code is the canonical source.
+
 ## What Cadence is (and how it relates to the task board)
 
 The task board is the **verbs of the operator's life** — discrete items routed through their attention. Cadence is the **state of their programs** — standing loops that hold *declared intent* against *observed reality* on a schedule, and emit a verb onto the task board **only when something genuinely needs a human**. It is an agentic TPM attached to the chief of staff: it tracks, reconciles, nudges, prepares, and verifies.

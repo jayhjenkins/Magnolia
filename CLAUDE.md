@@ -27,7 +27,7 @@ Full laws + enforcing commands: [`docs/reference/invariants.md`](docs/reference/
 | `.claude/` config (skills, packs, commands, hooks) | [`.claude/CLAUDE.md`](.claude/CLAUDE.md) |
 | Board UI internals (server, routes, JS, Moods) | [`ui/task-board/CLAUDE.md`](ui/task-board/CLAUDE.md) |
 | Profile schema & API | [`profile/README.md`](profile/README.md) |
-| Project history / past design decisions | [`docs/plans/`](docs/plans/) (archive) |
+| Project history / past design decisions | `docs/plans/` — the maintainer's local design archive; gitignored, not in a fresh clone |
 | Start a product package (Phase 1 discovery → `context-brief.md`) | the **`workflow-context-brief`** skill (`/context-brief`; Phase 1 of `/ship-it` and `/prep`) |
 
 Skill and command instructions invoke Python as `python3` (on Windows the installer provides a `python3` shim).
