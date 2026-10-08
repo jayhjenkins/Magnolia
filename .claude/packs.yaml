@@ -63,7 +63,6 @@ pm:
     - workflow-launch-announcement
     - workflow-tradeoff-decision
     - workflow-cs-prep
-    - workflow-velocity-estimate
     - workflow-metrics-definition
     - workflow-metric-diagnosis
     - workflow-dashboard-design
