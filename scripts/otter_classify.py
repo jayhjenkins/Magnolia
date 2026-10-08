@@ -111,10 +111,11 @@ def classify_domain(title: str, content_preview: str, filename_hint: str = "") -
             prompt, model, max_turns=1,
         )
         env = platform_lib.headless_harness_env(harness_name)
+        cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
         result = subprocess.run(
             cmd,
             env=env,
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(), timeout=30,
             cwd=str(profile_lib.PM_OS_DIR),
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -303,7 +304,7 @@ def _mgc_lookup_email(display_name: str) -> Optional[str]:
                 "--top", "1",
             ],
             capture_output=True,
-            text=True,
+            **platform_lib.text_kwargs(),
             timeout=15,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):

@@ -157,7 +157,7 @@ def _fetch_new_meetings(state_or_ids, root=None):
     env = transcript_post._hook_env()    # strips CLAUDECODE so nested claude -p runs
     for attempt in (1, 2):
         try:
-            out = subprocess.run(cmd, capture_output=True, text=True,
+            out = subprocess.run(cmd, capture_output=True, **platform_lib.text_kwargs(),
                                  timeout=FETCH_TIMEOUT, env=env, cwd=str(profile_lib.PM_OS_DIR))
         except Exception as exc:
             log.error("CLI fetch failed (attempt %d): %s", attempt, exc)

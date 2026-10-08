@@ -452,7 +452,7 @@ def _spawn(cmd, exit_holder=None):
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        text=True,
+        **platform_lib.text_kwargs(),
         cwd=PM_OS_DIR,
         env=_chat_env(),
         **platform_lib.process_group_kwargs(),  # own process group for clean kill (C1)
