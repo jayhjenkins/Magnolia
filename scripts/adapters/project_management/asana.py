@@ -25,6 +25,12 @@ def fetch_status(issue_key, root=None):
         "Asana adapter is a stub — implement fetch_status() against the Asana MCP")
 
 
+def fetch_children(issue_key, root=None):
+    """READ op stub (see fetch_status)."""
+    raise NotConfigured(
+        "Asana adapter is a stub — implement fetch_children() against the Asana MCP")
+
+
 def update(update_dict, root=None):
     raise NotConfigured(
         "Asana adapter is a stub — implement update() against the Asana MCP")

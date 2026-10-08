@@ -19,6 +19,13 @@ import program_lib
 import sentinel_runner
 
 
+@pytest.fixture(autouse=True)
+def _no_live_child_reads(monkeypatch):
+    """tracker-truth also reads child tickets; never let a test reach a real tracker."""
+    monkeypatch.setattr(sentinel_runner.adapters, "fetch_children",
+                        lambda family, issue_key, root=None: None)
+
+
 def _pin_programs(tmp_path, monkeypatch):
     """Confine program_lib to a tmp datasets/programs dir."""
     pdir = tmp_path / "datasets" / "programs"
@@ -818,3 +825,61 @@ def test_adapter_sources_exempt_from_normalized_dedup(tmp_path, monkeypatch):
         claim="Tracker reports status 'PR Review'.",
         root=str(tmp_path))
     assert appended, "Adapter sources with different claims should both record"
+
+
+# --- child-ticket summary ------------------------------------------------------
+
+_KIDS = [
+    {"key": "EPIC-1a", "summary": "Opt-in setting \u2014 self-serve", "status": "PR Review",
+     "status_category": "indeterminate", "canceled": False, "updated": "2026-10-06",
+     "fix_versions": [{"name": "R-26", "release_date": "2026-10-09"}]},
+    {"key": "EPIC-1b", "summary": "SSO", "status": "Published",
+     "status_category": "done", "canceled": False, "updated": "2026-09-01", "fix_versions": []},
+    {"key": "EPIC-1c", "summary": "Old way", "status": "Canceled",
+     "status_category": "done", "canceled": True, "updated": "2026-08-01", "fix_versions": []},
+    {"key": "EPIC-1d", "summary": "Docs", "status": "To Do",
+     "status_category": "new", "canceled": False, "updated": "2026-07-01", "fix_versions": []},
+]
+
+
+def test_map_child_summary_counts_and_open_list():
+    claim = sentinel_runner._map_child_summary(_KIDS)
+    assert claim.startswith(
+        "Child tickets: 3 active (1 done, 1 in progress, 1 not started), 1 canceled; "
+        "last movement 2026-10-06; open: ")
+    assert "EPIC-1a [PR Review, fix R-26 2026-10-09] Opt-in setting - self-serve" in claim
+    assert "EPIC-1d [To Do] Docs" in claim
+    assert "EPIC-1b" not in claim and "EPIC-1c" not in claim
+    claim.encode("ascii")  # ASCII-safe runtime output
+
+
+def test_map_child_summary_empty_is_none():
+    assert sentinel_runner._map_child_summary([]) is None
+    assert sentinel_runner._map_child_summary(None) is None
+
+
+def test_map_child_summary_caps_open_list():
+    kids = [{"key": f"K-{i}", "summary": "x", "status": "To Do", "status_category": "new",
+             "canceled": False, "updated": "2026-01-01", "fix_versions": []} for i in range(11)]
+    claim = sentinel_runner._map_child_summary(kids)
+    assert "K-7" in claim and "K-8" not in claim
+    assert "+3 more open" in claim
+
+
+def test_tracker_truth_appends_child_summary_once(tmp_path, monkeypatch):
+    pid1, _ = _seed_two_programs_with_epics(tmp_path, monkeypatch, "EPIC-1", "EPIC-2")
+    monkeypatch.setattr(sentinel_runner, "_adapter_configured", lambda name, root=None: True)
+    monkeypatch.setattr(
+        sentinel_runner.adapters, "fetch_status",
+        lambda family, issue_key, root=None: {"status": "Open", "title": "T", "due": None})
+    monkeypatch.setattr(
+        sentinel_runner.adapters, "fetch_children",
+        lambda family, issue_key, root=None: _KIDS if issue_key == "EPIC-1" else [])
+    monkeypatch.setattr(sentinel_runner, "_dispatch",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no dispatch")))
+
+    sentinel_runner.run_sentinel("tracker-truth", root=str(tmp_path))
+    sentinel_runner.run_sentinel("tracker-truth", root=str(tmp_path))
+    body1 = program_lib.read_program(pid1, root=str(tmp_path))["body"]
+    assert body1.count("Child tickets:") == 1
+    assert "source: adapter:project_management:EPIC-1" in body1

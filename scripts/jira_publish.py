@@ -402,6 +402,32 @@ class JiraClient:
             raise RuntimeError(f"Jira get issue failed ({resp.status_code}): {resp.text[:500]}")
         return resp.json().get("fields", {})
 
+    def search(self, jql, fields=None, max_results=100):
+        """GET /rest/api/3/search/jql, following nextPageToken. Returns a list of
+        raw issue dicts ({"key", "fields"}), capped at max_results."""
+        issues = []
+        token = None
+        while len(issues) < max_results:
+            params = {"jql": jql, "maxResults": min(100, max_results - len(issues))}
+            if fields:
+                params["fields"] = ",".join(fields)
+            if token:
+                params["nextPageToken"] = token
+            resp = requests.get(
+                f"{self.base}/search/jql",
+                auth=self.auth,
+                headers=self.headers,
+                params=params,
+            )
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Jira search failed ({resp.status_code}): {resp.text[:500]}")
+            data = resp.json()
+            issues.extend(data.get("issues") or [])
+            token = data.get("nextPageToken")
+            if data.get("isLast", True) or not token:
+                break
+        return issues[:max_results]
+
 
 def _get_client():
     """Return a JiraClient if API credentials are configured, else None."""
@@ -533,6 +559,52 @@ def _fetch_rest(client, issue_key):
     }
 
 
+# Statuses Jira files under the "done" category that mean the work was dropped,
+# not delivered. Matched case-insensitively against the status name.
+_CANCELED_STATUSES = {"canceled", "cancelled", "won't do", "wont do", "won't fix",
+                      "duplicate", "rejected", "obsolete", "abandoned"}
+_CHILD_FIELDS = ["summary", "status", "issuetype", "updated", "fixVersions"]
+
+
+def _child_record(key, type_name, summary, status, category, updated, fix_versions):
+    """Normalize one child ticket. status_category is new | indeterminate | done."""
+    category = (category or "").strip().lower()
+    if category not in {"new", "indeterminate", "done"}:
+        category = "indeterminate"
+    return {
+        "key": key,
+        "type": type_name or "",
+        "summary": summary or "",
+        "status": status or "",
+        "status_category": category,
+        "canceled": (status or "").strip().lower() in _CANCELED_STATUSES,
+        "updated": (updated or "")[:10] or None,
+        "fix_versions": fix_versions or [],
+    }
+
+
+def _fetch_children_rest(client, issue_key):
+    """Fetch the child tickets of an issue via direct REST API."""
+    raw = client.search(f"parent = {issue_key} ORDER BY updated DESC",
+                        fields=_CHILD_FIELDS)
+    children = []
+    for issue in raw:
+        f = issue.get("fields") or {}
+        status = f.get("status") or {}
+        cat = (status.get("statusCategory") or {}).get("key") if isinstance(status, dict) else None
+        versions = [
+            {"name": v.get("name", ""), "release_date": v.get("releaseDate") or None}
+            for v in (f.get("fixVersions") or []) if isinstance(v, dict)
+        ]
+        children.append(_child_record(
+            issue.get("key", ""),
+            (f.get("issuetype") or {}).get("name", ""),
+            f.get("summary", ""),
+            status.get("name", "") if isinstance(status, dict) else str(status),
+            cat, f.get("updated"), versions))
+    return children
+
+
 # ─── Public API ─────────────────────────────────────────────────────────────
 
 def publish_to_jira(draft, session_id=None):
@@ -572,6 +644,20 @@ def fetch_issue(issue_key):
     if client:
         return _fetch_rest(client, issue_key)
     return _fetch_llm(issue_key)
+
+
+def fetch_children(issue_key):
+    """Read the child tickets of a Jira issue (JQL `parent = KEY`). Uses REST API
+    when credentials are configured, falls back to Claude CLI + MCP otherwise.
+
+    Returns a list of {"key", "type", "summary", "status", "status_category",
+    "canceled", "updated", "fix_versions"} (empty when the issue has no children).
+    Raises RuntimeError on failure.
+    """
+    client = _get_client()
+    if client:
+        return _fetch_children_rest(client, issue_key)
+    return _fetch_children_llm(issue_key)
 
 
 # ─── LangFuse Tracing ───────────────────────────────────────────────────────
@@ -975,6 +1061,82 @@ def _fetch_llm(issue_key):
         "ea_date": _clean_date(parts[3] if len(parts) > 3 else None),
         "ga_date": _clean_date(parts[4] if len(parts) > 4 else None),
     }
+
+
+_SEARCH_TOOL = "mcp__claude_ai_Jira__searchJiraIssuesUsingJql"
+
+
+def build_children_prompt(issue_key):
+    """Build the searchJiraIssuesUsingJql prompt for an issue's child tickets."""
+    return f"""List the child tickets of Jira issue {issue_key}:
+
+Tool: {_SEARCH_TOOL}
+Parameters:
+  cloudId: "{JIRA_CLOUD_ID}"
+  jql: "parent = {issue_key} ORDER BY updated DESC"
+  fields: {json.dumps(_CHILD_FIELDS)}
+  maxResults: 100
+
+Report one line per child ticket, pipe-separated, with no other text:
+JIRA_CHILD:key|issue_type|status_name|status_category_key|updated_yyyy-mm-dd|fix_versions|summary
+
+status_category_key is new, indeterminate, or done. fix_versions is a
+comma-separated list of name@release_date (or none).
+For example: JIRA_CHILD:PROJ-12|Unit|In Progress|indeterminate|2026-09-30|none|Build the opt-in setting
+If there are no child tickets, output exactly: JIRA_CHILD:NONE"""
+
+
+def _fetch_children_llm(issue_key):
+    """Read an issue's child tickets via Claude CLI + MCP (fallback path)."""
+    prompt = build_children_prompt(issue_key)
+    model = profile_lib.resolve_model("standard", min_tier="standard")
+    cmd, harness_name = harness_lib.build_oneshot_cmd(
+        prompt, model, allowed_tools=_SEARCH_TOOL, max_turns=3,
+        permission_mode="bypassPermissions",
+    )
+    if harness_lib.requires_claude_fallback(harness_name, requires_mcp=True):
+        cmd, harness_name = harness_lib.build_oneshot_cmd(
+            prompt, model, harness="claude", allowed_tools=_SEARCH_TOOL,
+            max_turns=3, permission_mode="bypassPermissions",
+        )
+    env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
+    try:
+        result = subprocess.run(
+            cmd, cwd=PM_OS_DIR, env=env, capture_output=True,
+            input=prompt_stdin, **platform_lib.text_kwargs(), timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("CLI session timed out after 120 seconds")
+    output = harness_lib.unwrap_oneshot_result(result.stdout, harness_name) or ""
+    return parse_children_output(output)
+
+
+def parse_children_output(output):
+    """Parse JIRA_CHILD lines into child records. Raises RuntimeError when the
+    output carries no JIRA_CHILD line at all (never fabricate an empty list)."""
+    lines = re.findall(r"JIRA_CHILD:(.+)", output or "")
+    if not lines:
+        raise RuntimeError(
+            f"Could not parse Jira children from Claude output. Output: {(output or '')[:500]}")
+    children = []
+    for payload in lines:
+        payload = payload.strip()
+        if payload == "NONE":
+            continue
+        parts = payload.split("|", 6)
+        if len(parts) < 7:
+            continue
+        versions = []
+        if _clean_date(parts[5]):
+            for v in parts[5].split(","):
+                name, _, rel = v.strip().partition("@")
+                if name:
+                    versions.append({"name": name, "release_date": _clean_date(rel)})
+        children.append(_child_record(
+            parts[0].strip(), parts[1].strip(), parts[6].strip(), parts[2].strip(),
+            parts[3].strip(), _clean_date(parts[4]), versions))
+    return children
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────

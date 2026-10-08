@@ -16,3 +16,7 @@ class ProjectManagementAdapter(Protocol):
     # when the provider/profile isn't set up (mirror publish). NEVER fabricates.
     def fetch_status(self, issue_key: str, root=None) -> dict | None:  # noqa: F811
         ...  # -> {"status": str, "title": str, "due": str | None} | None
+    # READ op, optional (same rules as fetch_status). Returns the child tickets of
+    # an issue (an epic/feature's work items), [] when it has none.
+    def fetch_children(self, issue_key: str, root=None) -> list | None:  # noqa: F811
+        ...  # -> [{"key", "type", "summary", "status", "status_category", "canceled", "updated", "fix_versions"}]

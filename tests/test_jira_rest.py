@@ -236,3 +236,71 @@ class TestDispatchRouting:
         assert result["title"] == "Test"
         assert result["ea_date"] == "2026-01-01"
         assert result["ga_date"] is None
+
+
+class TestFetchChildren:
+    def _resp(self, payload):
+        return type("R", (), {"status_code": 200, "json": lambda self: payload, "text": ""})()
+
+    def test_rest_maps_children_and_flags_canceled(self, jp, monkeypatch):
+        import requests as req_mod
+        monkeypatch.setattr(jp, "_get_client", lambda: jp.JiraClient(
+            "test.atlassian.net", "me@test.com", "tok"))
+        payload = {"isLast": True, "issues": [
+            {"key": "PROJ-2", "fields": {
+                "summary": "Opt-in setting", "issuetype": {"name": "Unit"},
+                "status": {"name": "PR Review", "statusCategory": {"key": "indeterminate"}},
+                "updated": "2026-10-06T14:00:00.000+0000",
+                "fixVersions": [{"name": "R-2626", "releaseDate": "2026-10-09"}]}},
+            {"key": "PROJ-3", "fields": {
+                "summary": "Old approach", "issuetype": {"name": "Unit"},
+                "status": {"name": "Canceled", "statusCategory": {"key": "done"}},
+                "updated": "2026-08-01T00:00:00.000+0000", "fixVersions": []}},
+        ]}
+        seen = {}
+
+        def fake_get(url, **k):
+            seen["url"] = url
+            seen["params"] = k.get("params")
+            return self._resp(payload)
+        monkeypatch.setattr(req_mod, "get", fake_get)
+        kids = jp.fetch_children("PROJ-1")
+        assert seen["url"].endswith("/search/jql")
+        assert "parent = PROJ-1" in seen["params"]["jql"]
+        assert kids[0]["key"] == "PROJ-2"
+        assert kids[0]["status_category"] == "indeterminate"
+        assert kids[0]["updated"] == "2026-10-06"
+        assert kids[0]["fix_versions"] == [{"name": "R-2626", "release_date": "2026-10-09"}]
+        assert kids[0]["canceled"] is False
+        assert kids[1]["canceled"] is True
+
+    def test_rest_search_follows_page_token(self, jp, monkeypatch):
+        import requests as req_mod
+        client = jp.JiraClient("test.atlassian.net", "me@test.com", "tok")
+        pages = [
+            {"isLast": False, "nextPageToken": "t2", "issues": [{"key": "A-1", "fields": {}}]},
+            {"isLast": True, "issues": [{"key": "A-2", "fields": {}}]},
+        ]
+        tokens = []
+
+        def fake_get(url, **k):
+            tokens.append(k["params"].get("nextPageToken"))
+            return self._resp(pages[len(tokens) - 1])
+        monkeypatch.setattr(req_mod, "get", fake_get)
+        out = client.search("parent = A-0")
+        assert [i["key"] for i in out] == ["A-1", "A-2"]
+        assert tokens == [None, "t2"]
+
+    def test_llm_output_parsing(self, jp):
+        out = ("noise\nJIRA_CHILD:PROJ-2|Unit|In Progress|indeterminate|2026-09-30|R-1@2026-10-09|Build | the thing\n"
+               "JIRA_CHILD:PROJ-3|Unit|Done|done|2026-09-01|none|Shipped bit\n")
+        kids = jp.parse_children_output(out)
+        assert [k["key"] for k in kids] == ["PROJ-2", "PROJ-3"]
+        assert kids[0]["summary"] == "Build | the thing"
+        assert kids[0]["fix_versions"] == [{"name": "R-1", "release_date": "2026-10-09"}]
+        assert kids[1]["fix_versions"] == []
+
+    def test_llm_output_none_and_unparseable(self, jp):
+        assert jp.parse_children_output("JIRA_CHILD:NONE") == []
+        with pytest.raises(RuntimeError):
+            jp.parse_children_output("I could not find it")

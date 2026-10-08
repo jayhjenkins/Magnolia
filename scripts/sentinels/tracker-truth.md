@@ -32,6 +32,11 @@ structured observation records that a deterministic harness records.
    - A closed or done epic status supports a `completion`.
    - A changed due date supports a `date-change`.
    - Any other reported status supports a `status-signal`.
+   - The epic's child tickets support one `status-signal` summary: counts by
+     status category (canceled counted apart), the last movement date, and the
+     open tickets with their status and fix versions. The reconciler's judged
+     date check reads it as evidence. (With Jira REST credentials this is one
+     search call. Without them it falls back to one MCP session per epic, which is slower.)
 3. Do not interpret, infer, or editorialize. If the tracker does not say it, you
    do not emit it. There is no free reading of progress here.
 4. Cite the tracker epic as the source for every observation.

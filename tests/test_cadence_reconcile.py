@@ -20,7 +20,6 @@ from cadence import reconcile
 _REAL_llm_evaluate_proposal = reconcile._llm_evaluate_proposal
 _REAL_llm_evaluate_archive_proposal = reconcile._llm_evaluate_archive_proposal
 _REAL_llm_evaluate_tracker_proposal = reconcile._llm_evaluate_tracker_proposal
-_REAL_llm_evaluate_date_proposal = reconcile._llm_evaluate_date_proposal
 
 
 @pytest.fixture(autouse=True)
@@ -52,9 +51,9 @@ def _isolated_task_queues(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(
         reconcile, "_llm_evaluate_archive_proposal",
         lambda *a, **kw: (True, "auto-approved in test"))
-    monkeypatch.setattr(
-        reconcile, "_llm_evaluate_date_proposal",
-        lambda *a, **kw: (True, "auto-approved in test", "2026-09-15"))
+    # The date judge never runs for real in tests: fail-closed (None) by default;
+    # date-check tests install their own stub.
+    monkeypatch.setattr(reconcile, "_llm_judge_date", lambda prompt: None)
 
 
 # A fixed "now" used everywhere so verdicts are deterministic.
@@ -3816,109 +3815,60 @@ def test_propose_archive_cooldown_type_configurable(tmp_path):
     assert result is None
 
 
-# ─── Date drift proposals ────────────────────────────────────────────────────
+# ─── Judged date check ("is this date still right?") ────────────────────────
+# NOW = 2026-06-16. The judge is stubbed per test; the autouse default is None.
+
+_CHILD_OPEN = ("Child tickets: 11 active (10 done, 1 in progress, 0 not started), "
+               "3 canceled; last movement 2026-06-12; open: PROJ-2 [PR Review] "
+               "Self-serve opt-in setting.")
 
 
-def test_propose_date_update_fires_on_overdue_checkpoint(tmp_path):
-    """Overdue checkpoint + Jira binding + stale Jira date -> date update."""
-    root = str(tmp_path / "data")
-    program_id, _ = pl.create_program(
-        type="roadmap-initiative",
-        title="Initiative with overdue EA",
-        owner_role="pm",
+def _seed_dated(root, phase="execution", ga=None, ea=None, child=_CHILD_OPEN,
+                obs_date="2026-06-10", anchor="PROJ-1", phase_entered="2026-06-10"):
+    pid, _ = pl.create_program(
+        type="roadmap-initiative", title="Offers", owner_role="pm",
         frontmatter_extra={
-            "phase": "execution",
-            "phase_entered": {"execution": "2026-05-01"},
-            "last_cycle": OTHER_PERIOD,
-            "bindings": [
-                {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "PROJ-99999",
-                 "mode": "read", "health": "ok"},
-            ],
-            "checkpoints": [
-                {"id": "ship", "label": "Ship to EA", "due": "2026-06-01",
-                 "status": "pending"},
-            ],
+            "phase": phase, "phase_entered": phase_entered,
+            "last_cycle": OTHER_PERIOD, "checkpoints": [],
+            "bindings": [{"id": "jira", "role": "truth", "kind": "project_management",
+                          "anchor": anchor, "mode": "read", "health": "ok"}],
         },
         root=root,
     )
-    # Add a date-change observation from the adapter showing Jira EA date
-    pl.append_observation(
-        program_id, root=root,
-        kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:PROJ-99999",
-        claim="EA date is 2026-06-01.", date="2026-06-10",
-    )
-    program = pl.read_program(program_id, root=root)
-    type_entry = next((t for t in _registry()["types"]
-                       if t["id"] == "roadmap-initiative"), {})
-
-    result = reconcile._propose_date_update(
-        program["frontmatter"], type_entry, program["body"], now=NOW)
-
-    assert result is not None
-    assert result["op"] == "update-tracker-date"
-    assert result["tracker_key"] == "PROJ-99999"
-    assert result["field"] == "ea_date"
-    assert result["overdue_days"] == 15  # June 16 - June 1
+    src = f"adapter:project_management:{anchor}"
+    if ea:
+        pl.append_observation(pid, root=root, kind="date-change", sentinel="tracker-truth",
+                              source=src, claim=f"EA date is {ea}.", date=obs_date)
+    if ga:
+        pl.append_observation(pid, root=root, kind="date-change", sentinel="tracker-truth",
+                              source=src, claim=f"GA date is {ga}.", date=obs_date)
+    if child:
+        pl.append_observation(pid, root=root, kind="status-signal", sentinel="tracker-truth",
+                              source=src, claim=child, date=obs_date)
+    return pid
 
 
-def test_propose_date_update_none_without_tracker(tmp_path):
-    """No Jira binding -> no date update proposal."""
-    root = str(tmp_path / "data")
-    program_id, _ = pl.create_program(
-        type="roadmap-initiative",
-        title="No tracker",
-        owner_role="pm",
-        frontmatter_extra={
-            "phase": "execution",
-            "phase_entered": {"execution": "2026-05-01"},
-            "checkpoints": [
-                {"id": "ship", "label": "Ship", "due": "2026-06-01",
-                 "status": "pending"},
-            ],
-        },
-        root=root,
-    )
-    program = pl.read_program(program_id, root=root)
-    type_entry = next((t for t in _registry()["types"]
-                       if t["id"] == "roadmap-initiative"), {})
-
-    result = reconcile._propose_date_update(
-        program["frontmatter"], type_entry, program["body"], now=NOW)
-    assert result is None
+def _judge(monkeypatch, verdict="at-risk", suggested="2026-06-30", calls=None):
+    def fake(prompt):
+        if calls is not None:
+            calls.append(prompt)
+        return {"verdict": verdict, "reason": "Gating ticket PROJ-2 still in review.",
+                "suggested_date": suggested, "key_evidence": ["PROJ-2 in PR Review"]}
+    monkeypatch.setattr(reconcile, "_llm_judge_date", fake)
 
 
-def test_propose_date_update_none_when_dates_aligned(tmp_path):
-    """Checkpoint not overdue -> no date update proposal."""
-    root = str(tmp_path / "data")
-    program_id, _ = pl.create_program(
-        type="roadmap-initiative",
-        title="On track initiative",
-        owner_role="pm",
-        frontmatter_extra={
-            "phase": "execution",
-            "phase_entered": {"execution": "2026-05-01"},
-            "last_cycle": OTHER_PERIOD,
-            "bindings": [
-                {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "PROJ-88888",
-                 "mode": "read", "health": "ok"},
-            ],
-            "checkpoints": [
-                {"id": "ship", "label": "Ship to EA", "due": "2026-07-01",
-                 "status": "pending"},
-            ],
-        },
-        root=root,
-    )
-    program = pl.read_program(program_id, root=root)
-    type_entry = next((t for t in _registry()["types"]
-                       if t["id"] == "roadmap-initiative"), {})
+def _reconcile(root, pid, now=NOW, force=True):
+    return reconcile.reconcile_program(
+        pl.read_program(pid, root=root), _registry(), now=now, force=force)
 
-    result = reconcile._propose_date_update(
-        program["frontmatter"], type_entry, program["body"], now=NOW)
-    assert result is None
+
+def _date_cards():
+    return [c for c in _open_human_cards()
+            if (c.get("proposal") or {}).get("op") == "update-tracker-date"]
+
+
+def _question_cards():
+    return [c for c in _open_human_cards() if c.get("task_type") == "cadence-date-question"]
 
 
 def test_date_drift_emitter_in_registry():
@@ -3930,200 +3880,347 @@ def test_date_drift_emitter_in_registry():
         assert "date-drift" in triggers, f"{type_id} missing date-drift emitter"
 
 
-# ─── Phase-date coherence tests ──────────────────────────────────────────────
-
-def test_phase_coherence_ga_imminent_still_in_execution(tmp_path):
-    """GA date within SOON_WINDOW but program still in execution -> date drift."""
-    root = str(tmp_path / "data")
-    program_id, _ = pl.create_program(
-        type="roadmap-initiative",
-        title="Offers - SSO update",
-        owner_role="pm",
-        frontmatter_extra={
-            "phase": "execution",
-            "phase_entered": {"execution": "2026-05-01"},
-            "last_cycle": OTHER_PERIOD,
-            "bindings": [
-                {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "PROJ-43453",
-                 "mode": "read", "health": "ok"},
-            ],
-            "checkpoints": [],
-        },
-        root=root,
-    )
-    pl.append_observation(
-        program_id, root=root,
-        kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:PROJ-43453",
-        claim="EA date is 2026-06-10.", date="2026-06-05",
-    )
-    pl.append_observation(
-        program_id, root=root,
-        kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:PROJ-43453",
-        claim="GA date is 2026-06-20.", date="2026-06-05",
-    )
-    program = pl.read_program(program_id, root=root)
-    type_entry = next((t for t in _registry()["types"]
-                       if t["id"] == "roadmap-initiative"), {})
-
-    result = reconcile._propose_date_update(
-        program["frontmatter"], type_entry, program["body"], now=NOW)
-
-    assert result is not None
-    assert result["op"] == "update-tracker-date"
-    assert result["source"] == "phase-coherence"
-    # EA date (June 10) is 6 days overdue on June 16 -- just below threshold
-    # but GA date (June 20) is 4 days away and program is still in execution
-    # EA fires first since it's past the 7-day threshold (6 days, under 7)
-    # Actually EA overdue is 6 < 7, so it won't fire. GA is within SOON_WINDOW.
-    assert result["field"] == "ga_date"
+def test_date_candidates_window(tmp_path):
+    root = str(tmp_path)
+    near = pl.read_program(_seed_dated(root, ga="2026-06-24", ea="2026-07-20"), root=root)
+    out = reconcile._date_check_candidates(near["frontmatter"], near["body"], NOW)
+    assert out == [("ga_date", date(2026, 6, 24))]   # EA 34d out is not judged yet
 
 
-def test_phase_coherence_ea_overdue_still_in_execution(tmp_path):
-    """EA date past 7+ days but program still in execution -> date drift."""
-    root = str(tmp_path / "data")
-    program_id, _ = pl.create_program(
-        type="roadmap-initiative",
-        title="Feature with stale EA",
-        owner_role="pm",
-        frontmatter_extra={
-            "phase": "execution",
-            "phase_entered": {"execution": "2026-05-01"},
-            "last_cycle": OTHER_PERIOD,
-            "bindings": [
-                {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "PROJ-11111",
-                 "mode": "read", "health": "ok"},
-            ],
-            "checkpoints": [],
-        },
-        root=root,
-    )
-    pl.append_observation(
-        program_id, root=root,
-        kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:PROJ-11111",
-        claim="EA date is 2026-06-01.", date="2026-06-01",
-    )
-    program = pl.read_program(program_id, root=root)
-    type_entry = next((t for t in _registry()["types"]
-                       if t["id"] == "roadmap-initiative"), {})
-
-    result = reconcile._propose_date_update(
-        program["frontmatter"], type_entry, program["body"], now=NOW)
-
-    assert result is not None
-    assert result["op"] == "update-tracker-date"
-    assert result["field"] == "ea_date"
-    assert result["source"] == "phase-coherence"
-    assert result["overdue_days"] == 15  # June 16 - June 1
+def test_date_candidates_include_passed_and_skip_met(tmp_path):
+    root = str(tmp_path)
+    prog = pl.read_program(_seed_dated(root, ga="2026-06-01"), root=root)
+    fm, body = prog["frontmatter"], prog["body"]
+    assert reconcile._date_check_candidates(fm, body, NOW) == [("ga_date", date(2026, 6, 1))]
+    fm["date_checks"] = {"ga_date": {"date": "2026-06-01", "verdict": "met"}}
+    assert reconcile._date_check_candidates(fm, body, NOW) == []
+    fm["date_checks"] = {"ga_date": {"date": "2026-05-01", "verdict": "met"}}  # other date
+    assert reconcile._date_check_candidates(fm, body, NOW) == [("ga_date", date(2026, 6, 1))]
 
 
-def test_phase_coherence_no_fire_when_shipped(tmp_path):
-    """Program already in shipped phase -> no phase-coherence trigger."""
-    root = str(tmp_path / "data")
-    program_id, _ = pl.create_program(
-        type="roadmap-initiative",
-        title="Already shipped",
-        owner_role="pm",
-        frontmatter_extra={
-            "phase": "shipped",
-            "phase_entered": {"shipped": "2026-06-10"},
-            "last_cycle": OTHER_PERIOD,
-            "bindings": [
-                {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "PROJ-22222",
-                 "mode": "read", "health": "ok"},
-            ],
-            "checkpoints": [],
-        },
-        root=root,
-    )
-    pl.append_observation(
-        program_id, root=root,
-        kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:PROJ-22222",
-        claim="EA date is 2026-06-01.", date="2026-06-01",
-    )
-    pl.append_observation(
-        program_id, root=root,
-        kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:PROJ-22222",
-        claim="GA date is 2026-06-20.", date="2026-06-01",
-    )
-    program = pl.read_program(program_id, root=root)
-    type_entry = next((t for t in _registry()["types"]
-                       if t["id"] == "roadmap-initiative"), {})
-
-    result = reconcile._propose_date_update(
-        program["frontmatter"], type_entry, program["body"], now=NOW)
-
-    assert result is None
+def test_parse_date_judgment():
+    ok = reconcile._parse_date_judgment(
+        'Sure.\n{"verdict": "At-Risk", "reason": "Gate open — not merged.", '
+        '"suggested_date": "2026-06-30", "key_evidence": ["a", ""]}')
+    assert ok == {"verdict": "at-risk", "reason": "Gate open - not merged.",
+                  "suggested_date": "2026-06-30", "key_evidence": ["a"]}
+    assert reconcile._parse_date_judgment('{"verdict": "maybe"}') is None
+    assert reconcile._parse_date_judgment("no json here") is None
+    nod = reconcile._parse_date_judgment('{"verdict": "holds", "suggested_date": null}')
+    assert nod["suggested_date"] is None
 
 
-def test_phase_coherence_no_fire_without_jira_dates(tmp_path):
-    """No tracker-truth date observations -> no phase-coherence trigger."""
-    root = str(tmp_path / "data")
-    program_id, _ = pl.create_program(
-        type="roadmap-initiative",
-        title="No dates observed",
-        owner_role="pm",
-        frontmatter_extra={
-            "phase": "execution",
-            "phase_entered": {"execution": "2026-05-01"},
-            "last_cycle": OTHER_PERIOD,
-            "bindings": [
-                {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "PROJ-33333",
-                 "mode": "read", "health": "ok"},
-            ],
-            "checkpoints": [],
-        },
-        root=root,
-    )
-    program = pl.read_program(program_id, root=root)
-    type_entry = next((t for t in _registry()["types"]
-                       if t["id"] == "roadmap-initiative"), {})
+def test_terminal_phase_still_gets_date_check(tmp_path, monkeypatch):
+    """The Offers regression: phase `verified` (terminal) on EA evidence, GA in
+    8 days, the one gating child ticket still open -> judged, card, drifting."""
+    root = str(tmp_path)
+    pid = _seed_dated(root, phase="verified", ga="2026-06-24")
+    calls = []
+    _judge(monkeypatch, calls=calls)
 
-    result = reconcile._propose_date_update(
-        program["frontmatter"], type_entry, program["body"], now=NOW)
+    result = _reconcile(root, pid)
 
-    assert result is None
+    assert len(calls) == 1
+    assert "PROJ-2 [PR Review]" in calls[0]          # child tickets reach the judge
+    assert "may be wrong" in calls[0]                # phase is only one signal
+    assert "2026-06-24 (in 8 days)" in calls[0]
+    cards = _date_cards()
+    assert len(cards) == 1
+    prop = cards[0]["proposal"]
+    assert prop["field"] == "ga_date"
+    assert prop["tracker_key"] == "PROJ-1"
+    assert prop["current_jira_date"] == "2026-06-24"
+    assert prop["suggested_date"] == "2026-06-30"
+    assert cards[0]["card_type"] == "recommendation"
+    assert result["verdict"] == "drifting"
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert fm["drift"] == "drifting"
+    assert fm["date_checks"]["ga_date"]["verdict"] == "at-risk"
 
 
-def test_phase_coherence_ga_far_away_no_fire(tmp_path):
-    """GA date far in the future -> no phase-coherence trigger."""
-    root = str(tmp_path / "data")
-    program_id, _ = pl.create_program(
-        type="roadmap-initiative",
-        title="GA far away",
-        owner_role="pm",
-        frontmatter_extra={
-            "phase": "execution",
-            "phase_entered": {"execution": "2026-05-01"},
-            "last_cycle": OTHER_PERIOD,
-            "bindings": [
-                {"id": "jira-feature", "role": "truth",
-                 "kind": "project_management", "anchor": "PROJ-44444",
-                 "mode": "read", "health": "ok"},
-            ],
-            "checkpoints": [],
-        },
-        root=root,
-    )
-    pl.append_observation(
-        program_id, root=root,
-        kind="date-change", sentinel="tracker-truth",
-        source="adapter:project_management:PROJ-44444",
-        claim="GA date is 2026-08-01.", date="2026-06-01",
-    )
-    program = pl.read_program(program_id, root=root)
-    type_entry = next((t for t in _registry()["types"]
-                       if t["id"] == "roadmap-initiative"), {})
+def test_date_judge_not_rerun_without_new_evidence(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    calls = []
+    _judge(monkeypatch, verdict="holds", suggested=None, calls=calls)
+    _reconcile(root, pid)
+    _reconcile(root, pid, force=False)   # mid-cycle tick, same period, no new evidence
+    assert len(calls) == 1
 
-    result = reconcile._propose_date_update(
-        program["frontmatter"], type_entry, program["body"], now=NOW)
 
-    assert result is None
+def test_date_judge_reruns_on_new_evidence(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    calls = []
+    _judge(monkeypatch, verdict="holds", suggested=None, calls=calls)
+    _reconcile(root, pid)
+    pl.append_observation(pid, root=root, kind="risk", sentinel="movement-watch",
+                          source="datasets/meetings/x.txt",
+                          claim="Self-serve work slipped a sprint.", date="2026-06-15")
+    _reconcile(root, pid, force=False)
+    assert len(calls) == 2
+    assert "Self-serve work slipped a sprint." in calls[1]
+
+
+def test_date_record_dropped_when_tracker_date_moves_out(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    _judge(monkeypatch)
+    _reconcile(root, pid)
+    pl.append_observation(pid, root=root, kind="date-change", sentinel="tracker-truth",
+                          source="adapter:project_management:PROJ-1",
+                          claim="GA date is 2026-07-31.", date="2026-06-15")
+    result = _reconcile(root, pid)
+    fm = pl.read_program(pid, root=root)["frontmatter"]
+    assert "date_checks" not in fm
+    assert result["verdict"] == "holding"
+
+
+def test_unknown_close_asks_once(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-20")
+    _judge(monkeypatch, verdict="unknown", suggested=None)
+    _reconcile(root, pid)
+    pl.append_observation(pid, root=root, kind="status-signal", sentinel="movement-watch",
+                          source="datasets/meetings/y.txt", claim="No update.", date="2026-06-15")
+    _reconcile(root, pid)
+    qs = _question_cards()
+    assert len(qs) == 1
+    assert "still right" in qs[0]["title"]
+    assert qs[0].get("proposal") in (None, {})    # never a tracker write on close
+    assert _date_cards() == []
+
+
+def test_unknown_far_out_no_card(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-28")
+    _judge(monkeypatch, verdict="unknown", suggested=None)
+    result = _reconcile(root, pid)
+    assert _question_cards() == [] and _date_cards() == []
+    assert result["verdict"] == "holding"
+
+
+def test_met_recorded_and_not_rejudged(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-12")
+    calls = []
+    _judge(monkeypatch, verdict="met", suggested=None, calls=calls)
+    result = _reconcile(root, pid)
+    assert result["verdict"] == "holding"
+    assert _date_cards() == []
+    pl.append_observation(pid, root=root, kind="status-signal", sentinel="movement-watch",
+                          source="datasets/meetings/z.txt", claim="GA went great.",
+                          date="2026-06-15")
+    _reconcile(root, pid)
+    assert len(calls) == 1
+
+
+def test_passed_and_at_risk_is_broken(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-09")
+    _judge(monkeypatch)
+    result = _reconcile(root, pid)
+    assert result["verdict"] == "broken"
+    assert _date_cards()[0]["proposal"]["overdue_days"] == 7
+
+
+def test_ea_and_ga_dedupe_independently(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-26", ea="2026-06-19")
+    _judge(monkeypatch)
+    _reconcile(root, pid)
+    _reconcile(root, pid)
+    fields = sorted(c["proposal"]["field"] for c in _date_cards())
+    assert fields == ["ea_date", "ga_date"]
+
+
+def test_judge_failure_emits_nothing_and_backs_off(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-20")
+    calls = []
+    monkeypatch.setattr(reconcile, "_llm_judge_date", lambda p: calls.append(p) or None)
+    result = _reconcile(root, pid)
+    assert _date_cards() == [] and _question_cards() == []
+    rec = pl.read_program(pid, root=root)["frontmatter"]["date_checks"]["ga_date"]
+    assert rec["verdict"] == "unavailable" and rec["last_failed"] == "2026-06-16"
+    assert result["verdict"] == "holding"
+    pl.append_observation(pid, root=root, kind="risk", sentinel="movement-watch",
+                          source="datasets/meetings/q.txt", claim="New info.", date="2026-06-16")
+    _reconcile(root, pid)                      # same day: no retry
+    assert len(calls) == 1
+    _reconcile(root, pid, now=date(2026, 6, 17))  # next day: one retry
+    assert len(calls) == 2
+
+
+def test_no_judge_without_tracker_dates(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root)
+    calls = []
+    _judge(monkeypatch, calls=calls)
+    _reconcile(root, pid)
+    assert calls == []
+
+
+def test_archive_blocked_by_open_date_judgment(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_dated(root, phase="verified", ga="2026-06-24", phase_entered="2026-05-01")
+    prog = pl.read_program(pid, root=root)
+    fm = prog["frontmatter"]
+    type_entry = next(t for t in _registry()["types"] if t["id"] == "roadmap-initiative")
+    assert reconcile._propose_archive(fm, type_entry, prog["body"], now=NOW) is not None
+    fm["date_checks"] = {"ga_date": {"date": "2026-06-24", "verdict": "at-risk"}}
+    assert reconcile._propose_archive(fm, type_entry, prog["body"], now=NOW) is None
+
+
+def test_long_passed_dates_are_history(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-05-01")   # 46 days ago
+    calls = []
+    _judge(monkeypatch, calls=calls)
+    result = _reconcile(root, pid)
+    assert calls == [] and result["verdict"] == "holding"
+
+
+def test_holds_rejudged_once_when_date_passes(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-18")
+    calls = []
+    _judge(monkeypatch, verdict="holds", suggested=None, calls=calls)
+    _reconcile(root, pid)
+    _reconcile(root, pid, now=date(2026, 6, 17), force=False)  # same period, not passed
+    assert len(calls) == 1
+    _reconcile(root, pid, now=date(2026, 6, 19), force=False)  # passed, no new evidence
+    assert len(calls) == 2
+
+
+def test_closed_question_records_human_holds(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-20")
+    calls = []
+    _judge(monkeypatch, verdict="unknown", suggested=None, calls=calls)
+    _reconcile(root, pid)
+    q = _question_cards()[0]
+    task_lib.complete_task(q["id"])
+    pl.append_observation(pid, root=root, kind="status-signal", sentinel="movement-watch",
+                          source="datasets/meetings/a.txt", claim="Chatter.", date="2026-06-16")
+    result = _reconcile(root, pid)
+    rec = pl.read_program(pid, root=root)["frontmatter"]["date_checks"]["ga_date"]
+    assert rec["verdict"] == "holds" and rec["source"] == "human"
+    assert len(calls) == 1                     # a human answer is not re-judged
+    assert result["verdict"] == "holding"
+    assert _question_cards() == []
+
+
+def test_rejected_proposal_records_human_holds(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    calls = []
+    _judge(monkeypatch, calls=calls)
+    _reconcile(root, pid)
+    task_lib.cancel_task(_date_cards()[0]["id"], reason="date is fine")
+    pl.append_observation(pid, root=root, kind="status-signal", sentinel="movement-watch",
+                          source="datasets/meetings/b.txt", claim="More chatter.", date="2026-06-16")
+    result = _reconcile(root, pid)
+    rec = pl.read_program(pid, root=root)["frontmatter"]["date_checks"]["ga_date"]
+    assert rec["source"] == "human" and rec["verdict"] == "holds"
+    assert _date_cards() == [] and len(calls) == 1
+    assert result["verdict"] == "holding"
+
+
+def test_accepted_proposal_is_acknowledged_no_new_card(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    calls = []
+    _judge(monkeypatch, calls=calls)
+    _reconcile(root, pid)
+    task_lib.complete_task(_date_cards()[0]["id"])
+    pl.append_observation(pid, root=root, kind="status-signal", sentinel="movement-watch",
+                          source="datasets/meetings/c.txt", claim="Still chatter.", date="2026-06-16")
+    _reconcile(root, pid)
+    rec = pl.read_program(pid, root=root)["frontmatter"]["date_checks"]["ga_date"]
+    assert rec.get("acknowledged") == "2026-06-16"
+    assert _date_cards() == [] and len(calls) == 1
+
+
+def test_archive_blocked_on_every_door(tmp_path):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    prog = pl.read_program(pid, root=root)
+    fm = prog["frontmatter"]
+    fm["checkpoints"] = [{"id": "did-it-work", "status": "met"}]
+    type_entry = next(t for t in _registry()["types"] if t["id"] == "roadmap-initiative")
+    assert reconcile._propose_archive(fm, type_entry, prog["body"], now=NOW) is not None
+    fm["date_checks"] = {"ga_date": {"date": "2026-06-24", "verdict": "unknown"}}
+    assert reconcile._propose_archive(fm, type_entry, prog["body"], now=NOW) is None
+    assert reconcile._propose_archive_silent(
+        fm, type_entry, prog["body"], {}, NOW.isoformat()) is None
+
+
+def test_broken_date_does_not_also_escalate(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-09")
+    _judge(monkeypatch)
+    result = _reconcile(root, pid)
+    assert result["verdict"] == "broken"
+    titles = [c["title"] for c in _open_human_cards()]
+    assert not any(t.endswith("needs attention") for t in titles)
+    assert len(_date_cards()) == 1
+
+
+def test_writes_during_judge_are_not_lost(tmp_path, monkeypatch):
+    """The judge is slow; a sentinel observation and a phase change written while
+    it runs must survive this cycle's write."""
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    stale = pl.read_program(pid, root=root)
+
+    def slow_judge(prompt):
+        pl.append_observation(pid, root=root, kind="risk", sentinel="movement-watch",
+                              source="datasets/meetings/d.txt",
+                              claim="Written while judging.", date="2026-06-16")
+        p = pl.read_program(pid, root=root)
+        p["frontmatter"]["phase"] = "shipped"
+        pl._write_program_file(p["filepath"], p["frontmatter"], p["body"])
+        return {"verdict": "holds", "reason": "ok", "suggested_date": None, "key_evidence": []}
+    monkeypatch.setattr(reconcile, "_llm_judge_date", slow_judge)
+
+    reconcile.reconcile_program(stale, _registry(), now=NOW, force=True)
+    after = pl.read_program(pid, root=root)
+    assert "Written while judging." in after["body"]
+    assert after["frontmatter"]["phase"] == "shipped"
+    assert after["frontmatter"]["date_checks"]["ga_date"]["verdict"] == "holds"
+
+
+def test_reconcile_all_reads_each_program_fresh(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    first = _seed_dated(root, ga="2026-06-24")
+    second = _seed_dated(root)
+
+    def judge(prompt):
+        pl.append_observation(second, root=root, kind="risk", sentinel="movement-watch",
+                              source="datasets/meetings/e.txt",
+                              claim="Landed during the first judge.", date="2026-06-16")
+        return {"verdict": "holds", "reason": "ok", "suggested_date": None, "key_evidence": []}
+    monkeypatch.setattr(reconcile, "_llm_judge_date", judge)
+    reconcile.reconcile_all(root=root, now=NOW, force=True)
+    assert "Landed during the first judge." in pl.read_program(second, root=root)["body"]
+
+
+def test_prior_rejection_for_same_date_is_honored_immediately(tmp_path, monkeypatch):
+    """The operator already rejected a date proposal for this exact date (e.g. from
+    the old phase-gated check): the first judgment folds that answer in."""
+    root = str(tmp_path)
+    pid = _seed_dated(root, ea="2026-06-10")
+    tid, _ = task_lib.create_task(
+        title="old date proposal", queue="human", creator="cadence",
+        card_type="recommendation", task_type="cadence-propose-update",
+        tags=[pid, "cadence"],
+        proposal={"op": "update-tracker-date", "field": "ea_date",
+                  "current_jira_date": "2026-06-10", "tracker_key": "PROJ-1"})
+    task_lib.cancel_task(tid, reason="date is fine")
+    _judge(monkeypatch)
+    result = _reconcile(root, pid)
+    rec = pl.read_program(pid, root=root)["frontmatter"]["date_checks"]["ea_date"]
+    assert rec["source"] == "human" and rec["verdict"] == "holds"
+    assert result["verdict"] == "holding"
+    assert _date_cards() == []

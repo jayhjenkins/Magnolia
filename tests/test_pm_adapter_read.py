@@ -110,6 +110,13 @@ def test_jira_fetch_status_raises_not_configured_when_unconfigured(tmp_path):
 
 # --- jira_publish.fetch_issue output parsing ---------------------------------
 
+@pytest.fixture(autouse=True)
+def _force_llm_read_path(monkeypatch):
+    """These tests exercise the MCP (LLM) read path. Without this, a machine with
+    Jira REST credentials in its profile takes the REST path and hits real Jira."""
+    monkeypatch.setattr(jira_publish, "_get_client", lambda: None)
+
+
 def test_fetch_issue_parses_full_result(monkeypatch):
     monkeypatch.setattr(jira_publish, "_run_jira_read_session",
                         lambda key: "JIRA_READ:In Progress|Build the feed|2026-09-15|2026-08-01|2026-09-15")
@@ -166,3 +173,39 @@ def test_fetch_issue_raises_on_unparseable(monkeypatch):
 def test_asana_fetch_status_raises_not_configured(tmp_path):
     with pytest.raises(NotConfigured):
         asana.fetch_status("EPIC-1", root=str(tmp_path))
+
+
+# --- fetch_children: the free read of an issue's child tickets ---------------
+
+def test_fetch_children_returns_list_without_tier2(monkeypatch):
+    kids = [{"key": "PROJ-2", "status": "In Progress"}]
+    fake = types.SimpleNamespace(
+        is_configured=lambda root=None: True,
+        fetch_children=lambda issue_key, root=None: kids,
+    )
+    monkeypatch.setattr(adapters, "get", lambda family, root=None: fake)
+
+    def boom(*a, **k):
+        raise AssertionError("a read must never raise NeedsConfirmation (Tier-2)")
+    monkeypatch.setattr(adapters, "_is_confirmed", boom)
+    assert adapters.fetch_children("project_management", "PROJ-1") == kids
+
+
+def test_fetch_children_none_when_provider_lacks_op(monkeypatch):
+    fake = types.SimpleNamespace(is_configured=lambda root=None: True)
+    monkeypatch.setattr(adapters, "get", lambda family, root=None: fake)
+    assert adapters.fetch_children("project_management", "PROJ-1") is None
+
+
+def test_fetch_children_collapses_runtime_error_to_none(monkeypatch):
+    def _raise(issue_key, root=None):
+        raise NotConfigured("nope")
+    fake = types.SimpleNamespace(is_configured=lambda root=None: True,
+                                 fetch_children=_raise)
+    monkeypatch.setattr(adapters, "get", lambda family, root=None: fake)
+    assert adapters.fetch_children("project_management", "PROJ-1") is None
+
+
+def test_asana_fetch_children_is_a_stub():
+    with pytest.raises(NotConfigured):
+        asana.fetch_children("X-1")

@@ -18,6 +18,7 @@ invariant #8.
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -220,6 +221,26 @@ def _verdict_pipeline(fm, type_entry, now):
             if verdict == "holding":
                 facts = {"reason": f"phase {phase} aging ({days_in_phase}d)",
                          "next": f"watch {phase}"}
+            verdict = _worse(verdict, "drifting")
+
+    # Judged tracker dates (see _run_date_checks). A passed date that is not
+    # met is broken; an at-risk date, or an unknown one that is close, drifts.
+    for field, rec, days in _date_check_signals(fm, now):
+        dv = rec.get("verdict")
+        label = _date_label(field, rec)
+        if dv not in ("at-risk", "unknown") or rec.get("source") == "human":
+            continue
+        if days < 0 and dv in ("at-risk", "unknown"):
+            if verdict != "broken":
+                facts = {"reason": f"{label} passed, not met ({dv})",
+                         "next": f"reset {field.split('_')[0].upper()} date",
+                         "source": "date-check"}
+            verdict = _worse(verdict, "broken")
+        elif dv == "at-risk" or (dv == "unknown" and days <= _DATE_QUESTION_WINDOW_DAYS):
+            if verdict == "holding":
+                facts = {"reason": f"{label} {dv}",
+                         "next": f"confirm {field.split('_')[0].upper()} date",
+                         "source": "date-check"}
             verdict = _worse(verdict, "drifting")
 
     return verdict, facts
@@ -474,8 +495,7 @@ def _open_propose_update_ops(task_lib, program_id):
             fm = task_lib.read_task(t["id"])["frontmatter"]
         except Exception:
             continue
-        proposal = fm.get("proposal") or {}
-        op = proposal.get("op") if isinstance(proposal, dict) else None
+        op = _proposal_key(fm.get("proposal") or {})
         if op:
             ops.add(op)
     return ops
@@ -505,8 +525,7 @@ def _resolved_propose_update_ops(task_lib, program_id):
         fm = full.get("frontmatter") or {}
         if program_id not in (fm.get("tags") or []):
             continue
-        proposal = fm.get("proposal") or {}
-        op = proposal.get("op") if isinstance(proposal, dict) else None
+        op = _proposal_key(fm.get("proposal") or {})
         if not op:
             continue
         res_date = (fm.get("updated") or fm.get("created") or "")[:10]
@@ -971,69 +990,6 @@ def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
     return True, reason
 
 
-def _llm_evaluate_date_proposal(program_title, current_phase, field,
-                                 jira_date, observations, phase_description=""):
-    """Ask Claude whether a Jira date is realistic and suggest a replacement.
-
-    Returns (approved, reason, suggested_date). approved=True means the date IS
-    unrealistic and the update proposal should fire. suggested_date is an ISO
-    date string or None. Fail-closed: returns (False, ..., None) on any
-    dispatch failure.
-    """
-    obs_text = "\n".join(f"- {o}" for o in observations[-15:]) if observations else "(none)"
-    field_label = field.replace("_", " ").upper()
-    phase_ctx = f"\nWhat '{current_phase}' means: {phase_description}" if phase_description else ""
-    prompt = (
-        "You are evaluating whether a product initiative's Jira date is "
-        "realistic given its current state. Consider ALL the evidence -- "
-        "recent progress, blockers, deployment status, and the overall "
-        "trajectory -- not just the phase label.\n\n"
-        f"Program: {program_title}\n"
-        f"Current phase: {current_phase}{phase_ctx}\n"
-        f"Jira {field_label}: {jira_date}\n\n"
-        f"Recent observations (oldest to newest):\n{obs_text}\n\n"
-        f"Based on the evidence, is the {field_label} of {jira_date} "
-        f"unrealistic and should be updated? Consider whether the program's "
-        f"actual progress supports hitting this date.\n\n"
-        "Reply in exactly three lines:\n"
-        "Line 1: YES (date is unrealistic) or NO (date is achievable)\n"
-        "Line 2: One-sentence reason\n"
-        "Line 3: If YES, a realistic replacement date in YYYY-MM-DD format "
-        "based on the evidence timeline. If NO, write NONE."
-    )
-    import profile_lib
-    model = profile_lib.resolve_model(_LLM_EVAL_TIER)
-    cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
-    env = platform_lib.headless_harness_env(harness_name)
-    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
-    try:
-        proc = subprocess.run(
-            cmd, cwd=os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__)))),
-            env=env, capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(),
-            timeout=_LLM_EVAL_TIMEOUT,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        sys.stderr.write(f"[cadence] LLM date eval failed ({exc.__class__.__name__}), fail-closed\n")
-        return False, "evaluation unavailable -- fail-closed", None
-    if proc.returncode != 0:
-        sys.stderr.write(f"[cadence] LLM date eval exited {proc.returncode}, fail-closed\n")
-        return False, "evaluation unavailable -- fail-closed", None
-    out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
-    lines = (out or "").strip().split("\n")
-    first_line = lines[0].strip().upper() if lines else ""
-    reason = lines[1].strip() if len(lines) > 1 else "no reason given"
-    suggested = None
-    if len(lines) > 2:
-        raw = lines[2].strip()
-        suggested = _parse_iso_date(raw)
-        if suggested:
-            suggested = suggested.isoformat()
-    if first_line.startswith("NO"):
-        return False, reason, None
-    return True, reason, suggested
-
-
 def _gather_observation_claims(body):
     """Extract observation claims from a program body for LLM evaluation."""
     claims = []
@@ -1205,197 +1161,434 @@ def _build_tracker_update_description(mutation, program_id):
     )
 
 
-_EA_CHECKPOINT_TOKENS = {"ship", "beta", "build-exit", "ea", "ftue-ea"}
-_GA_CHECKPOINT_TOKENS = {"did-it-work", "verified", "ga", "activation"}
-_DATE_DRIFT_OVERDUE_DAYS = 7
+# ─── The judged date check ("is this date still right?") ──────────────────────
+#
+# Each EA/GA date on the program's tracker anchor that is coming up soon, or has
+# passed without being confirmed met, gets a JUDGMENT call: does the evidence
+# (child-ticket state, meeting observations, the calendar) say the date still
+# holds? This deliberately does NOT gate on the pipeline phase - a phase can be
+# wrong (a program advanced to `verified` on EA evidence while GA work was still
+# open). The phase is handed to the judge as one more, fallible, signal.
+#
+# The judgment is stored as state on the program (`date_checks`), so the drift
+# verdict and the emitter both read it deterministically, and the (costly) judge
+# runs at most once per date per cadence period unless new evidence arrives.
+
+_DATE_FIELDS = ("ea_date", "ga_date")
+_DATE_FIELD_LABELS = {"ea_date": "EA (early access)",
+                      "ga_date": "GA (general availability / go-to-market)"}
+_DATE_CHECK_WINDOW_DAYS = 14   # judge dates this close (or already passed)
+_DATE_QUESTION_WINDOW_DAYS = 7  # an `unknown` this close asks the human
+_DATE_CHECK_EVIDENCE_DAYS = 45  # observation look-back handed to the judge
+_DATE_CHECK_LOOKBACK_DAYS = 30  # a date passed longer ago than this is history
+_DATE_CHECK_MAX_EVIDENCE = 30
+_DATE_VERDICTS = ("holds", "at-risk", "unknown", "met")
+_CHILD_SUMMARY_PREFIX = "Child tickets:"
 
 
-def _propose_date_update(fm, type_entry, body, now=None):
-    """Detect date drift: checkpoint overdue but Jira date not updated.
-
-    Returns {"op": "update-tracker-date", "tracker_key": key,
-    "field": "ea_date"|"ga_date", "current_jira_date": ...,
-    "checkpoint_id": ..., "checkpoint_label": ..., "overdue_days": int,
-    "reason": ...} or None.
-    """
-    anchor = program_lib.tracker_anchor(fm)
-    if not anchor:
-        return None
-    if now is None:
-        now = datetime.now(timezone.utc)
-    now_date = _to_date(now)
-
-    # Parse latest Jira dates from date-change observations.
-    jira_ea = None
-    jira_ga = None
+def _latest_tracker_dates(body):
+    """Return {"ea_date": date|None, "ga_date": date|None} - the latest tracker
+    EA/GA dates recorded by the adapter-grounded sentinel (tracker-truth)."""
+    dates = {"ea_date": None, "ga_date": None}
     for _date_str, kind, source, claim in _iter_observations(body or ""):
         if kind != "date-change" or not source.startswith("adapter:"):
             continue
-        m_ea = re.match(r"EA date is (\S+)\.", claim)
-        if m_ea:
-            jira_ea = _parse_iso_date(m_ea.group(1))
-        m_ga = re.match(r"GA date is (\S+)\.", claim)
-        if m_ga:
-            jira_ga = _parse_iso_date(m_ga.group(1))
+        m = re.match(r"(EA|GA) date is (\S+)\.", claim)
+        if m:
+            parsed = _parse_iso_date(m.group(2))
+            if parsed:
+                dates["ea_date" if m.group(1) == "EA" else "ga_date"] = parsed
+    return dates
 
-    # Scan checkpoints for overdue ones that map to a Jira date field.
-    for cp in fm.get("checkpoints") or []:
-        if cp.get("status") in {"met", "missed", "verified"}:
+
+def _latest_child_summary(body):
+    """The most recent adapter-recorded child-ticket summary claim, or None."""
+    latest = None
+    for _date_str, _kind, source, claim in _iter_observations(body or ""):
+        if source.startswith("adapter:") and claim.startswith(_CHILD_SUMMARY_PREFIX):
+            latest = claim
+    return latest
+
+
+def _date_check_candidates(fm, body, now):
+    """Return [(field, date)] for the tracker dates that need a judgment now.
+
+    A date qualifies when it falls within the next _DATE_CHECK_WINDOW_DAYS, or
+    passed within the last _DATE_CHECK_LOOKBACK_DAYS, unless it is recorded as
+    `met` for that same date. No phase gate.
+    """
+    now_date = _to_date(now)
+    checks = fm.get("date_checks") or {}
+    out = []
+    for field, when in _latest_tracker_dates(body).items():
+        if when is None:
             continue
-        due = _parse_iso_date(cp.get("due"))
-        if due is None:
+        if (when - now_date).days > _DATE_CHECK_WINDOW_DAYS:
             continue
-        overdue_days = (now_date - due).days
-        if overdue_days < _DATE_DRIFT_OVERDUE_DAYS:
+        if (now_date - when).days > _DATE_CHECK_LOOKBACK_DAYS:
             continue
-
-        cp_id = cp.get("id", "")
-        cp_label = cp.get("label", cp_id)
-        # Determine which Jira field this checkpoint maps to.
-        field = None
-        jira_date = None
-        if any(tok in cp_id for tok in _EA_CHECKPOINT_TOKENS):
-            field = "ea_date"
-            jira_date = jira_ea
-        elif any(tok in cp_id for tok in _GA_CHECKPOINT_TOKENS):
-            field = "ga_date"
-            jira_date = jira_ga
-
-        if not field:
+        rec = checks.get(field) or {}
+        if rec.get("verdict") == "met" and rec.get("date") == when.isoformat():
             continue
+        out.append((field, when))
+    return out
 
-        # If Jira date is already past the checkpoint due, the date hasn't
-        # been pushed out to reflect the slip.
-        if jira_date and jira_date > now_date:
+
+def _dated_evidence(body, now):
+    """Dated, source-tagged observation lines from the look-back window, oldest
+    first, for the judge. Child summaries are handed over separately."""
+    cutoff = _to_date(now) - timedelta(days=_DATE_CHECK_EVIDENCE_DAYS)
+    lines = []
+    for date_str, kind, source, claim in _iter_observations(body or ""):
+        parsed = _parse_iso_date(date_str)
+        if parsed is None or parsed < cutoff:
             continue
+        if claim.startswith(_CHILD_SUMMARY_PREFIX):
+            continue
+        origin = "tracker" if source.startswith("adapter:") else "meetings/docs"
+        lines.append(f"{parsed.isoformat()} [{kind}, {origin}] {claim}")
+    return lines[-_DATE_CHECK_MAX_EVIDENCE:]
 
-        return {
-            "op": "update-tracker-date",
-            "tracker_key": anchor,
-            "field": field,
-            "current_jira_date": jira_date.isoformat() if jira_date else None,
-            "checkpoint_id": cp_id,
-            "checkpoint_label": cp_label,
-            "overdue_days": overdue_days,
-            "reason": (
-                f"{cp_label} overdue by {overdue_days} days; "
-                f"Jira {field.replace('_', ' ')} should be updated"
-            ),
-        }
 
-    # Also check the program's top-level due date against the GA field.
-    program_due = _parse_iso_date(fm.get("due"))
-    if program_due and jira_ga:
-        if program_due > jira_ga and jira_ga < now_date:
-            return {
-                "op": "update-tracker-date",
-                "tracker_key": anchor,
-                "field": "ga_date",
-                "current_jira_date": jira_ga.isoformat(),
-                "checkpoint_id": None,
-                "checkpoint_label": "program due date",
-                "overdue_days": (now_date - jira_ga).days,
-                "reason": (
-                    f"Jira GA date ({jira_ga.isoformat()}) has passed but "
-                    f"program is due {program_due.isoformat()}"
-                ),
-            }
+def _build_date_judge_prompt(fm, type_entry, body, field, when, now):
+    """The judgment prompt. Asks for judgment, never a counting rule."""
+    now_date = _to_date(now)
+    days = (when - now_date).days
+    timing = (f"in {days} days" if days > 0 else
+              "today" if days == 0 else f"{-days} days ago")
+    phase = fm.get("phase") or "?"
+    phase_desc = next((p.get("description", "") for p in (type_entry.get("phases") or [])
+                       if isinstance(p, dict) and p.get("id") == phase), "")
+    intent = program_lib._parse_intent(body or "") or "(none recorded)"
+    child = _latest_child_summary(body) or "(no child-ticket data recorded)"
+    evidence = _dated_evidence(body, now)
+    ev_text = "\n".join(f"- {e}" for e in evidence) if evidence else "(none)"
+    cycles = _extract_recent_cycles(body, max_cycles=4)
+    cyc_text = "\n".join(f"- {c}" for c in cycles) if cycles else "(none)"
+    label = _DATE_FIELD_LABELS.get(field, field)
+    return (
+        "You are a program manager's chief of staff checking whether a committed "
+        "date in the tracker is still right. Use judgment, not a formula: a "
+        "feature with most tickets done can still miss its date if the one open "
+        "ticket is the thing that gates the milestone, and a feature with many "
+        "open tickets can be fine if they are small, moving, and not required "
+        "for this milestone.\n\n"
+        f"Today: {now_date.isoformat()}\n"
+        f"Program: {fm.get('title') or fm.get('program_id')}\n"
+        f"Date under review: {label} = {when.isoformat()} ({timing})\n\n"
+        f"Intent / success criteria:\n{intent}\n\n"
+        f"Program phase (one signal, may be wrong or stale): {phase}"
+        + (f" - {phase_desc}" if phase_desc else "") + "\n\n"
+        f"Child tickets of the tracker item (latest snapshot):\n{child}\n\n"
+        f"Recent observations, oldest to newest:\n{ev_text}\n\n"
+        f"Recent cycle verdicts:\n{cyc_text}\n\n"
+        "Weigh: which open tickets actually gate this milestone; whether work "
+        "has moved recently or is sitting still; whether open work is in a "
+        "release/fix version that lands before the date; what people said in "
+        "meetings, especially where it contradicts the tracker (e.g. still in "
+        "early access, work not started); and how much time is left.\n\n"
+        "Verdicts:\n"
+        "- holds: the evidence supports hitting this date.\n"
+        "- at-risk: the evidence says this date will likely be missed.\n"
+        "- unknown: not enough evidence either way.\n"
+        "- met: the milestone this date tracks has already been delivered.\n\n"
+        "Reply with ONLY a JSON object, no prose:\n"
+        '{"verdict": "holds|at-risk|unknown|met", '
+        '"reason": "one or two plain sentences", '
+        '"suggested_date": "YYYY-MM-DD or null (a realistic date when at-risk)", '
+        '"key_evidence": ["short quote or fact", "..."]}'
+    )
 
-    # Phase-date coherence: detect when Jira EA/GA dates are unrealistic
-    # given the program's current pipeline phase. Catches programs that have
-    # no checkpoints (or none matching EA/GA tokens) but whose tracker dates
-    # conflict with their phase position. Marked source:"phase-coherence" so
-    # the emitter path can gate these through an LLM evaluation.
-    phases = type_entry.get("phases") or []
-    if phases and (jira_ea or jira_ga):
-        current_phase = fm.get("phase")
-        current_idx = next(
-            (i for i, p in enumerate(phases)
-             if isinstance(p, dict) and p.get("id") == current_phase),
-            -1,
+
+def _parse_date_judgment(text):
+    """Parse the judge's JSON reply into a normalized dict, or None."""
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(0))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    verdict = str(data.get("verdict") or "").strip().lower()
+    if verdict not in _DATE_VERDICTS:
+        return None
+    suggested = _parse_iso_date(str(data.get("suggested_date") or ""))
+    evidence = data.get("key_evidence") or []
+    if not isinstance(evidence, list):
+        evidence = [str(evidence)]
+    return {
+        "verdict": verdict,
+        "reason": _ascii_text(str(data.get("reason") or "").strip()) or "no reason given",
+        "suggested_date": suggested.isoformat() if suggested else None,
+        "key_evidence": [_ascii_text(str(e).strip()) for e in evidence if str(e).strip()][:5],
+    }
+
+
+_ascii_text = program_lib.ascii_fold
+
+
+def _llm_judge_date(prompt):
+    """Run the date judge. Returns the parsed judgment dict, or None (fail-closed:
+    an unavailable or unparseable judge never produces a card)."""
+    import profile_lib
+    model = profile_lib.resolve_model(_LLM_EVAL_TIER)
+    cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
+    env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
+    try:
+        proc = subprocess.run(
+            cmd, cwd=os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))),
+            env=env, capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(),
+            timeout=_LLM_EVAL_TIMEOUT,
         )
-        if current_idx >= 0:
-            ea_phase_idx = None
-            ga_phase_idx = None
-            for i, ph in enumerate(phases):
-                if not isinstance(ph, dict):
-                    continue
-                cp_id = ph.get("exit_checkpoint") or ""
-                if any(tok in cp_id for tok in _EA_CHECKPOINT_TOKENS):
-                    ea_phase_idx = i
-                if any(tok in cp_id for tok in _GA_CHECKPOINT_TOKENS):
-                    ga_phase_idx = i
-            if ga_phase_idx is None:
-                for i in range(len(phases) - 1, -1, -1):
-                    if isinstance(phases[i], dict) and not phases[i].get("terminal"):
-                        ga_phase_idx = i
-                        break
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write(f"[cadence] date judge failed ({exc.__class__.__name__}), fail-closed\n")
+        return None
+    if proc.returncode != 0:
+        sys.stderr.write(f"[cadence] date judge exited {proc.returncode}, fail-closed\n")
+        return None
+    out = harness_lib.unwrap_oneshot_result(proc.stdout, harness_name)
+    judgment = _parse_date_judgment(out)
+    if judgment is None:
+        sys.stderr.write("[cadence] date judge reply unparseable, fail-closed\n")
+    return judgment
 
-            if jira_ea and ea_phase_idx is not None and current_idx <= ea_phase_idx:
-                overdue = (now_date - jira_ea).days
-                if overdue >= _DATE_DRIFT_OVERDUE_DAYS:
-                    return {
-                        "op": "update-tracker-date",
-                        "tracker_key": anchor,
-                        "field": "ea_date",
-                        "current_jira_date": jira_ea.isoformat(),
-                        "checkpoint_id": None,
-                        "checkpoint_label": f"phase still {current_phase}",
-                        "overdue_days": overdue,
-                        "source": "phase-coherence",
-                        "reason": (
-                            f"EA date ({jira_ea.isoformat()}) passed {overdue}d ago "
-                            f"but program is still in {current_phase} phase"
-                        ),
-                    }
 
-            if jira_ga and ga_phase_idx is not None and current_idx < ga_phase_idx:
-                days_to_ga = (jira_ga - now_date).days
-                if days_to_ga <= _SOON_WINDOW_DAYS:
-                    overdue = max(0, -days_to_ga)
-                    return {
-                        "op": "update-tracker-date",
-                        "tracker_key": anchor,
-                        "field": "ga_date",
-                        "current_jira_date": jira_ga.isoformat(),
-                        "checkpoint_id": None,
-                        "checkpoint_label": f"phase still {current_phase}",
-                        "overdue_days": overdue,
-                        "source": "phase-coherence",
-                        "reason": (
-                            f"GA date ({jira_ga.isoformat()}) "
-                            + (f"in {days_to_ga}d" if days_to_ga > 0 else f"passed {-days_to_ga}d ago")
-                            + f" but program is still in {current_phase} phase"
-                        ),
-                    }
-
+def _task_status(task_lib, task_id):
+    """A task's status whether it is still in a queue or already archived, or None."""
+    try:
+        return (task_lib.read_task(task_id).get("frontmatter") or {}).get("status")
+    except Exception:
+        pass
+    for t in task_lib.list_archived(limit=500):
+        if t.get("id") == task_id:
+            return t.get("status")
     return None
 
 
-def _build_date_update_description(mutation, program_id):
-    """Build a date-update proposal card body."""
-    key = mutation.get("tracker_key", "?")
-    field = mutation.get("field", "?").replace("_", " ")
-    current = mutation.get("current_jira_date", "not set")
-    cp_label = mutation.get("checkpoint_label", "?")
-    overdue = mutation.get("overdue_days", 0)
-    suggested = mutation.get("suggested_date")
-    llm_reason = mutation.get("llm_reason")
-    lines = [
-        f"Jira {key} {field} needs updating: {cp_label} is overdue by "
-        f"{overdue} days. Current Jira {field}: {current}.",
-    ]
-    if llm_reason:
-        lines.append(f"Assessment: {llm_reason}")
-    if suggested:
-        lines.append(
-            f"Accept to update Jira {key} {field} from {current} to {suggested}."
-        )
+def _resolved_date_proposals(task_lib, program_id):
+    """{(field, jira_date): status} for this program's resolved (done = accepted,
+    cancelled = rejected) update-tracker-date proposal cards, queue or archive."""
+    out = {}
+    seen = []
+    for status in ("done", "cancelled"):
+        seen.extend(task_lib.list_tasks(queue=None, status=status))
+    seen.extend(task_lib.list_archived(limit=500))
+    for t in seen:
+        if t.get("task_type") != "cadence-propose-update":
+            continue
+        if t.get("status") not in ("done", "cancelled"):
+            continue
+        try:
+            fm = task_lib.read_task(t["id"])["frontmatter"]
+        except Exception:
+            fm = t
+        if program_id not in (fm.get("tags") or []):
+            continue
+        prop = fm.get("proposal") or {}
+        if not isinstance(prop, dict) or prop.get("op") != "update-tracker-date":
+            continue
+        out[(prop.get("field"), prop.get("current_jira_date"))] = t.get("status")
+    return out
+
+
+def _apply_human_answers(fm, checks, now):
+    """Fold the human's answers back into the stored judgments (mutates `checks`).
+
+    - A closed question card (asked once per date) = "the date holds".
+    - A rejected at-risk proposal for this exact date = "the date holds".
+    - An accepted proposal for this exact date = acknowledged: the human acted
+      (moved the date or flagged it), so no new card for this date.
+    A human answer stands until the tracker date changes or the date passes.
+    """
+    pending = [f for f, r in checks.items() if isinstance(r, dict)
+               and r.get("source") != "human" and not r.get("acknowledged")
+               and (r.get("asked") or r.get("verdict") == "at-risk")]
+    if not pending:
+        return
+    import task_lib
+    proposals = None
+    today = _to_date(now).isoformat()
+    for field in pending:
+        rec = checks[field]
+        if rec.get("asked") and _task_status(task_lib, rec["asked"]) in ("done", "cancelled"):
+            rec.update({"verdict": "holds", "source": "human", "answered": today,
+                        "reason": "Operator closed the date question: the date holds."})
+            continue
+        if rec.get("verdict") == "at-risk":
+            if proposals is None:
+                proposals = _resolved_date_proposals(task_lib, fm.get("program_id"))
+            status = proposals.get((field, rec.get("date")))
+            if status == "cancelled":
+                rec.update({"verdict": "holds", "source": "human", "answered": today,
+                            "reason": "Operator rejected the date change: the date holds."})
+            elif status == "done":
+                rec["acknowledged"] = today
+
+
+def _run_date_checks(fm, type_entry, body, now, period):
+    """Judge each candidate EA/GA date and store the result in fm["date_checks"].
+
+    Mutates `fm` in place (the caller persists it). Drops records whose tracker
+    date changed or vanished, folds in human answers, then judges a candidate
+    only when something relevant changed since the last judgment: the date, the
+    evidence, the cadence period, or whether the date has passed. A human answer
+    is not re-judged until the date changes or passes. A failed judge call is
+    retried at most once per day. Returns (changed, judged): whether
+    fm["date_checks"] changed, and whether the (slow) judge was called.
+    """
+    before = json.dumps(fm.get("date_checks") or {}, sort_keys=True, default=str)
+    if not program_lib.tracker_anchor(fm):
+        fm.pop("date_checks", None)
+        return before != "{}", False
+    checks = {k: dict(v) for k, v in (fm.get("date_checks") or {}).items()
+              if isinstance(v, dict)}
+    current = _latest_tracker_dates(body)
+    for field in _DATE_FIELDS:
+        rec = checks.get(field)
+        when = current.get(field)
+        if rec and (when is None or rec.get("date") != when.isoformat()):
+            checks.pop(field, None)  # the tracker date moved: old judgment is moot
+    _apply_human_answers(fm, checks, now)
+
+    fm_view = dict(fm, date_checks=checks)
+    candidates = dict(_date_check_candidates(fm_view, body, now))
+    latest_obs = _latest_observation_date(body)
+    evidence_through = latest_obs.isoformat() if latest_obs else None
+    today = _to_date(now)
+    judged = False
+
+    for field, when in candidates.items():
+        rec = checks.get(field)
+        passed = when < today
+        if rec:
+            if rec.get("verdict") == "met":
+                continue
+            if rec.get("last_failed") == today.isoformat():
+                continue  # back off: one retry per day after a failure
+            if rec.get("passed", False) == passed and (
+                    rec.get("source") == "human" or rec.get("acknowledged")
+                    or (rec.get("evidence_through") == evidence_through
+                        and rec.get("period") == period)):
+                continue  # nothing new to judge
+        judged = True
+        judgment = _llm_judge_date(
+            _build_date_judge_prompt(fm, type_entry, body, field, when, now))
+        if judgment is None:
+            # Fail closed: keep any prior judgment, note the failure for backoff.
+            failed = rec or {"date": when.isoformat(), "verdict": "unavailable"}
+            failed["last_failed"] = today.isoformat()
+            checks[field] = failed
+            continue
+        new = {
+            "date": when.isoformat(),
+            "verdict": judgment["verdict"],
+            "reason": judgment["reason"],
+            "suggested_date": judgment["suggested_date"],
+            "key_evidence": judgment["key_evidence"],
+            "checked": today.isoformat(),
+            "evidence_through": evidence_through,
+            "period": period,
+            "passed": passed,
+        }
+        if rec and rec.get("asked"):
+            new["asked"] = rec["asked"]  # never re-ask the same date
+        checks[field] = new
+
+    if judged:
+        # A fresh judgment can land on a date the operator already answered
+        # (e.g. rejected an earlier proposal for it): honor that answer now.
+        _apply_human_answers(fm, checks, now)
+
+    if checks:
+        fm["date_checks"] = checks
     else:
-        lines.append(
-            f"Accept to update the {field} in Jira to reflect the actual timeline."
-        )
+        fm.pop("date_checks", None)
+    after = json.dumps(fm.get("date_checks") or {}, sort_keys=True, default=str)
+    return before != after, judged
+
+
+def _has_open_date_judgment(fm):
+    """True when a stored date judgment says the program is not done yet."""
+    for rec in (fm.get("date_checks") or {}).values():
+        if (isinstance(rec, dict) and rec.get("verdict") in ("at-risk", "unknown")
+                and rec.get("source") != "human"):
+            return True
+    return False
+
+
+def _date_check_signals(fm, now):
+    """Yield (field, rec, days_to_date) for stored judgments that still matter."""
+    now_date = _to_date(now)
+    for field in _DATE_FIELDS:
+        rec = (fm.get("date_checks") or {}).get(field)
+        if not isinstance(rec, dict):
+            continue
+        when = _parse_iso_date(rec.get("date"))
+        if when is None:
+            continue
+        yield field, rec, (when - now_date).days
+
+
+def _date_label(field, rec):
+    return f"{field.split('_')[0].upper()} {rec.get('date')}"
+
+
+def _build_date_check_description(mutation, rec, child_summary, program_id):
+    """Card body for an at-risk date proposal: the judgment and its evidence."""
+    key = mutation.get("tracker_key", "?")
+    field = mutation.get("field", "?").split("_")[0].upper()
+    current = mutation.get("current_jira_date") or "not set"
+    suggested = mutation.get("suggested_date")
+    lines = [
+        f"Cadence judged the Jira {key} {field} date ({current}) at risk for "
+        f"{program_id}.",
+        f"Assessment: {rec.get('reason', 'no reason given')}",
+    ]
+    if rec.get("key_evidence"):
+        lines.append("Evidence:")
+        lines.extend(f"- {e}" for e in rec["key_evidence"])
+    if child_summary:
+        lines.append(f"Tracker: {child_summary}")
+    if suggested:
+        lines.append(f"Accept to update Jira {key} {field} from {current} to {suggested}.")
+    else:
+        lines.append(f"Accept to flag the {field} date on {key} for review.")
     return "\n".join(lines)
+
+
+def _build_date_question_description(field, rec, child_summary, program_id, days):
+    """Card body for an `unknown` date judgment close to the date."""
+    timing = (f"in {days} days" if days > 0 else
+              "today" if days == 0 else f"{-days} days ago")
+    lines = [
+        f"Is the {_date_label(field, rec)} date for {program_id} still right? "
+        f"It is {timing}, and Cadence could not tell from the evidence.",
+        f"Assessment: {rec.get('reason', 'no reason given')}",
+    ]
+    if rec.get("key_evidence"):
+        lines.append("Evidence:")
+        lines.extend(f"- {e}" for e in rec["key_evidence"])
+    if child_summary:
+        lines.append(f"Tracker: {child_summary}")
+    lines.append("If it moved, update the date in Jira. If it holds, close this card.")
+    return "\n".join(lines)
+
+
+def _proposal_key(proposal):
+    """The dedupe key for a proposal: its op, plus the field for date updates so
+    an EA and a GA proposal on the same program never collapse into one."""
+    if not isinstance(proposal, dict):
+        return None
+    op = proposal.get("op")
+    if op == "update-tracker-date" and proposal.get("field"):
+        return f"{op}:{proposal['field']}"
+    return op
 
 
 def _build_birth_description(proposal, program_id):
@@ -1484,6 +1677,11 @@ def _propose_archive(fm, type_entry, body, now=None):
       - A dict with op:"archive", reason, citations if archive is proposed
       - None otherwise
     """
+    # An open date judgment (at-risk / unknown) means the program is not done -
+    # no archive door opens past it.
+    if _has_open_date_judgment(fm):
+        return None
+
     # Fact 1: Terminal phase
     phase = fm.get("phase")
     if phase and program_lib._terminal_phase(type_entry, phase):
@@ -1602,6 +1800,8 @@ def _propose_archive_silent(fm, type_entry, body, telemetry, now_iso):
       - A dict with op:"archive", reason, citations if silent archive is proposed
       - None otherwise
     """
+    if _has_open_date_judgment(fm):
+        return None
     silent_cycles = type_entry.get("archive_after_silent_cycles")
     if not silent_cycles:
         return None  # No silent policy configured for this type
@@ -1766,6 +1966,8 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
         if action == "escalate":
             if on != f"drift:{verdict}":
                 continue
+            if (facts or {}).get("source") == "date-check":
+                continue  # the date-check card already covers this program
             # Lazy import on the emitting path only - the pure-verdict path never
             # imports task_lib. Imported once here, not again per card.
             import task_lib
@@ -1934,51 +2136,70 @@ def _evaluate_emitters(program, type_entry, verdict, facts, body=None, root=None
             open_prop_ops.add(mutation["op"])
 
         elif action == "propose-update" and on == "date-drift":
-            mutation = _propose_date_update(fm, type_entry, body or "", now=now)
-            if not mutation:
+            # Cards come from the stored date judgments (_run_date_checks ran
+            # before the verdict); no judge call happens here.
+            anchor = program_lib.tracker_anchor(fm)
+            if not anchor:
                 continue
+            child_summary = _latest_child_summary(body or "")
             import task_lib
-            if open_prop_ops is None:
-                open_prop_ops = _open_propose_update_ops(task_lib, program_id)
-            if mutation["op"] in open_prop_ops:
-                continue
-            if resolved_prop_ops is None:
-                resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
-            if _suppressed_by_resolution(mutation["op"], resolved_prop_ops, body):
-                continue
-            if mutation.get("source") == "phase-coherence":
-                phase_desc = ""
-                for ph in (type_entry.get("phases") or []):
-                    if ph.get("id") == fm.get("phase"):
-                        phase_desc = ph.get("description", "")
-                        break
-                obs_claims = _gather_observation_claims(body)
-                approved, reason, suggested = _llm_evaluate_date_proposal(
-                    title, fm.get("phase", "?"),
-                    mutation.get("field", "date"),
-                    mutation.get("current_jira_date", "?"),
-                    obs_claims, phase_description=phase_desc)
-                if not approved:
-                    sys.stderr.write(
-                        f"[cadence] LLM says date achievable {program_id} "
-                        f"{mutation.get('field')}: {reason}\n")
-                    continue
-                if suggested:
-                    mutation["suggested_date"] = suggested
-                mutation["llm_reason"] = reason
-            task_id, _ = task_lib.create_task(
-                title=f"{title}: update Jira {mutation.get('field', 'date').replace('_', ' ')}?",
-                queue="human",
-                priority="high",
-                creator="cadence",
-                card_type="recommendation",
-                task_type="cadence-propose-update",
-                tags=[program_id, "cadence"],
-                proposal=mutation,
-                description=_build_date_update_description(mutation, program_id),
-            )
-            emitted.append(task_id)
-            open_prop_ops.add(mutation["op"])
+            for field, rec, days in _date_check_signals(fm, now):
+                verdict_ = rec.get("verdict")
+                if rec.get("source") == "human" or rec.get("acknowledged"):
+                    continue  # the operator already answered for this date
+                if verdict_ == "at-risk":
+                    mutation = {
+                        "op": "update-tracker-date",
+                        "tracker_key": anchor,
+                        "field": field,
+                        "current_jira_date": rec.get("date"),
+                        "suggested_date": rec.get("suggested_date"),
+                        "checkpoint_id": None,
+                        "checkpoint_label": f"{_date_label(field, rec)} check",
+                        "overdue_days": max(0, -days),
+                        "source": "date-check",
+                        "llm_reason": rec.get("reason"),
+                        "reason": f"{_date_label(field, rec)} judged at risk",
+                    }
+                    key = _proposal_key(mutation)
+                    if open_prop_ops is None:
+                        open_prop_ops = _open_propose_update_ops(task_lib, program_id)
+                    if key in open_prop_ops:
+                        continue
+                    if resolved_prop_ops is None:
+                        resolved_prop_ops = _resolved_propose_update_ops(task_lib, program_id)
+                    if _suppressed_by_resolution(key, resolved_prop_ops, body):
+                        continue
+                    task_id, _ = task_lib.create_task(
+                        title=f"{title}: update Jira {field.split('_')[0].upper()} date?",
+                        queue="human",
+                        priority="high",
+                        creator="cadence",
+                        card_type="recommendation",
+                        task_type="cadence-propose-update",
+                        tags=[program_id, "cadence"],
+                        proposal=mutation,
+                        description=_build_date_check_description(
+                            mutation, rec, child_summary, program_id),
+                    )
+                    emitted.append(task_id)
+                    open_prop_ops.add(key)
+                elif (verdict_ == "unknown" and days <= _DATE_QUESTION_WINDOW_DAYS
+                        and not rec.get("asked")):
+                    # A plain question card, NOT a proposal: closing it never
+                    # writes to the tracker. Asked once per date.
+                    task_id, _ = task_lib.create_task(
+                        title=f"{title}: is the {_date_label(field, rec)} date still right?",
+                        queue="human",
+                        priority="high",
+                        creator="cadence",
+                        task_type="cadence-date-question",
+                        tags=[program_id, "cadence"],
+                        description=_build_date_question_description(
+                            field, rec, child_summary, program_id, days),
+                    )
+                    emitted.append(task_id)
+                    rec["asked"] = task_id
 
         elif action == "propose-update":
             mutation = _propose_phase_advance(fm, type_entry, body or "")
@@ -2418,8 +2639,6 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     # can drift on a stale nursery (4a M-3). No-op for items without `opened`.
     _age_candidates(fm, now)
 
-    verdict, facts = compute_verdict(program, registry, now)
-
     cadence = _resolve_cadence(fm, registry)
     period = current_period(cadence, now)
 
@@ -2430,6 +2649,27 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
     type_entry = next(
         (t for t in registry.get("types", []) if t.get("id") == type_id), {}
     )
+
+    # The judged date check runs BEFORE the verdict so the verdict can read it.
+    # Only for types that declare the date-drift emitter (declarative opt-in).
+    dates_changed = False
+    if any(em.get("on") == "date-drift" for em in (type_entry.get("emitters") or [])):
+        dates_changed, judged = _run_date_checks(fm, type_entry, body, now, period)
+        filepath = program.get("filepath")
+        if judged and filepath and os.path.isfile(filepath):
+            # The judge is slow. Re-read the file so nothing written meanwhile
+            # (a sentinel observation, an accepted proposal) is overwritten by
+            # this cycle's write; carry over only the fresh judgments.
+            fresh_fm, fresh_body = program_lib._parse_program_file(filepath)
+            if fresh_fm.get("date_checks") != fm.get("date_checks"):
+                if fm.get("date_checks"):
+                    fresh_fm["date_checks"] = fm["date_checks"]
+                else:
+                    fresh_fm.pop("date_checks", None)
+            program = dict(program, frontmatter=fresh_fm, body=fresh_body)
+            fm, body = fresh_fm, fresh_body
+
+    verdict, facts = compute_verdict(program, registry, now)
 
     # Check for pending weekday-gated emitters that haven't fired this period.
     # A weekday emitter whose target day is today (and correct month occurrence
@@ -2473,7 +2713,8 @@ def reconcile_program(program, registry, now=None, force=False, root=None):
                 period=period, registry=registry, now=now, proposals_only=True,
             )
         drift_changed = fm.get("drift") != verdict
-        if drift_changed or fm.get("last_run", "") < program_lib._now_iso()[:13] or emitted:
+        if (drift_changed or dates_changed or emitted
+                or fm.get("last_run", "") < program_lib._now_iso()[:13]):
             fm["drift"] = verdict
             fm["last_run"] = program_lib._now_iso()
             filepath = program.get("filepath")
@@ -2649,6 +2890,11 @@ def reconcile_all(root=None, now=None, force=False):
         # malformed program still names its file in the error line (not a bare "?").
         program_id = program.get("program_id") or "?"
         try:
+            # Re-read now, not at list time: earlier programs' date judgments can
+            # take minutes, and a stale snapshot would overwrite newer writes.
+            if program.get("filepath") and os.path.isfile(program["filepath"]):
+                fresh_fm, fresh_body = program_lib._parse_program_file(program["filepath"])
+                program = dict(program, frontmatter=fresh_fm, body=fresh_body)
             results.append(
                 reconcile_program(program, registry, now=now, force=force, root=root)
             )
