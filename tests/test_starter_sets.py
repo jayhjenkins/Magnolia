@@ -11,8 +11,17 @@ import starter_sets
 
 def test_eos_bundle_lists_the_eos_types():
     b = starter_sets.bundle("eos")
-    assert set(b["types"]) == {"eos-l10-prep", "eos-rock"}
+    # The onboarding pitch names L10 prep, rocks, the scorecard cycle, and the
+    # issues list - the bundle must actually seed all four.
+    assert set(b["types"]) == {"eos-l10-prep", "eos-rock", "eos-cycle", "eos-issues"}
     assert b["label"]
+
+
+def test_every_bundle_has_its_own_leading_question():
+    sets = starter_sets.load_starter_sets()["sets"]
+    questions = [spec.get("question") for spec in sets.values()]
+    assert all(q and q.strip().endswith("?") for q in questions)
+    assert len(set(questions)) == len(questions)
 
 
 def test_all_five_bundles_exist():

@@ -22,15 +22,15 @@ messaging:
   m365:
     confirmed: false     # Tier-2 gate: one plain-language confirm before the first send
 doc_sync:
-  onedrive_root: ""      # auto-detected by the Doctor (OneDrive-* under ~/Library/CloudStorage)
+  onedrive_root: ""      # your synced OneDrive folder; auto-detected by the Doctor
   sharepoint_site: "PM-OS"
   enabled: false
 analytics:
   pendo:
     provider: "none"      # pendo | none
     subscription_id: ""
-    app_ids: {}
+    app_ids: {}           # name -> Pendo appId, e.g. {default: "123"}
   databricks:
     provider: "none"      # databricks | none
     catalog: ""
-    sources: {}
+    sources: {}           # logical source -> schema, e.g. {gong: "gongio"}
