@@ -93,3 +93,11 @@ def test_phase4_crons_route_to_expected_workers(monkeypatch):
                "domain": si_tpl["domain"], "queue": si_tpl["queue"]}
     worker, score, _ = task_dispatch.match_worker(si_task, workers)
     assert worker["name"] == "eval-analyst", f"got {worker['name']} (score {score})"
+
+
+def test_defaults_carry_no_operator_specific_jobs():
+    """Seeded defaults are engine-generic: no operator-personal scorecard/rocks jobs."""
+    import re
+    blob = repr(seed_default_crons.DEFAULTS)
+    for pat in (r"Resident Experience", r"scorecard", r"\brocks?\b", r"pm-agent-activation"):
+        assert not re.search(pat, blob, re.IGNORECASE), f"default cron leaks /{pat}/"
