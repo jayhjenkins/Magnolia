@@ -7,8 +7,8 @@ models:
 # claude (default) | codex
 harness: "claude"
 active_skill_packs: ["core"]
-server:
-  port: 8742
+# server.port is NOT seeded here: the `magnolia` launcher picks a free port on
+# first run and records it in profile/config.yaml (server.port).
 # Autonomous Mode: when true, action-types graduated to the 'autonomous' tier
 # auto-ship their terminal action (send / publish) without a per-instance approve.
 # Default off — opt-in via the top-bar settings cog.

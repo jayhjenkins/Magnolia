@@ -4,4 +4,7 @@ display_name: "Your Name"
 email: "you@company.com"
 company: "Your Company"
 persona: "pm"            # pm | exec
+role: ""                 # role / title, e.g. "Senior Product Manager"
+team: ""                 # team name, e.g. "Payments"
+products: []             # products / product areas you own, e.g. ["Mobile app", "Billing"]
 timezone: "America/New_York"
