@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE = os.path.join(ROOT, "profile.example", "integrations.yaml")
 
 FIELD_KEYS = ("epic_name", "ga_date", "ea_date", "spec_reference",
-              "client_commitment", "release_notes")
+              "client_commitment", "release_notes", "severity")
 
 FULL_MAP = {
     "epic_name": "customfield_90001",

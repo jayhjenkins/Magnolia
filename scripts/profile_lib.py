@@ -155,7 +155,7 @@ def jira_config(root=None):
 # they live in the profile under project_management.jira.fields. An empty id
 # means "this site has no such field" and the engine omits it - never guesses.
 JIRA_FIELD_KEYS = ("epic_name", "ga_date", "ea_date", "spec_reference",
-                   "client_commitment", "release_notes")
+                   "client_commitment", "release_notes", "severity")
 
 # Secrets that must never be echoed by the CLI or into a prompt.
 _JIRA_SECRET_KEYS = ("api_token", "email")

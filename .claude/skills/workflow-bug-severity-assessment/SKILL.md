@@ -11,14 +11,15 @@ Turn a bare Jira bug link into a structured Severity 1-4 verdict against Vantaca
 
 ## When to Use
 
-- User gives a Jira URL (`https://vantaca.atlassian.net/browse/PROJ-XXXXX`) or bare key and asks for a severity read.
+- User gives a Jira URL (`https://<site>/browse/PROJ-XXXXX`) or bare key and asks for a severity read.
 
 **When NOT to use:** the issue type isn't Bug/Security Defect (e.g. Feature, Unit, Epic) — the rubric is written for client-reported defects. Flag this and confirm with the user before applying it anyway.
 
 ## Workflow Steps
 
+0. **Read the Jira config** — `python3 scripts/profile_lib.py --jira-config`. Use its `cloud_id` as the site and `fields.severity` as the Severity field id. If `cloud_id` is empty, use the host from the URL the user gave; if there's neither, ask.
 1. **Parse input** — extract the issue key via `[A-Z]+-\d+` from a URL or bare key.
-2. **Fetch the issue**: `mcp__claude_ai_Jira__getJiraIssue` with `cloudId: "vantaca.atlassian.net"`, `issueIdOrKey`, `fields: ["summary","description","status","issuetype","priority","labels","components","assignee","reporter","created","updated","resolution","project","comment"]`, `responseContentFormat: "markdown"`.
+2. **Fetch the issue**: `mcp__claude_ai_Jira__getJiraIssue` with `cloudId: "{cloud_id}"`, `issueIdOrKey`, `fields: ["summary","description","status","issuetype","priority","labels","components","assignee","reporter","created","updated","resolution","project","comment"]`, `responseContentFormat: "markdown"`.
 3. **Error handling**:
    - Issue not found → surface Jira's error, ask the user to confirm the key.
    - Issue type isn't Bug/Security Defect → say so, ask before proceeding.
@@ -34,8 +35,8 @@ Turn a bare Jira bug link into a structured Severity 1-4 verdict against Vantaca
    ```
 7. **Optional write-back** — ask explicitly before either of these, every single time (external system, shared state):
    - Post the assessment as a comment via `mcp__claude_ai_Jira__addCommentToJiraIssue` — keep it to the verdict + rationale bullets, not a restated essay.
-   - Set `customfield_10269` (Severity, select) to `{"value": "Severity N"}` via `mcp__claude_ai_Jira__editJiraIssue`.
-   - Nothing else gets written. The Impact field (`customfield_10582`) is out of scope for this skill — do not compute or set it, even if asked in passing; if the user wants Impact scored, that's a separate explicit ask.
+   - Set the Severity select field (`fields.severity` from the profile) to `{"value": "Severity N"}` via `mcp__claude_ai_Jira__editJiraIssue`. If `fields.severity` is empty, don't offer this write — offer the comment only.
+   - Nothing else gets written. The Impact field is out of scope for this skill — do not compute or set it, even if asked in passing; if the user wants Impact scored, that's a separate explicit ask.
    - If the user declines, leave the ticket untouched — the chat output already answered the ask.
 
 ## Quality Gates
