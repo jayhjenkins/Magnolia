@@ -834,11 +834,12 @@ def _llm_evaluate_proposal(program_title, current_phase, target_phase,
     model = profile_lib.resolve_model(_LLM_EVAL_TIER)
     cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
     env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
     try:
         proc = subprocess.run(
             cmd, cwd=os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__)))),
-            env=env, capture_output=True, text=True,
+            env=env, capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(),
             timeout=_LLM_EVAL_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
@@ -902,11 +903,12 @@ def _llm_evaluate_tracker_proposal(program_title, tracker_key, current_status,
     model = profile_lib.resolve_model(_LLM_EVAL_TIER)
     cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
     env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
     try:
         proc = subprocess.run(
             cmd, cwd=os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__)))),
-            env=env, capture_output=True, text=True,
+            env=env, capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(),
             timeout=_LLM_EVAL_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
@@ -947,11 +949,12 @@ def _llm_evaluate_archive_proposal(program_title, archive_reason, citations,
     model = profile_lib.resolve_model(_LLM_EVAL_TIER)
     cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
     env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
     try:
         proc = subprocess.run(
             cmd, cwd=os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__)))),
-            env=env, capture_output=True, text=True,
+            env=env, capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(),
             timeout=_LLM_EVAL_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
@@ -1002,11 +1005,12 @@ def _llm_evaluate_date_proposal(program_title, current_phase, field,
     model = profile_lib.resolve_model(_LLM_EVAL_TIER)
     cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
     env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
     try:
         proc = subprocess.run(
             cmd, cwd=os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__)))),
-            env=env, capture_output=True, text=True,
+            env=env, capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(),
             timeout=_LLM_EVAL_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:

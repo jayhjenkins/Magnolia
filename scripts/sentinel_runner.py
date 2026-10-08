@@ -121,10 +121,11 @@ def _dispatch(prompt, tier=None, timeout=None):
     model = profile_lib.resolve_model(tier or SENTINEL_MODEL_TIER)
     cmd, harness_name = harness_lib.build_oneshot_cmd(prompt, model)
     env = platform_lib.headless_harness_env(harness_name)
+    cmd, prompt_stdin = harness_lib.stdin_prompt(cmd)
     try:
         proc = subprocess.run(
             cmd, cwd=PM_OS_DIR, env=env,
-            capture_output=True, text=True, timeout=effective_timeout,
+            capture_output=True, input=prompt_stdin, **platform_lib.text_kwargs(), timeout=effective_timeout,
         )
     except FileNotFoundError:
         log("CLI not found on PATH - skipping (no observations recorded)")

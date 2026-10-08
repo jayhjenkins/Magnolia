@@ -70,9 +70,12 @@ def run_downstream(txt_path, item_id, state, log):
     log_dir.mkdir(parents=True, exist_ok=True)
     env = _hook_env()
     task_extract = str(SCRIPT_DIR / "task_extract_meetings.py")
+    # The child's stdout is a log file; force UTF-8 so a non-cp1252 meeting
+    # path/title can't crash its prints on Windows.
+    extract_env = dict(env, PYTHONIOENCODING="utf-8")
     try:
         subprocess.Popen([sys.executable, task_extract, final_path],
-                         cwd=str(profile_lib.PM_OS_DIR), env=env,
+                         cwd=str(profile_lib.PM_OS_DIR), env=extract_env,
                          stdout=open(log_dir / "task-extract.log", "a"),
                          stderr=subprocess.STDOUT,
                          **platform_lib.process_group_kwargs())

@@ -631,3 +631,36 @@ class TestRequiresClaudeFallback:
 
     def test_default_requires_mcp_is_false(self):
         assert harness_lib.requires_claude_fallback("codex") is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# stdin_prompt: keep long prompts off a cmd.exe-parsed argv (claude.cmd shim)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_stdin_prompt_moves_prompt_off_argv_for_cmd_shim(monkeypatch):
+    monkeypatch.setattr(platform_lib, "resolve_claude", lambda path=None: r"C:\npm\claude.cmd")
+    prompt = 'line one\nline "two" & <three> | four'
+    cmd, _ = harness_lib.build_oneshot_cmd(prompt, "haiku", harness="claude")
+    new_cmd, stdin = harness_lib.stdin_prompt(cmd)
+    assert stdin == prompt
+    assert prompt not in new_cmd
+    assert new_cmd[:2] == [r"C:\npm\claude.cmd", "-p"]
+    assert "--model" in new_cmd and "haiku" in new_cmd
+
+
+def test_stdin_prompt_noop_for_real_binary():
+    cmd, _ = harness_lib.build_oneshot_cmd("hi\nthere", "haiku", harness="claude")
+    new_cmd, stdin = harness_lib.stdin_prompt(cmd)
+    assert new_cmd == cmd and stdin is None
+
+
+def test_stdin_prompt_hermetic_cmd_shim(monkeypatch):
+    monkeypatch.setattr(platform_lib, "resolve_claude", lambda path=None: "claude.CMD")
+    cmd, _ = harness_lib.build_hermetic_cmd("multi\nline", "haiku", harness="claude")
+    new_cmd, stdin = harness_lib.stdin_prompt(cmd)
+    assert stdin == "multi\nline" and "multi\nline" not in new_cmd
+
+
+def test_stdin_prompt_leaves_non_claude_alone():
+    cmd = ["codex.cmd", "exec", "hello", "-m", "x"]
+    assert harness_lib.stdin_prompt(cmd) == (cmd, None)

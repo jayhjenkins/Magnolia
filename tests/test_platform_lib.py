@@ -314,3 +314,37 @@ def test_popen_detached_posix_is_plain_popen(monkeypatch):
                         lambda cmd, **kw: seen.update(cmd=cmd, kw=kw) or "proc")
     assert platform_lib.popen_detached(["x"], cwd="/tmp") == "proc"
     assert seen["kw"] == {"cwd": "/tmp"}
+
+
+# --- text_kwargs: decode child output as UTF-8, never the locale (cp1252) ---
+
+def test_text_kwargs_decode_utf8_not_locale():
+    assert platform_lib.text_kwargs() == {"text": True, "encoding": "utf-8",
+                                          "errors": "replace"}
+
+
+def test_text_kwargs_roundtrip_non_cp1252_text():
+    # Curly quotes, an em dash, CJK and an emoji. Their UTF-8 bytes include
+    # 0x81/0x8d/0x9d, which cp1252 cannot decode (UnicodeDecodeError on Windows).
+    import subprocess
+    s = "\u201ccurly\u201d \u2014 \u65e5\u672c \U0001f600"
+    code = "import sys; sys.stdout.buffer.write(%r.encode('utf-8'))" % s
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         **platform_lib.text_kwargs())
+    assert out.stdout == s
+
+
+def test_text_kwargs_replaces_invalid_bytes_instead_of_raising():
+    import subprocess
+    code = "import sys; sys.stdout.buffer.write(b'ok \\x81\\x8d\\xff end')"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         **platform_lib.text_kwargs())
+    assert out.stdout.startswith("ok ") and out.stdout.endswith(" end")
+
+
+def test_is_cmd_shim():
+    assert platform_lib.is_cmd_shim(r"C:\Users\x\AppData\Roaming\npm\claude.cmd")
+    assert platform_lib.is_cmd_shim("C:/npm/CLAUDE.BAT")
+    assert not platform_lib.is_cmd_shim(r"C:\Program Files\claude\claude.exe")
+    assert not platform_lib.is_cmd_shim("/opt/homebrew/bin/claude")
+    assert not platform_lib.is_cmd_shim(None)

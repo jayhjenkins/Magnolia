@@ -55,6 +55,23 @@ def test_run_downstream_classifies_and_fires_hooks(tmp_path, monkeypatch, qmd_re
     assert (tmp_path / "logs").is_dir()   # log dir created under tmp, not the repo
 
 
+def test_task_extract_child_writes_utf8_stdio(tmp_path, monkeypatch, qmd_resolves):
+    # The child's stdout is a log file; on Windows its default codec is cp1252,
+    # so printing a meeting path with non-cp1252 characters would crash it.
+    monkeypatch.setattr(transcript_post.profile_lib, "PM_OS_DIR", str(tmp_path))
+    txt = tmp_path / "x.txt"
+    txt.write_text("hi", encoding="utf-8")
+    monkeypatch.setattr(transcript_post, "_classify_fn",
+                        lambda: lambda p, speech_id=None, downloaded_state=None:
+                        {"domain": "general", "final_path": str(txt)})
+    envs = []
+    monkeypatch.setattr(transcript_post.subprocess, "Popen",
+                        lambda *a, **k: envs.append((a[0], k.get("env"))))
+    transcript_post.run_downstream(str(txt), "id-1", {}, log=transcript_post._null_log())
+    extract_env = next(e for cmd, e in envs if "task_extract_meetings.py" in cmd[1])
+    assert extract_env["PYTHONIOENCODING"] == "utf-8"
+
+
 def test_run_downstream_classify_import_error_still_fires_hooks(tmp_path, monkeypatch, qmd_resolves):
     """openai missing: _classify_fn raises ImportError. Skip classification,
     fall back to str(txt_path), but STILL fire both hooks."""
