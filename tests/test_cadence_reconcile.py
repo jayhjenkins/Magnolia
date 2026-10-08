@@ -3848,12 +3848,14 @@ def _seed_dated(root, phase="execution", ga=None, ea=None, child=_CHILD_OPEN,
     return pid
 
 
-def _judge(monkeypatch, verdict="at-risk", suggested="2026-06-30", calls=None):
+def _judge(monkeypatch, verdict="at-risk", suggested="2026-06-30", calls=None,
+           changed=False):
     def fake(prompt):
         if calls is not None:
             calls.append(prompt)
         return {"verdict": verdict, "reason": "Gating ticket PROJ-2 still in review.",
-                "suggested_date": suggested, "key_evidence": ["PROJ-2 in PR Review"]}
+                "suggested_date": suggested, "key_evidence": ["PROJ-2 in PR Review"],
+                "changed_since_answer": changed}
     monkeypatch.setattr(reconcile, "_llm_judge_date", fake)
 
 
@@ -3903,7 +3905,8 @@ def test_parse_date_judgment():
         'Sure.\n{"verdict": "At-Risk", "reason": "Gate open — not merged.", '
         '"suggested_date": "2026-06-30", "key_evidence": ["a", ""]}')
     assert ok == {"verdict": "at-risk", "reason": "Gate open - not merged.",
-                  "suggested_date": "2026-06-30", "key_evidence": ["a"]}
+                  "suggested_date": "2026-06-30", "key_evidence": ["a"],
+                  "changed_since_answer": False}
     assert reconcile._parse_date_judgment('{"verdict": "maybe"}') is None
     assert reconcile._parse_date_judgment("no json here") is None
     nod = reconcile._parse_date_judgment('{"verdict": "holds", "suggested_date": null}')
@@ -4224,3 +4227,88 @@ def test_prior_rejection_for_same_date_is_honored_immediately(tmp_path, monkeypa
     assert rec["source"] == "human" and rec["verdict"] == "holds"
     assert result["verdict"] == "holding"
     assert _date_cards() == []
+
+
+# --- An operator answer is dated evidence, not a lock --------------------------
+
+def _reject_first_card(root, pid, monkeypatch):
+    _judge(monkeypatch)
+    _reconcile(root, pid)
+    task_lib.cancel_task(_date_cards()[0]["id"], reason="fine for now")
+    _reconcile(root, pid)   # records the answer
+    rec = pl.read_program(pid, root=root)["frontmatter"]["date_checks"]["ga_date"]
+    assert rec["source"] == "human" and rec["human_answer"]["answer"] == "holds"
+
+
+def test_rejected_date_reopens_when_state_changes(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    _reject_first_card(root, pid, monkeypatch)
+    pl.append_observation(pid, root=root, kind="blocker", sentinel="movement-watch",
+                          source="datasets/meetings/f.txt",
+                          claim="Release train for the gating ticket was cancelled.",
+                          date="2026-06-17")
+    calls = []
+    _judge(monkeypatch, calls=calls, changed=True)
+    result = _reconcile(root, pid, now=date(2026, 6, 17))
+    assert len(calls) == 1
+    assert "Operator input: on 2026-06-16" in calls[0]
+    assert "not as permanent" in calls[0]
+    cards = _date_cards()
+    assert len(cards) == 1
+    assert "You said this date held on 2026-06-16" in task_lib.read_task(cards[0]["id"])["body"]
+    assert result["verdict"] == "drifting"
+
+
+def test_rejected_date_stands_when_nothing_material_changed(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    _reject_first_card(root, pid, monkeypatch)
+    pl.append_observation(pid, root=root, kind="status-signal", sentinel="movement-watch",
+                          source="datasets/meetings/g.txt", claim="Routine standup.",
+                          date="2026-06-17")
+    calls = []
+    _judge(monkeypatch, calls=calls, changed=False)   # judge still uneasy, nothing new
+    result = _reconcile(root, pid, now=date(2026, 6, 17))
+    assert len(calls) == 1                              # new evidence WAS looked at
+    rec = pl.read_program(pid, root=root)["frontmatter"]["date_checks"]["ga_date"]
+    assert rec["verdict"] == "holds" and rec["source"] == "human"
+    assert _date_cards() == [] and result["verdict"] == "holding"
+
+
+def test_answered_date_not_rejudged_without_new_evidence(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    _reject_first_card(root, pid, monkeypatch)
+    calls = []
+    _judge(monkeypatch, calls=calls)
+    _reconcile(root, pid, now=date(2026, 6, 22))   # new period, but nothing new
+    assert calls == []
+
+
+def test_same_day_evidence_triggers_rejudge(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-24")
+    calls = []
+    _judge(monkeypatch, verdict="holds", suggested=None, calls=calls)
+    _reconcile(root, pid)
+    pl.append_observation(pid, root=root, kind="risk", sentinel="movement-watch",
+                          source="datasets/meetings/h.txt", claim="Same-day slip.",
+                          date="2026-06-10")   # same date as the seeded evidence
+    _reconcile(root, pid, force=False)
+    assert len(calls) == 2
+
+
+def test_closed_question_reasked_when_state_changes(tmp_path, monkeypatch):
+    root = str(tmp_path)
+    pid = _seed_dated(root, ga="2026-06-20")
+    _judge(monkeypatch, verdict="unknown", suggested=None)
+    _reconcile(root, pid)
+    task_lib.complete_task(_question_cards()[0]["id"])
+    _reconcile(root, pid)   # records "holds"
+    pl.append_observation(pid, root=root, kind="risk", sentinel="movement-watch",
+                          source="datasets/meetings/i.txt", claim="QA found a blocker.",
+                          date="2026-06-17")
+    _judge(monkeypatch, verdict="unknown", suggested=None, changed=True)
+    _reconcile(root, pid, now=date(2026, 6, 17))
+    assert len(_question_cards()) == 1
