@@ -135,3 +135,6 @@ docs/*
 !docs/INSTALL-macos.md
 !docs/INSTALL-windows.md
 !docs/INSTALL-smoke-checklist.md
+
+# Private scratch / personal notes (never tracked)
+private/
