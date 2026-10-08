@@ -30,7 +30,7 @@ External integrations are pluggable families behind structural Protocols in each
 
 ## 5. Profile + instruct-to-read-profile de-personalization
 
-All identity and integration values flow through `scripts/profile_lib.py` — getters (`provider`, `jira_config`, `pendo_config`, `resolve_model`), writers (`set_integration_provider`, `set_integration_conventions`, `set_integration_confirmed`), and CLI flags (e.g. `--pendo-subid`). This API surface is what makes invariant #1 true: skills, workers, and adapters read from the profile here rather than embedding literals. The denylist test enforces it.
+All identity and integration values flow through `scripts/profile_lib.py` — getters (`provider`, `jira_config`, `jira_fields`, `pendo_config`, `resolve_model`), writers (`set_integration_provider`, `set_integration_conventions`, `set_integration_confirmed`), and CLI flags (e.g. `--pendo-subid`, `--jira-config`). Jira custom-field ids are per-instance and live in `project_management.jira.fields` (semantic name → id; empty id = field omitted). This API surface is what makes invariant #1 true: skills, workers, and adapters read from the profile here rather than embedding literals. The denylist test enforces it.
 
 **Canonical source:** `profile/README.md`; `scripts/profile_lib.py`; `tests/test_engine_no_jay.py`.
 

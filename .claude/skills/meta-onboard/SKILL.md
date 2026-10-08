@@ -152,8 +152,12 @@ revealed exactly once, at the very end (see Close).
      sound like their team filed them. Write under `project_management.jira`: `cloud_id` (their Jira
      site, e.g. yourorg.atlassian.net), `project_key` (the prefix on their issues, like ABC),
      `board_id` (the team's board number), `default_assignee` (who new tickets go to),
-     `component_id`, and `product_area` (the swim-lane label — often one of the products from step 1).
-     Any of these can be left blank and filled in later.
+     `component_id`, `auto_label` (the lane label Features/Epics carry, if their board uses one),
+     `product_area` (that lane's display name — often one of the products from step 1), and
+     `unlabeled_lane` (where unlabeled tickets land). If they know their site's custom-field ids
+     (Epic Name, GA/EA date, spec link, client commitment, release notes, severity), write them under
+     `fields:` — an empty id just means that field is skipped. Any of these can be left blank and
+     filled in later.
      *Optional, skippable:* a Jira **email + API token** (created at id.atlassian.com → Security → API
      tokens). With them, publishing and fetching tickets goes straight to Jira's API — faster and more
      reliable. Without them, it still works through the Jira connector in Claude. They live only in

@@ -88,7 +88,7 @@ If any file has no Word copy, add: "To get a Word copy, open the file in the boa
 
 Two URLs feed the Jira Feature ticket:
 
-- **`PRD_{slug}.md`** → the Jira Feature's **Spec Reference** field (`customfield_10783`), the load-bearing field for downstream Teams comms.
+- **`PRD_{slug}.md`** → the Jira Feature's **Spec Reference** field (profile `fields.spec_reference`), the load-bearing field for downstream Teams comms.
 - **`press-release-internal.md`** → an "Internal Press Release" link in the Feature's description body.
 
 `/project:ship-it` Phase 7 option (a) runs the same `urls --json` lookup. For manual use: copy the URLs from the table and paste into `/jira:create --feature`.

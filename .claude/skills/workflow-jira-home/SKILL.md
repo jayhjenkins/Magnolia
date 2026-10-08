@@ -1,6 +1,6 @@
 ---
 name: workflow-jira-home
-description: Create Jira issues (Features, Units, Bugs, Regression Defects, etc.) on the team's Vantaca Home board (VNT) via the Jira MCP. Use when the user wants to log a bug, file a feature request, draft a unit, or create a PRD-linked Feature for the Home product area.
+description: Create Jira issues (Features, Units, Bugs, Regression Defects, etc.) on the team's Jira board (site, project, component, lane label and custom fields from profile) via the Jira MCP. Use when the user wants to log a bug, file a feature request, draft a unit, or create a PRD-linked Feature.
 triggers:
   - jira
   - create ticket
@@ -9,19 +9,39 @@ triggers:
   - create feature
   - create unit
   - feature request
-  - Vantaca Home AI DLC
-  - VNT board
-  - HXP
 ---
 
-# Jira Home Issue Creation
+# Jira Issue Creation
 
-Create issues on the team's Vantaca Home board (project `VNT`, `board_id` from `profile/integrations.yaml`) using the Jira MCP.
+Create issues on the team's Jira board using the Jira MCP. The site, project, component, board, lane label and custom-field ids are per-team values that live in the profile, never in this skill.
+
+## Step 0: Read the team's Jira config (always first)
+
+```bash
+python3 scripts/profile_lib.py --jira-config
+```
+
+This prints `profile/integrations.yaml` → `project_management.jira` as JSON (secrets removed). Use these keys everywhere below — the placeholders in `{braces}` refer to them:
+
+| Key | Meaning |
+|---|---|
+| `cloud_id` | The Jira site, e.g. `yourorg.atlassian.net`. Pass as `cloudId`; browse links are `https://{cloud_id}/browse/<KEY>`. |
+| `project_key` | Project the issue is created in. |
+| `component_id` | Default component id. Empty → omit `components`. |
+| `board_id` | The team's board, wherever a board id is needed. |
+| `auto_label` | The lane label for Features/Epics (see Lane Rule). Empty → no default label. |
+| `product_area` | Display name of the lane `auto_label` routes to. |
+| `unlabeled_lane` | Display name of the lane unlabeled issues land in (may be empty). |
+| `default_assignee` | Jira accountId Features default to. Empty → leave assignee blank. |
+| `conventions` | Free-form team nuance (e.g. client-commitment values, process notes). Honor it. |
+| `fields.<name>` | This site's custom-field id for each semantic field (table below). Empty → that field does not exist on this site: omit it, never guess an id. |
+
+If `--jira-config` prints no `project_key`/`cloud_id`, Jira isn't configured: tell the user and point them at the `workflow-doctor` skill instead of guessing.
 
 ## When to Use
 
-- User wants to log a bug for Vantaca Home (client-reported or internal regression)
-- User wants to draft a Unit (small enhancement, improvement, or single engineering change) for Home work
+- User wants to log a bug (client-reported or internal regression)
+- User wants to draft a Unit (small enhancement, improvement, or single engineering change)
 - User wants to create a Feature (PRD-linked product capability)
 - User wants to file a Spike, Hotfix, or other defect type
 - User says "create a Jira ticket", "log this bug", "file a feature request", "draft a unit", "create a feature"
@@ -63,24 +83,26 @@ Full description with context...
 ### Fields
 - **Type:** Unit
 - **Priority:** High
-- **Labels:** (none — Units land in "everything else" by default; set to `home_aidlc` only for Features/Epics or Units that mirror an AI DLC parent)
+- **Labels:** (none — Units land in the unlabeled lane by default; set to `{auto_label}` only for Features/Epics or Units that mirror a labeled parent)
 - **Release Notes:** Internal Only
 - **Parent:** PROJ-12345
 <!-- /JIRA_DRAFT -->
 ```
 
+The draft carries semantic values only. `jira_publish.py` maps them onto this site's custom-field ids from the profile at publish time, and drops any field the profile leaves unmapped.
+
 **Field rules:**
 - `JIRA_TYPE`: `Bug`, `Regression Defect`, `Story`, `Unit`, `Epic`, `Feature`, `Spike`, or `Hotfix`
 - `JIRA_PRIORITY`: `Highest`, `High`, `Medium`, `Low`, `Lowest` (or empty for default)
-- `JIRA_LABELS`: usually empty. The only label PM-OS applies is `home_aidlc`, and only on Features/Epics (see Swim Lane Rule below). For Bugs, Units, Regression Defects, Spikes, Hotfixes — leave this empty. Never invent topical labels (`calendar`, `compliance`, `resident-portal`, etc.) from the ticket subject — those create permanent noise in a taxonomy you don't own. Add a non-default label only when the user explicitly types it in their prompt.
+- `JIRA_LABELS`: usually empty. The only label PM-OS applies by default is the profile `auto_label`, and only on Features/Epics (see Lane Rule below). For Bugs, Units, Regression Defects, Spikes, Hotfixes — leave this empty. Never invent topical labels (`calendar`, `compliance`, etc.) from the ticket subject — those create permanent noise in a taxonomy you don't own. Add a non-default label only when the user explicitly types it in their prompt.
 - `JIRA_RELEASE_NOTES`: `None`, `Internal Only`, or `External` (or empty)
 - `JIRA_PARENT`: parent issue key (e.g., `PROJ-12345`) — typically for `Unit` linking to a `Feature` or `Epic`. Optional; leave empty to create unparented.
-- `JIRA_FEATURE_NAME`: short label for the Feature (Feature only — also accepted as the legacy `JIRA_EPIC_NAME` for compatibility)
+- `JIRA_FEATURE_NAME`: short label for the Feature/Epic (also accepted as the legacy `JIRA_EPIC_NAME`). Sent to Jira only for **Epics** (the Epic Name field); a Feature's title is its summary.
 - `JIRA_GTM_DATE`: `YYYY-MM-DD`, or empty / `TBD` to leave blank (Feature / Epic only)
-- `JIRA_EA_DATE`: `YYYY-MM-DD`, or empty / `TBD` to leave blank (Feature / Epic only). Early-access date — typically before GTM. Sam's process accepts incomplete dates so long as the field can be filled in later in the Jira UI.
+- `JIRA_EA_DATE`: `YYYY-MM-DD`, or empty / `TBD` to leave blank (Feature / Epic only). Early-access date — typically before GTM. Incomplete dates are fine; they can be filled in later in the Jira UI.
 - `JIRA_SPEC_REFERENCE`: absolute URL to the spec/PRD (Feature / Epic only). For PM-OS-driven Features this is the Word/SharePoint URL of `PRD_{slug}.md`. The URL goes in the Jira field, not in the description body — keep the description lean.
-- `JIRA_CLIENT_COMMITMENT`: `CAI`, `Vision`, or empty (Feature / Epic only)
-- `JIRA_ASSIGNEE`: Jira account ID string. **Interactive mode:** read `default_assignee` from `profile/integrations.yaml` (`project_management.jira`) and set it for Features (override only if the user names someone else); leave empty for non-Feature types. **Draft mode:** leave `<!-- JIRA_ASSIGNEE: -->` empty — `jira_publish.py` applies the profile `default_assignee` at publish time, so the drafting agent does NOT do the lookup. Never invent an assignee; if the profile has none, leave it blank.
+- `JIRA_CLIENT_COMMITMENT`: the team's commitment value (see profile `conventions`), or empty (Feature / Epic only)
+- `JIRA_ASSIGNEE`: Jira account ID string. **Interactive mode:** use the profile `default_assignee` for Features (override only if the user names someone else); leave empty for non-Feature types. **Draft mode:** leave `<!-- JIRA_ASSIGNEE: -->` empty — `jira_publish.py` applies the profile `default_assignee` at publish time, so the drafting agent does NOT do the lookup. Never invent an assignee; if the profile has none, leave it blank.
 
 **Description hygiene (applies to both draft mode and direct-publish mode):**
 
@@ -90,88 +112,78 @@ The `### Description` body (or `description:` arg in direct MCP calls) becomes t
 - No local paths (`datasets/`, `scripts/`, `.claude/`, etc.)
 - Reference meetings by **date + participants + customer**, not by local transcript filename
 
-Cross-link via Jira-native references instead (`VNT-NNNNN` keys, Confluence URLs, customer names, dates, verbatim quotes).
+Cross-link via Jira-native references instead (`{project_key}-NNNNN` keys, Confluence URLs, customer names, dates, verbatim quotes).
 
 ## Jira Configuration
 
-All values below are hardcoded from the Vantaca Jira instance. The migration to the team's Home board over the weekend of 2026-05-10 did not change project-level identifiers; only the issue type hierarchy and the board filter changed.
-
-| Setting | Value |
-|---------|-------|
-| Cloud ID | `vantaca.atlassian.net` |
-| Project Key | `VNT` |
-| Project ID | `10032` |
-| Default Board | from profile `board_id` (e.g. the Home AI DLC board) |
-| Default Component | `Vantaca HXP` (id `10011`) |
-| Default Label | **None.** `home_aidlc` is a *swim lane assignment* — apply it only to Features and Epics (which flow through the AI DLC automated lane). Bugs, Units, and other one-off types get no labels and land in the "everything else" column on the team's Home board. See the Swim Lane Rule below. |
-
-**Per-team values from profile.** The board and default assignee are not hardcoded — read them from `profile/integrations.yaml` under `project_management.jira`:
-- `board_id` — the team's Home board id. Use it wherever a board id is needed.
-- `default_assignee` — the Jira accountId that Features default to. If empty/unset, leave the assignee field blank rather than inventing one.
-
 ### Issue Types
 
-| Type | ID | Hierarchy | Use Case | Where it appears |
-|------|-----|-----------|----------|------------------|
-| Feature | `10446` | 1 | **Larger net-new product capability (PRD-scale).** Product-owned, contains Units as children. Replaces Epic. | Roadmap boards only — does **not** appear on the Home AI DLC kanban. |
-| Unit | `10314` | 0 | **Small enhancement, improvement, or single engineering change.** Independently buildable, testable, deployable. Default for most engineering work. Replaces Story. | the team's Home board — backlog + kanban. |
-| Bug | `10033` | 0 | **Client-reported problem or error.** Default for `--bug`. | the team's Home board — backlog + kanban. |
-| Regression Defect | `10165` | 0 | **Internally-found regression** (QA, internal testing). Use when bug source is internal, not customer. | the team's Home board — backlog + kanban. |
-| Spike | `10281` | 0 | Time-boxed investigation. | the team's Home board. |
-| Hotfix | `10076` | 0 | Emergency fix. | the team's Home board. |
-| Work Item Defect | `10164` | 0 | Internally-reported problem blocking a work item. | the team's Home board. |
-| Performance Defect | `10213` | 0 | Performance-class defect. | the team's Home board. |
-| Security Defect | `10214` | 0 | Security-class defect. | the team's Home board. |
-| Epic | `10000` | 1 | Legacy / cross-team grouping. Use Feature instead for new work. | Roadmap boards (mirrors Feature). |
-| Story | `10009` | 0 | Legacy / non-Home flows. Use Unit instead for Home engineering work. | the team's Home board. |
+Issue type names are passed as `issueTypeName`; ids differ per site, so never hardcode them.
+
+| Type | Hierarchy | Use Case | Where it appears |
+|------|-----------|----------|------------------|
+| Feature | 1 | **Larger net-new product capability (PRD-scale).** Product-owned, contains Units as children. Replaces Epic. | Roadmap boards — typically not the team kanban. |
+| Unit | 0 | **Small enhancement, improvement, or single engineering change.** Independently buildable, testable, deployable. Default for most engineering work. Replaces Story. | The team's board — backlog + kanban. |
+| Bug | 0 | **Client-reported problem or error.** Default for `--bug`. | The team's board. |
+| Regression Defect | 0 | **Internally-found regression** (QA, internal testing). Use when bug source is internal, not customer. | The team's board. |
+| Spike | 0 | Time-boxed investigation. | The team's board. |
+| Hotfix | 0 | Emergency fix. | The team's board. |
+| Work Item Defect | 0 | Internally-reported problem blocking a work item. | The team's board. |
+| Performance Defect | 0 | Performance-class defect. | The team's board. |
+| Security Defect | 0 | Security-class defect. | The team's board. |
+| Epic | 1 | Legacy / cross-team grouping. Use Feature instead for new work. | Roadmap boards (mirrors Feature). |
+| Story | 0 | Legacy flows. Use Unit instead for new engineering work. | The team's board. |
+
+If the site rejects a type name, list the project's types (`getJiraProjectIssueTypesMetadata`) and let the user pick.
 
 ### Custom Field Reference
 
-| Field | fieldId | Type | Notes |
+Custom-field ids are site-specific. Resolve each from `fields.<name>` in the `--jira-config` output; if it's empty, leave that field out of the call entirely.
+
+| Semantic field | Profile key | Type | Notes |
 |-------|---------|------|-------|
-| Feature/Epic Name | `customfield_10011` | string | Short label (Feature or Epic only). Populated from `JIRA_FEATURE_NAME` or legacy `JIRA_EPIC_NAME`. |
-| GTM Date | `customfield_10300` | date | `YYYY-MM-DD` (Feature / Epic only) |
-| EA Date | `customfield_10683` | date | `YYYY-MM-DD` (Feature / Epic only). Early-access date introduced in Sam's 2026-05-22 process refresh. |
-| Spec Reference | `customfield_10783` | URL string | Canonical home for the PRD's Word/SharePoint URL (Feature / Epic only). Sam's process refresh: downstream Teams comms and other automation read this field, so populate it whenever a published PRD URL exists. |
-| Client Commitment | `customfield_10298` | labels array | `CAI`, `Vision`, or custom (Feature / Epic only) |
-| Release Notes | `customfield_10499` | select | `None` / `Internal Only` / `External` |
-| Regression Area | `customfield_10293` | multiselect | 260+ product area options — set in Jira UI, not in PM-OS drafts |
+| Epic Name | `fields.epic_name` | string | **Epic only** — the Feature create screen rejects it. Populated from `JIRA_FEATURE_NAME` / legacy `JIRA_EPIC_NAME`. |
+| GTM / GA Date | `fields.ga_date` | date | `YYYY-MM-DD` (Feature / Epic only) |
+| EA Date | `fields.ea_date` | date | `YYYY-MM-DD` (Feature / Epic only). Early-access date. |
+| Spec Reference | `fields.spec_reference` | URL string | Canonical home for the PRD's Word/SharePoint URL (Feature / Epic only). Populate it whenever a published PRD URL exists. |
+| Client Commitment | `fields.client_commitment` | labels array | Team-defined values (Feature / Epic only) |
+| Release Notes | `fields.release_notes` | select | `None` / `Internal Only` / `External` |
+| Regression Area | — | multiselect | Usually many options — set in the Jira UI, not in PM-OS drafts |
 | Priority | `priority` | priority | Standard Jira priorities |
-| Labels | `labels` | array of string | Swim lane assignment. `home_aidlc` → AI DLC automated lane (Features/Epics only). Empty → "everything else" column (bugs, ad-hoc work). No auto-prepend; the draft's labels are submitted as-is. |
+| Labels | `labels` | array of string | Lane assignment. `{auto_label}` → the `{product_area}` lane (Features/Epics). Empty → the `{unlabeled_lane}` lane. No auto-prepend; the draft's labels are submitted as-is. |
 | Parent | `parent` | issue link | Top-level field on Unit/Sub-task — value is `{"key": "PROJ-XXXXX"}` |
-| Assignee | `assignee` | account object | `{"accountId": "..."}`. **Interactive mode:** Features get the profile `default_assignee` (`project_management.jira`) unless overridden; leave empty if unset. **Draft mode:** leave the draft assignee blank — `jira_publish.py` fills the profile `default_assignee` at publish time. Non-Feature types: leave unset unless the user specifies. |
+| Assignee | `assignee` | account object | `{"accountId": "..."}`. **Interactive mode:** Features get the profile `default_assignee` unless overridden; leave empty if unset. **Draft mode:** leave blank — `jira_publish.py` fills it at publish time. Non-Feature types: leave unset unless the user specifies. |
 
-### Swim Lane Rule
+### Lane Rule
 
-The `home_aidlc` label plays two different roles depending on the issue type:
+The profile `auto_label` plays two roles depending on the issue type. If `auto_label` is empty, the team has no lane convention: apply no default labels at all.
 
-**For Features and Epics** — it's an *initiative tag*. Features and Epics live on roadmap boards (not on the team's Home board kanban), but the label identifies them as part of the AI DLC initiative. PM-OS defaults Features and Epics to `["home_aidlc"]` for this reason.
+**For Features and Epics** — it's an *initiative tag*. Features and Epics usually live on roadmap boards, but the label identifies them as part of the team's lane. PM-OS defaults Features and Epics to `["{auto_label}"]`.
 
-**For Units, Bugs, and other backlog-tier types** — it's a *swim lane assignment* on the team's Home board:
+**For Units, Bugs, and other backlog-tier types** — it's a *lane assignment* on the team's board:
 
-- **With `home_aidlc`** → AI DLC swim lane (agent-driven, automated work the team consumes through pipelines).
-- **Without any labels** → "everything else" column (manual kanban for ad-hoc Bugs, Regression Defects, Units, Spikes, Hotfixes, and other one-off work).
+- **With `{auto_label}`** → the `{product_area}` lane.
+- **Without any labels** → the `{unlabeled_lane}` lane (ad-hoc Bugs, Regression Defects, Units, Spikes, Hotfixes, and other one-off work).
 
-PM-OS defaults these types to `[]`. A Unit that's a child of an AI DLC Feature should mirror the parent's `home_aidlc` label so the Unit lands in the swim lane.
+PM-OS defaults these types to `[]`. A Unit that's a child of a labeled Feature should mirror the parent's `{auto_label}` so the Unit lands in the same lane.
 
 **Default by issue type:**
 
 | Type | Default labels |
 |---|---|
-| Feature, Epic | `["home_aidlc"]` |
+| Feature, Epic | `["{auto_label}"]` (or `[]` if `auto_label` is empty) |
 | Bug, Regression Defect, Hotfix, Work Item Defect, Performance Defect, Security Defect, Spike | `[]` (empty) |
-| Unit, Story | `[]` by default. If the Unit is parented to a Feature/Epic that has `home_aidlc`, mirror the parent. |
+| Unit, Story | `[]` by default. If parented to a Feature/Epic carrying `{auto_label}`, mirror the parent. |
 
-**No-Invent Rule.** Do not synthesize labels from the ticket's topic, product area, customer name, or bug class. The Labels field is routing metadata controlled by the engineering team, not a tagging surface for AI-generated context — context belongs in the description. Only add a non-default label when the user explicitly dictates it in their prompt (e.g., "tag this `mobile-only`"). When in doubt, omit. The user can always add labels in the Jira UI after the fact; AI-generated labels are hard to remove once they spread.
+**No-Invent Rule.** Do not synthesize labels from the ticket's topic, product area, customer name, or bug class. The Labels field is routing metadata controlled by the engineering team, not a tagging surface for AI-generated context — context belongs in the description. Only add a non-default label when the user explicitly dictates it in their prompt (e.g., "tag this `mobile-only`"). When in doubt, omit.
 
 **Publish behavior.** `jira_publish.py` submits the draft's labels as-is. No auto-prepend. If the draft has no `JIRA_LABELS`, the issue is created with no labels.
 
 ### Workflow Notes
 
-- New issues default to **Refinement** status (some types — Unit, Feature — may default to Backlog; let Jira pick the initial transition)
-- To transition out of Refinement to "To Do", these fields must be filled in Jira: Release Notes, Regression Area, Components
-- The `Vantaca HXP` component makes the issue eligible for Home team boards
-- The `home_aidlc` label has dual roles — initiative tag for Features/Epics (they live on roadmap boards), or swim lane assignment for Units/Bugs/etc. on the team's Home board. Defaults to applied for Features/Epics, omitted for everything else. See the Swim Lane Rule above.
+- New issues default to the project's initial status (often Refinement or Backlog); let Jira pick the initial transition
+- Some workflows require Release Notes, Regression Area and Components before leaving the first status — check the profile `conventions`
+- The profile `component_id` is what makes the issue eligible for the team's boards
 - A `Unit` should be parented to a `Feature` (preferred) or `Epic` (legacy). Jira may reject Unit parents of other types — surface the error and let the user pick a valid parent.
 
 ---
@@ -193,7 +205,7 @@ Ask the user:
 >
 > - **Is something broken or wrong?** → **Bug** (client-reported) or **Regression Defect** (caught internally by QA).
 > - **Adding or changing something small** — a tweak, an improvement, a single capability change? → **Unit**. This is the default for most engineering work and is what you usually want.
-> - **Net-new product capability** driven by a PRD or larger scope? → **Feature**. Only use this when the work is roadmap-tier; Features don't appear on the AI DLC kanban.
+> - **Net-new product capability** driven by a PRD or larger scope? → **Feature**. Only use this when the work is roadmap-tier; Features usually don't appear on the team kanban.
 > - **Need to investigate before scoping?** → **Spike** (time-boxed investigation).
 > - **Emergency fix?** → **Hotfix**.
 > - Legacy hierarchy needed (Epic / Story)? → mention it explicitly.
@@ -218,26 +230,26 @@ Ask if the user wants to set any of these now (they can always be added later in
 
 - **Priority**: Highest / High / Medium / Low / Lowest
 - **Release Notes**: None / Internal Only / External
-- **Labels**: usually skip. Bugs default to no labels — they land in the "everything else" column on the team's Home board. Only ask if the user has already mentioned a specific label in their prompt. Do NOT volunteer topical tags. See the Swim Lane Rule above.
+- **Labels**: usually skip. Bugs default to no labels. Only ask if the user has already mentioned a specific label in their prompt. Do NOT volunteer topical tags. See the Lane Rule above.
 
-Do NOT ask about Regression Area — it has 260+ options and is better set in the Jira UI.
+Do NOT ask about Regression Area — it has many options and is better set in the Jira UI.
 
 ### Step 2.3: Create the Issue
 
 ```
 mcp__claude_ai_Jira__createJiraIssue(
-  cloudId: "vantaca.atlassian.net",
-  projectKey: "VNT",
+  cloudId: "{cloud_id}",
+  projectKey: "{project_key}",
   issueTypeName: "Bug" | "Regression Defect",
   summary: "<user's summary>",
   description: "<user's description>",
   contentFormat: "markdown",
   additional_fields: {
-    "components": [{"id": "10011"}],
-    "labels": [],  // bugs default to no labels — "everything else" lane. Only populate if user explicitly named a label.
-    // Include only if user provided values:
+    "components": [{"id": "{component_id}"}],   // omit if component_id is empty
+    "labels": [],  // bugs default to no labels. Only populate if user explicitly named a label.
+    // Include only if user provided values (and the field id is mapped):
     "priority": {"name": "<priority>"},
-    "customfield_10499": {"value": "<release notes choice>"}
+    "{fields.release_notes}": {"value": "<release notes choice>"}
   }
 )
 ```
@@ -246,10 +258,10 @@ mcp__claude_ai_Jira__createJiraIssue(
 
 Display:
 - Issue key (e.g., `PROJ-1234`)
-- Direct link: `https://vantaca.atlassian.net/browse/PROJ-1234`
+- Direct link: `https://{cloud_id}/browse/PROJ-1234`
 - Type: `Bug` or `Regression Defect`
-- Status: Refinement (default)
-- Reminder: "To move to To Do, you'll need to set Release Notes, Regression Area, and Components in Jira (component is already set)."
+- Status: the project's initial status
+- Reminder (if the profile `conventions` says so): which fields must be set in Jira before the issue can move on.
 
 ---
 
@@ -257,50 +269,46 @@ Display:
 
 Use this for larger net-new product capability work — PRD-scale, product-owned, contains Units as children. Replaces Epic for new work.
 
-**Heads-up:** Features live on roadmap boards, not on the Home AI DLC kanban. If the work is a small enhancement or single change, use a Unit instead — that's where most engineering work belongs.
+**Heads-up:** Features usually live on roadmap boards, not on the team kanban. If the work is a small enhancement or single change, use a Unit instead — that's where most engineering work belongs.
 
 ### Step 3.1: Gather Required Info
 
 Ask for (skip any already provided):
 
-1. **Feature Name** (required): Short label (e.g., "Mobile Push Notifications")
+1. **Feature Name** (required): Short label (e.g., "Mobile Push Notifications"). Used as the summary; it is not sent as Epic Name (the Feature screen rejects that field).
 2. **Summary** (required): One-line summary (can match Feature Name or be more descriptive)
-3. **Description / Outcome Detail** (required): What is this Feature about and why are we building it? This is the outcome detail required before inception. Keep the body lean per the Description hygiene rules — no meeting framing, no version narrative.
+3. **Description / Outcome Detail** (required): What is this Feature about and why are we building it? Keep the body lean per the Description hygiene rules — no meeting framing, no version narrative.
 
 ### Step 3.2: Gather Feature-Specific Fields
 
-Ask each in turn (skip any already provided via arguments). For dates, accept `TBD` or empty as "leave the Jira field blank — Sam's process is fine with filling it in later."
+Ask each in turn (skip any already provided via arguments, and skip any whose `fields.<name>` id is empty — the site has no such field). For dates, accept `TBD` or empty as "leave the Jira field blank — fill it in later."
 
-1. **Spec Reference URL** (recommended): The Word/SharePoint URL of the PRD or spec document. This populates the dedicated **Spec Reference** field (`customfield_10783`) — downstream Teams comms key off it, per Sam's 2026-05-22 process refresh. Paste the URL, or skip to leave blank.
+1. **Spec Reference URL** (recommended): The Word/SharePoint URL of the PRD or spec document. Populates the Spec Reference field (`fields.spec_reference`); downstream automation may key off it. Paste the URL, or skip to leave blank.
 2. **GTM Date** (optional): `YYYY-MM-DD`, or `TBD` / empty.
-3. **EA Date** (optional): `YYYY-MM-DD`, or `TBD` / empty. Early-access date — typically before GTM. New field in Sam's process refresh.
-4. **Client Commitment** (optional): Is this committed for a specific event?
-   - `CAI` — committed for CAI conference
-   - `Vision` — committed for Vision conference
-   - None — not event-committed (skip field)
-5. **Assignee** (optional): This is interactive mode, so read `default_assignee` from `profile/integrations.yaml` (`project_management.jira`) and use it; leave empty if unset, unless the user specifies someone else. Only ask if the user has already named a different person. (In draft mode this field stays blank — `jira_publish.py` fills it at publish time.)
+3. **EA Date** (optional): `YYYY-MM-DD`, or `TBD` / empty. Early-access date — typically before GTM.
+4. **Client Commitment** (optional): Is this committed for a specific event or client? Offer the values listed in the profile `conventions`; otherwise accept what the user types, or skip.
+5. **Assignee** (optional): This is interactive mode, so use the profile `default_assignee`; leave empty if unset, unless the user specifies someone else. (In draft mode this field stays blank — `jira_publish.py` fills it at publish time.)
 
 ### Step 3.3: Create the Feature
 
 ```
 mcp__claude_ai_Jira__createJiraIssue(
-  cloudId: "vantaca.atlassian.net",
-  projectKey: "VNT",
+  cloudId: "{cloud_id}",
+  projectKey: "{project_key}",
   issueTypeName: "Feature",
   summary: "<user's summary>",
   description: "<user's description with outcome detail>",
   contentFormat: "markdown",
   additional_fields: {
-    "components": [{"id": "10011"}],
-    "labels": ["home_aidlc"],  // Features go to the AI DLC swim lane
-    "customfield_10011": "<feature name>",
-    // Include only if user provided values:
-    "customfield_10300": "<YYYY-MM-DD gtm date>",
-    "customfield_10683": "<YYYY-MM-DD ea date>",
-    "customfield_10783": "<absolute spec reference url>",
-    "customfield_10298": ["<commitment flag>"],
-    // Assignee (interactive mode): read default_assignee from profile/integrations.yaml; override only if user named someone else. Omit if profile has none.
-    "assignee": {"accountId": "<default_assignee from profile/integrations.yaml, if set>"}
+    "components": [{"id": "{component_id}"}],   // omit if component_id is empty
+    "labels": ["{auto_label}"],                 // [] if auto_label is empty
+    // Include only if user provided values AND the field id is mapped:
+    "{fields.ga_date}": "<YYYY-MM-DD gtm date>",
+    "{fields.ea_date}": "<YYYY-MM-DD ea date>",
+    "{fields.spec_reference}": "<absolute spec reference url>",
+    "{fields.client_commitment}": ["<commitment flag>"],
+    // Assignee (interactive mode): profile default_assignee; override only if user named someone else. Omit if the profile has none.
+    "assignee": {"accountId": "{default_assignee}"}
   }
 )
 ```
@@ -309,19 +317,17 @@ mcp__claude_ai_Jira__createJiraIssue(
 
 Display:
 - Feature key (e.g., `PROJ-5678`)
-- Direct link: `https://vantaca.atlassian.net/browse/PROJ-5678`
-- Feature Name: displayed
+- Direct link: `https://{cloud_id}/browse/PROJ-5678`
 - Spec Reference: displayed (if set) — confirm it renders as a clickable URL in Jira
-- GTM Date: displayed (if set)
-- EA Date: displayed (if set)
-- Client Commitment: displayed (if set)
-- Status: Refinement (default)
+- GTM Date / EA Date / Client Commitment: displayed (if set)
+- Any field skipped because the profile has no id for it — so the user can fill it in Jira
+- Status: the project's initial status
 
 ---
 
 ## Phase 4: Create a Unit
 
-Use this for engineering work that is **a small enhancement, improvement, or single deployable change** — the default type for most Home engineering work. Replaces Story. Lands on the Home AI DLC board's backlog and kanban.
+Use this for engineering work that is **a small enhancement, improvement, or single deployable change** — the default type for most engineering work. Replaces Story. Lands on the team board's backlog and kanban.
 
 ### Step 4.1: Gather Required Info
 
@@ -337,26 +343,26 @@ Ask:
 
 - **Priority**: Highest / High / Medium / Low / Lowest
 - **Release Notes**: None / Internal Only / External
-- **Labels**: usually skip. Units default to no labels — they land in the "everything else" column. If this Unit is a child of a Feature/Epic that lives in the AI DLC swim lane (`home_aidlc`), mirror the parent's label. Otherwise leave empty. Do NOT volunteer topical tags. See the Swim Lane Rule above.
+- **Labels**: usually skip. Units default to no labels. If this Unit is a child of a Feature/Epic carrying `{auto_label}`, mirror the parent's label. Otherwise leave empty. Do NOT volunteer topical tags. See the Lane Rule above.
 
 ### Step 4.3: Create the Unit
 
 ```
 mcp__claude_ai_Jira__createJiraIssue(
-  cloudId: "vantaca.atlassian.net",
-  projectKey: "VNT",
+  cloudId: "{cloud_id}",
+  projectKey: "{project_key}",
   issueTypeName: "Unit",
   summary: "<user's summary>",
   description: "<user's description>",
   contentFormat: "markdown",
   additional_fields: {
-    "components": [{"id": "10011"}],
-    "labels": [],  // Units default to "everything else" — set to ["home_aidlc"] only if parented to a home_aidlc Feature
+    "components": [{"id": "{component_id}"}],   // omit if component_id is empty
+    "labels": [],  // set to ["{auto_label}"] only if parented to a Feature carrying it
     // Include only if parent provided:
     "parent": {"key": "<PROJ-XXXXX>"},
-    // Include only if user provided values:
+    // Include only if user provided values (and the field id is mapped):
     "priority": {"name": "<priority>"},
-    "customfield_10499": {"value": "<release notes choice>"}
+    "{fields.release_notes}": {"value": "<release notes choice>"}
   }
 )
 ```
@@ -372,20 +378,21 @@ Display:
 
 ## Phase 5: Legacy Epic / Story
 
-Retained for cases where the user explicitly asks for Epic or Story, or for non-Home work routed through this skill. New Home work should prefer Feature / Unit (Phases 3 / 4).
+Retained for cases where the user explicitly asks for Epic or Story. New work should prefer Feature / Unit (Phases 3 / 4).
 
-The flow is identical to Phase 3 (Epic mirrors Feature) and Phase 4 (Story mirrors Unit). Substitute `issueTypeName: "Epic"` or `"Story"` accordingly. The legacy `JIRA_EPIC_NAME` field name is still accepted for Epic creation.
+The flow is identical to Phase 3 (Epic mirrors Feature) and Phase 4 (Story mirrors Unit). Substitute `issueTypeName: "Epic"` or `"Story"` accordingly. **Epics additionally set Epic Name:** `"{fields.epic_name}": "<epic name>"` (if the id is mapped). The legacy `JIRA_EPIC_NAME` field name is still accepted.
 
-**Label defaults follow the Swim Lane Rule:** Epic defaults to `["home_aidlc"]` (mirrors Feature — AI DLC swim lane). Story defaults to `[]` (mirrors Unit — "everything else" column).
+**Label defaults follow the Lane Rule:** Epic defaults to `["{auto_label}"]` (mirrors Feature). Story defaults to `[]` (mirrors Unit).
 
 ---
 
 ## Error Handling
 
 - **MCP unavailable**: "The Jira MCP is not connected. Make sure you're running inside this project with MCP integrations enabled."
-- **Permission denied**: "You don't have permission to create issues in VNT. Check your Jira access."
-- **Field validation error**: Display the error from Jira and suggest corrections.
-- **Component not found**: Fall back to using the component name instead of ID: `[{"name": "Vantaca HXP"}]`
+- **Jira not configured** (no `cloud_id` / `project_key` from `--jira-config`): say so and point at the `workflow-doctor` skill. Never guess a site or project.
+- **Permission denied**: "You don't have permission to create issues in {project_key}. Check your Jira access."
+- **Field validation error** (e.g. "cannot be set"): display the error from Jira and drop the rejected field — it may not be on that issue type's create screen. If a custom-field id looks wrong, suggest correcting `fields.<name>` in `profile/integrations.yaml`.
+- **Component not found**: surface the error and suggest checking `component_id` in the profile.
 - **Parent issue invalid or wrong type**: Jira rejects Units parented to anything other than a Feature/Epic. Show the error, suggest a valid parent (Feature preferred), and offer to retry without the parent.
 - **Unknown issue type**: Normalize common variants (`unit` → `Unit`, `regression defect` → `Regression Defect`, `feature` → `Feature`) before failing. If still unrecognized, list the valid types from the table above.
 

@@ -150,6 +150,37 @@ def jira_config(root=None):
     return pm.get("jira") or {}
 
 
+# Semantic Jira custom fields the engine knows how to fill. The ids are
+# instance-specific (every Jira site numbers its custom fields differently), so
+# they live in the profile under project_management.jira.fields. An empty id
+# means "this site has no such field" and the engine omits it - never guesses.
+JIRA_FIELD_KEYS = ("epic_name", "ga_date", "ea_date", "spec_reference",
+                   "client_commitment", "release_notes", "severity")
+
+# Secrets that must never be echoed by the CLI or into a prompt.
+_JIRA_SECRET_KEYS = ("api_token", "email")
+
+
+def jira_fields(root=None):
+    """Semantic name -> Jira custom-field id ("" when unmapped).
+
+    Always returns every key in JIRA_FIELD_KEYS (plus any extra the profile
+    declares), so callers can look ids up without KeyError."""
+    raw = jira_config(root).get("fields") or {}
+    out = {k: "" for k in JIRA_FIELD_KEYS}
+    for k, v in raw.items():
+        out[str(k)] = str(v or "").strip()
+    return out
+
+
+def jira_public_config(root=None):
+    """The Jira profile block with secrets removed and `fields` normalized -
+    safe to print for skills that read the team's board settings."""
+    cfg = {k: v for k, v in jira_config(root).items() if k not in _JIRA_SECRET_KEYS}
+    cfg["fields"] = jira_fields(root)
+    return cfg
+
+
 def doc_sync_config(root=None):
     d = integration("doc_sync", root)
     return {
@@ -586,3 +617,5 @@ if __name__ == "__main__":
         print(pendo_config().get("subscription_id", ""))
     if "--databricks-catalog" in sys.argv:
         print(databricks_config().get("catalog", ""))
+    if "--jira-config" in sys.argv:
+        print(json.dumps(jira_public_config(), indent=2))

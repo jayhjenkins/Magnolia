@@ -30,6 +30,13 @@ JIRA_PROJECT_KEY = _jira.get("project_key", "")
 JIRA_COMPONENT_ID = _jira.get("component_id", "")
 JIRA_AUTO_LABEL = _jira.get("auto_label", "")
 JIRA_DEFAULT_ASSIGNEE = _jira.get("default_assignee", "")
+JIRA_PRODUCT_AREA = _jira.get("product_area", "")
+JIRA_UNLABELED_LANE = _jira.get("unlabeled_lane", "")
+
+# Semantic name -> this site's custom-field id (project_management.jira.fields).
+# Custom-field ids differ per Jira instance; an empty id means the field is
+# omitted, never guessed.
+JIRA_FIELDS = profile_lib.jira_fields()
 
 # Base for issue browse URLs, derived from the profile's cloud_id (e.g.
 # "https://yourorg.atlassian.net/browse"). Empty until a profile is configured.
@@ -52,8 +59,44 @@ JIRA_TYPE_CANONICAL = {
     "security defect": "Security Defect",
 }
 
-# Types that use the Feature/Epic-name custom field (customfield_10011).
+# Types that take the date / spec / commitment custom fields. Only "Epic" gets
+# the Epic Name field: the Feature create screen rejects it ("cannot be set"),
+# so a Feature's title is just its summary.
 NAMED_PARENT_TYPES = {"Feature", "Epic"}
+
+
+def _fid(name):
+    """The profile's custom-field id for a semantic field, or "" if unmapped."""
+    return (JIRA_FIELDS or {}).get(name, "") or ""
+
+
+def _set_field(fields, name, value):
+    """Set fields[<id>] = value only when the profile maps `name` to an id."""
+    fid = _fid(name)
+    if fid:
+        fields[fid] = value
+
+
+def _date_fields(update):
+    """EA/GA date edits for an update dict, keyed by the profile's field ids."""
+    fields = {}
+    if update.get("ea_date"):
+        _set_field(fields, "ea_date", update["ea_date"])
+    if update.get("ga_date"):
+        _set_field(fields, "ga_date", update["ga_date"])
+    return fields
+
+
+def lane_hint(labels):
+    """A short dry-run hint naming the board lane a label set routes to.
+
+    Driven by the profile (auto_label -> product_area, unlabeled_lane); empty
+    when the profile declares no lane convention."""
+    if not labels:
+        return f" ({JIRA_UNLABELED_LANE} lane)" if JIRA_UNLABELED_LANE else ""
+    if JIRA_AUTO_LABEL and JIRA_AUTO_LABEL in labels and JIRA_PRODUCT_AREA:
+        return f" ({JIRA_PRODUCT_AREA} lane)"
+    return ""
 
 
 def normalize_type(raw):
@@ -384,29 +427,30 @@ def _build_additional_fields(draft):
             seen.add(l)
             labels.append(l)
 
-    additional_fields = {
-        "components": [{"id": JIRA_COMPONENT_ID}],
-        "labels": labels,
-    }
+    additional_fields = {"labels": labels}
+    if JIRA_COMPONENT_ID:
+        additional_fields["components"] = [{"id": JIRA_COMPONENT_ID}]
 
     if draft.get("priority"):
         additional_fields["priority"] = {"name": draft["priority"]}
 
     if draft.get("release_notes"):
-        additional_fields["customfield_10499"] = {"value": draft["release_notes"]}
+        _set_field(additional_fields, "release_notes", {"value": draft["release_notes"]})
 
     if issue_type in NAMED_PARENT_TYPES:
         name = draft.get("feature_name") or draft.get("epic_name")
-        if name:
-            additional_fields["customfield_10011"] = name
+        # Epic Name is on the Epic screen only; the Feature create screen
+        # rejects it ("cannot be set"). Feature title is the summary.
+        if name and issue_type == "Epic":
+            _set_field(additional_fields, "epic_name", name)
         if draft.get("gtm_date"):
-            additional_fields["customfield_10300"] = draft["gtm_date"]
+            _set_field(additional_fields, "ga_date", draft["gtm_date"])
         if draft.get("ea_date"):
-            additional_fields["customfield_10683"] = draft["ea_date"]
+            _set_field(additional_fields, "ea_date", draft["ea_date"])
         if draft.get("spec_reference"):
-            additional_fields["customfield_10783"] = draft["spec_reference"]
+            _set_field(additional_fields, "spec_reference", draft["spec_reference"])
         if draft.get("client_commitment"):
-            additional_fields["customfield_10298"] = [draft["client_commitment"]]
+            _set_field(additional_fields, "client_commitment", [draft["client_commitment"]])
 
     parent_key = (draft.get("parent") or "").strip()
     if parent_key:
@@ -448,10 +492,7 @@ def _update_rest(client, update):
             fields["labels"] = update["labels"]
         if update.get("description"):
             fields["description"] = update["description"]
-        if update.get("ea_date"):
-            fields["customfield_10683"] = update["ea_date"]
-        if update.get("ga_date"):
-            fields["customfield_10300"] = update["ga_date"]
+        fields.update(_date_fields(update))
         return client.edit_issue(key, fields)
     elif action == "comment_and_edit":
         fields = {}
@@ -463,10 +504,7 @@ def _update_rest(client, update):
             fields["labels"] = update["labels"]
         if update.get("description"):
             fields["description"] = update["description"]
-        if update.get("ea_date"):
-            fields["customfield_10683"] = update["ea_date"]
-        if update.get("ga_date"):
-            fields["customfield_10300"] = update["ga_date"]
+        fields.update(_date_fields(update))
         client.edit_issue(key, fields)
         return client.add_comment(key, update["comment_body"])
     elif action == "transition":
@@ -480,10 +518,9 @@ def _update_rest(client, update):
 
 def _fetch_rest(client, issue_key):
     """Fetch a Jira issue via direct REST API."""
-    fields = client.get_issue(
-        issue_key,
-        fields=["summary", "status", "duedate", "customfield_10683", "customfield_10300"],
-    )
+    ea_id, ga_id = _fid("ea_date"), _fid("ga_date")
+    wanted = ["summary", "status", "duedate"] + [f for f in (ea_id, ga_id) if f]
+    fields = client.get_issue(issue_key, fields=wanted)
     if fields is None:
         return None
     status = fields.get("status", {})
@@ -491,8 +528,8 @@ def _fetch_rest(client, issue_key):
         "status": status.get("name", "") if isinstance(status, dict) else str(status),
         "title": fields.get("summary", ""),
         "due": fields.get("duedate") or None,
-        "ea_date": fields.get("customfield_10683") or None,
-        "ga_date": fields.get("customfield_10300") or None,
+        "ea_date": (fields.get(ea_id) if ea_id else None) or None,
+        "ga_date": (fields.get(ga_id) if ga_id else None) or None,
     }
 
 
@@ -613,48 +650,7 @@ JIRA_SYSTEM_PROMPT = (
 def build_claude_prompt(draft):
     """Build a constrained prompt for Claude to call the Jira MCP tool."""
     issue_type = normalize_type(draft.get("type") or "Bug")
-
-    seen = set()
-    labels = []
-    for l in (draft.get("labels") or []):
-        if l and l not in seen:
-            seen.add(l)
-            labels.append(l)
-
-    additional_fields = {
-        "components": [{"id": JIRA_COMPONENT_ID}],
-        "labels": labels,
-    }
-
-    if draft.get("priority"):
-        additional_fields["priority"] = {"name": draft["priority"]}
-
-    if draft.get("release_notes"):
-        additional_fields["customfield_10499"] = {"value": draft["release_notes"]}
-
-    if issue_type in NAMED_PARENT_TYPES:
-        name = draft.get("feature_name") or draft.get("epic_name")
-        if name:
-            additional_fields["customfield_10011"] = name
-        if draft.get("gtm_date"):
-            additional_fields["customfield_10300"] = draft["gtm_date"]
-        if draft.get("ea_date"):
-            additional_fields["customfield_10683"] = draft["ea_date"]
-        if draft.get("spec_reference"):
-            additional_fields["customfield_10783"] = draft["spec_reference"]
-        if draft.get("client_commitment"):
-            additional_fields["customfield_10298"] = [draft["client_commitment"]]
-
-    parent_key = (draft.get("parent") or "").strip()
-    if parent_key:
-        additional_fields["parent"] = {"key": parent_key}
-
-    assignee_id = (draft.get("assignee") or "").strip()
-    if issue_type in NAMED_PARENT_TYPES:
-        additional_fields["assignee"] = {"accountId": assignee_id or JIRA_DEFAULT_ASSIGNEE}
-    elif assignee_id:
-        additional_fields["assignee"] = {"accountId": assignee_id}
-
+    additional_fields = _build_additional_fields(draft)
     additional_fields_json = json.dumps(additional_fields)
 
     summary_escaped = draft["summary"].replace('"', '\\"')
@@ -821,28 +817,41 @@ def _run_jira_session(prompt, allowed_tools, session_id=None, max_turns=3):
     raise RuntimeError(f"Could not parse Jira result from Claude output. Exit code: {result.returncode}. Output: {output[:500]}")
 
 
+def build_read_prompt(issue_key):
+    """Build the getJiraIssue prompt. EA/GA date fields are requested only when
+    the profile maps them; otherwise the model reports them as none."""
+    ea_id, ga_id = _fid("ea_date"), _fid("ga_date")
+    wanted = ["summary", "status", "duedate"] + [f for f in (ea_id, ga_id) if f]
+    notes = [
+        f"{ea_id} is the EA date." if ea_id else "There is no EA date field; report none.",
+        f"{ga_id} is the GA date." if ga_id else "There is no GA date field; report none.",
+    ]
+
+    return f"""Read Jira issue {issue_key}:
+
+Tool: mcp__claude_ai_Jira__getJiraIssue
+Parameters:
+  cloudId: "{JIRA_CLOUD_ID}"
+  issueIdOrKey: "{issue_key}"
+  fields: {json.dumps(wanted)}
+
+Report the result as a single line with pipe-separated fields:
+JIRA_READ:status_name|summary_text|due_date_or_none|ea_date_or_none|ga_date_or_none
+
+{" ".join(notes)}
+
+For example: JIRA_READ:In Progress|Build the feed widget|2026-09-15|2026-08-01|2026-09-15
+Or with missing dates: JIRA_READ:Done|Ship the feature|none|none|none
+If the issue is not found: JIRA_READ:NOT_FOUND"""
+
+
 def _run_jira_read_session(issue_key):
     """Spawn a mini CLI session to read a Jira issue via MCP.
 
     Returns the raw output string for parsing.
     Raises RuntimeError on failure.
     """
-    prompt = f"""Read Jira issue {issue_key}:
-
-Tool: mcp__claude_ai_Jira__getJiraIssue
-Parameters:
-  cloudId: "{JIRA_CLOUD_ID}"
-  issueIdOrKey: "{issue_key}"
-  fields: ["summary", "status", "duedate", "customfield_10683", "customfield_10300"]
-
-Report the result as a single line with pipe-separated fields:
-JIRA_READ:status_name|summary_text|due_date_or_none|ea_date_or_none|ga_date_or_none
-
-customfield_10683 is the EA date. customfield_10300 is the GA date.
-
-For example: JIRA_READ:In Progress|Build the feed widget|2026-09-15|2026-08-01|2026-09-15
-Or with missing dates: JIRA_READ:Done|Ship the feature|none|none|none
-If the issue is not found: JIRA_READ:NOT_FOUND"""
+    prompt = build_read_prompt(issue_key)
 
     cmd, harness_name = harness_lib.build_oneshot_cmd(
         prompt, profile_lib.resolve_model("standard", min_tier="standard"),
@@ -990,18 +999,11 @@ def main():
         if l and l not in effective_labels:
             effective_labels.append(l)
 
-    if not effective_labels:
-        lane_hint = " ('everything else' column)"
-    elif JIRA_AUTO_LABEL in effective_labels:
-        lane_hint = " (AI DLC swim lane)"
-    else:
-        lane_hint = ""
-
     print(f"Parsed Jira Draft:")
     print(f"  Type:        {draft['type']}")
     print(f"  Summary:     {draft['summary']}")
     print(f"  Priority:    {draft['priority'] or '(default)'}")
-    print(f"  Labels:      {', '.join(effective_labels) or '(none)'}{lane_hint}")
+    print(f"  Labels:      {', '.join(effective_labels) or '(none)'}{lane_hint(effective_labels)}")
     print(f"  Release:     {draft['release_notes'] or '(none)'}")
     if draft.get("parent"):
         print(f"  Parent:      {draft['parent']}")
