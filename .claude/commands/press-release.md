@@ -16,7 +16,7 @@ Articulate the product vision through dual press releases (external customer-fac
 
 ## Prerequisites
 
-- A Context Brief should exist (from `/discover` or manual input)
+- A Context Brief should exist (from `/context-brief` — the `workflow-context-brief` skill — or manual input)
 - The PM must have a rough vision, problem statement, or feature idea
 
 ## Arguments

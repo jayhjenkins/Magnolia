@@ -37,11 +37,11 @@ Derive the slug from `--topic` if provided, or ask the PM for the initiative nam
 
 1. If `--topic` was provided, use it as the starting problem statement
 2. If `--from-transcript` was provided, process the transcript for context
-3. Run `/project:create-notes` or use Context Gathering skills to produce the Context Brief through interactive conversation with the PM
+3. Read and execute `.claude/skills/workflow-context-brief/SKILL.md` (pass the topic/transcript and the package folder) to produce the Context Brief through interactive conversation with the PM. Template: `datasets/product/templates/context-brief.md`
 
 **Output**: `{package}/context-brief.md`
 
-**Gate 1**: Verify context-brief.md contains at least one clearly stated customer problem backed by data. If not, ask the PM for more input before proceeding.
+**Gate 1**: Verify context-brief.md contains at least one clearly stated customer problem backed by data (the brief's header records the skill's Gate 1 self-check). If not, ask the PM for more input before proceeding.
 
 ---
 
