@@ -157,6 +157,8 @@ If the result has zero slots (`"slots": []`) OR `empty_reason` indicates `Attend
 
 3. **Hard block only.** Only call `agent:ask` if the operator themselves has zero availability across the next 10 business days — that is a real scheduling failure. Do NOT ask whether to widen, whether to propose anyway, or which option is best.
 
+**Day-pinned asks.** If the ask names a day ("Friday", "tomorrow"), search that whole day first (use `--start`/`--end` for just that date) and, when it is tight, retry with the shorter duration the ask allows (e.g. 30-45 min) before looking at other days. Only if that day has no clean slot (Rule 8) offer the nearest alternative days, and say so in the completion comment ("Friday had no clean slot; Options 3-4 are Thursday").
+
 **Do NOT use MCP tools for availability lookup** — the headless dispatch environment does not have MCP access. Always use the `find_meeting_times.py` script.
 
 ### 5. Format Suggested Times
@@ -221,6 +223,8 @@ Also update the description body to include the `## Suggested Times` section. Us
 
 **Gate before completing.** Re-read the task frontmatter. If any `meeting_attendees` entry has no `@`, go back to Step 3 (resolve it or `agent:ask` and STOP). If any slot violates Slot quality rules 0, 6, or 7 without the required note, fix the slot list first.
 
+**Per-slot check (write it out before completing).** For each slot, list in your own notes: (a) the fixed meetings and protected blocks from the Calendar Structure Reference that fall on that day, and whether the slot's start-to-end range intersects any of them (compare end time to the next meeting's start, not just the start); (b) whether the day matches the day the ask named. Any slot that intersects must be dropped or labelled "overlaps {meeting}" per Rule 7. Make sure the option numbers in your completion comment match the `<!-- SLOT:N -->` numbers exactly.
+
 ```bash
 ./scripts/task.sh agent:complete {TASK_ID}
 ```
@@ -279,6 +283,7 @@ Use this reference when annotating suggested time slots in Step 5.
 ## Success Criteria
 
 - Task updated with 2-4 selectable time slots, none in the past
+- Option numbers in the completion comment match the SLOT numbers; day named in the ask was searched in full before other days
 - Every attendee is an email; missing or inferred attendees are named under **Attendees to confirm**
 - No slot sits in a protected block or overlaps a fixed meeting unless it is ranked last with that stated
 - Working sessions, reviews, and sign-offs name the expected output or decision in `meeting_description`
