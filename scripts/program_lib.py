@@ -110,7 +110,10 @@ def _parse_program_file(filepath):
         raise ValueError(f"Program file has malformed frontmatter: {filepath}")
 
     fm_str = parts[1]
-    body = parts[2]
+    # Drop the one newline _write_program_file emits after the closing ---, so a
+    # parse -> write round trip is byte-stable (keeping it grew the file by one
+    # blank line on every write).
+    body = parts[2][1:] if parts[2].startswith("\n") else parts[2]
 
     fm = yaml.load(fm_str)
     if fm is None:
@@ -136,6 +139,9 @@ def _write_program_file(filepath, frontmatter, body):
     yaml.dump(frontmatter, stream)
     fm_str = stream.getvalue()
 
+    # lstrip heals files that accumulated leading blank lines before the parser
+    # fix above; the body always starts at a `## ` heading.
+    body = body.lstrip("\n")
     content = f"---\n{fm_str}---\n{body}"
 
     with open(filepath, "w", encoding="utf-8") as f:

@@ -2964,6 +2964,8 @@ def handle_schedule_meeting(handler, task_id):
     # Use values from POST body if provided (user may have edited in UI), else fall back to task frontmatter
     meeting_title = body.get("meeting_title") or fm.get("meeting_title") or fm.get("title", "Meeting")
     meeting_attendees_raw = body.get("attendees") or fm.get("meeting_attendees") or []
+    if isinstance(meeting_attendees_raw, str):  # bare string would iterate per character
+        meeting_attendees_raw = [a.strip() for a in meeting_attendees_raw.split(",") if a.strip()]
     meeting_description = body.get("meeting_description") or fm.get("meeting_description") or ""
     timezone = "America/New_York"
 

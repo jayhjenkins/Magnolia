@@ -757,6 +757,27 @@ def _persist_session_id(task_id, claude_session_id):
         log(f"WARN: could not persist session id for {task_id}", task_id=task_id)
 
 
+def _mark_running(task_id):
+    """Best-effort: stamp agent_status=running once the worker has launched.
+
+    The dispatch-sweep re-dispatches any actionable task whose agent_status is
+    still empty after 90s. Workers are told to run `agent:start`, but not every
+    worker prompt does (or does it early), so a slow worker got a fresh duplicate
+    every sweep tick. Marking it here closes that window for every worker. Only
+    fills an EMPTY status - a resumed `queued` task keeps its own flow. Never
+    raises (same contract as _persist_session_id).
+    """
+    try:
+        fm = task_lib.read_task(task_id)["frontmatter"]
+        if fm.get("agent_status") is None:
+            task_lib.update_task(task_id, {
+                "agent_status": "running",
+                "agent_started": task_lib._now_iso(),
+            })
+    except Exception:
+        log(f"WARN: could not mark {task_id} running", task_id=task_id)
+
+
 def apply_output_format(prompt, task_fm, worker):
     """Append the HTML contract pointer when the task resolves to html.
 
@@ -899,6 +920,8 @@ def dispatch_task(task, dry_run=False, rerun=False, workers=None):
     # The worker is already running (Popen succeeded) — a persistence failure
     # must not orphan the live process or crash the dispatch loop.
     _persist_session_id(task_id, claude_session_id)
+    # Mark running now so the dispatch-sweep can't re-dispatch a slow worker.
+    _mark_running(task_id)
 
     # Poll: wait for process exit OR agent to report completion via task file.
     # The claude interactive process often hangs after the agent finishes, so we

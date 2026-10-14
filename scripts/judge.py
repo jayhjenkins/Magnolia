@@ -320,6 +320,14 @@ def detect_kind(fm):
     return None
 
 
+def _as_list(value):
+    """Frontmatter list fields sometimes arrive as one bare/comma-separated string;
+    joining that directly would split it into single characters."""
+    if isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    return list(value or [])
+
+
 def _meeting_activity_line(body):
     """Pull the 'Calendar event created...' line from the activity log, if present."""
     for line in body.splitlines():
@@ -361,7 +369,7 @@ def gather_evidence(kind, fm, body, task_id):
         selected = fm.get("meeting_selected_slot")
         fields = [
             ("Title", fm.get("meeting_title") or fm.get("title")),
-            ("Attendees", ", ".join(fm.get("meeting_attendees") or []) or "(none recorded)"),
+            ("Attendees", ", ".join(_as_list(fm.get("meeting_attendees"))) or "(none recorded)"),
             ("Duration (min)", fm.get("meeting_duration")),
             ("Recurrence", fm.get("meeting_recurrence_pattern") or ("recurring" if fm.get("meeting_recurring") else "one-time")),
             ("Description / agenda", (fm.get("meeting_description") or "").strip() or "(none)"),
