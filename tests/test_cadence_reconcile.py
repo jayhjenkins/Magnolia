@@ -2647,26 +2647,74 @@ def test_fire_weekday_fresh_cycle_on_target_day_prevents_mid_cycle_refire(tmp_pa
     assert r2["emitted"] == []
 
 
-def test_fire_weekday_mid_cycle_wrong_day_no_fire(tmp_path):
-    # Cycle starts Monday, re-reconcile on Wednesday (not the target Tuesday).
-    # The emitter should NOT fire on Wednesday.
+def test_fire_weekday_mid_cycle_before_target_day_no_fire(tmp_path):
+    # Cycle starts Monday, re-reconcile on Tuesday; the target is Wednesday.
+    # The target day has not arrived yet -> no fire.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    monday = date(2026, 6, 15)
+    tuesday = date(2026, 6, 16)
+
+    program = pl.read_program(program_id, root=root)
+    reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=3), now=monday
+    )
+
+    program = pl.read_program(program_id, root=root)
+    r2 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=3), now=tuesday
+    )
+    assert r2["new_cycle"] is False
+    assert r2["emitted"] == []
+
+
+def test_fire_weekday_missed_target_day_catches_up(tmp_path):
+    # Cycle starts Monday; NO tick runs on the Tuesday target (host asleep).
+    # The Wednesday tick catches up and fires once; Thursday does not re-fire.
     root = str(tmp_path / "data")
     program_id = _seed_holding_weekly_priorities(root)
     monday = date(2026, 6, 15)
     wednesday = date(2026, 6, 17)
+    thursday = date(2026, 6, 18)
 
-    # Monday: fresh cycle, fire_weekday=2 skipped.
     program = pl.read_program(program_id, root=root)
     reconcile.reconcile_program(
         program, _day_registry(fire_weekday=2), now=monday
     )
 
-    # Wednesday: mid-cycle tick, fire_weekday=2 doesn't match Wednesday (3).
     program = pl.read_program(program_id, root=root)
     r2 = reconcile.reconcile_program(
         program, _day_registry(fire_weekday=2), now=wednesday
     )
     assert r2["new_cycle"] is False
+    assert len(r2["emitted"]) == 1
+
+    program = pl.read_program(program_id, root=root)
+    r3 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=thursday
+    )
+    assert r3["emitted"] == []
+    assert len(task_lib.list_tasks(queue="collab", status="open")) == 1
+
+
+def test_fire_weekday_fresh_cycle_after_target_day_catches_up(tmp_path):
+    # The first tick of the week lands Wednesday (Mon + Tue missed). The fresh
+    # cycle fires the Tuesday emitter and records it so later ticks don't re-fire.
+    root = str(tmp_path / "data")
+    program_id = _seed_holding_weekly_priorities(root)
+    wednesday = date(2026, 6, 17)
+
+    program = pl.read_program(program_id, root=root)
+    r1 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=wednesday
+    )
+    assert r1["new_cycle"] is True
+    assert len(r1["emitted"]) == 1
+
+    program = pl.read_program(program_id, root=root)
+    r2 = reconcile.reconcile_program(
+        program, _day_registry(fire_weekday=2), now=wednesday
+    )
     assert r2["emitted"] == []
 
 
@@ -2845,10 +2893,15 @@ def test_fire_month_occurrence_skips_1st_monday(tmp_path, monkeypatch):
     assert result["emitted"] == []
 
 
-def test_fire_month_occurrence_skips_3rd_monday(tmp_path, monkeypatch):
-    # August 17, 2026 = 3rd Monday. Target is 2nd. Cycle already started this month.
+def test_fire_month_occurrence_already_fired_no_refire_on_3rd_monday(tmp_path, monkeypatch):
+    # August 17, 2026 = 3rd Monday. The 2nd-Monday fire is already recorded for
+    # 2026-08 -> no re-fire.
     root = str(tmp_path / "data")
     pid = _seed_monthly_program(root, last_cycle="2026-08")
+    path = pl.read_program(pid, root=root)["filepath"]
+    fm, body = pl._parse_program_file(path)
+    fm["weekday_fired"] = {"2026-08": ["1:2"]}
+    pl._write_program_file(path, fm, body)
     aug_17 = date(2026, 8, 17)
 
     monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
@@ -2858,9 +2911,54 @@ def test_fire_month_occurrence_skips_3rd_monday(tmp_path, monkeypatch):
         program, _monthly_registry(fire_weekday=1, fire_month_occurrence=2),
         now=aug_17
     )
-    # Same month (2026-08) -> not a new cycle. 3rd Monday != 2nd Monday -> no fire.
     assert result["new_cycle"] is False
     assert result["emitted"] == []
+
+
+def test_fire_month_occurrence_missed_2nd_monday_catches_up(tmp_path, monkeypatch):
+    # The regression: October 2026 cycle started Oct 1; no tick ran on the 2nd
+    # Monday (Oct 12, host asleep). The Tuesday Oct 13 tick must fire the prep
+    # once, and Oct 14 must not fire it again.
+    root = str(tmp_path / "data")
+    pid = _seed_monthly_program(root, last_cycle="2026-09")
+    reg = _monthly_registry(fire_weekday=1, fire_month_occurrence=2)
+
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    program = pl.read_program(pid, root=root)
+    r1 = reconcile.reconcile_program(program, reg, now=date(2026, 10, 1))
+    assert r1["new_cycle"] is True
+    assert r1["emitted"] == []
+
+    program = pl.read_program(pid, root=root)
+    r2 = reconcile.reconcile_program(program, reg, now=date(2026, 10, 13))
+    assert r2["new_cycle"] is False
+    assert len(r2["emitted"]) == 1
+
+    program = pl.read_program(pid, root=root)
+    r3 = reconcile.reconcile_program(program, reg, now=date(2026, 10, 14))
+    assert r3["emitted"] == []
+
+
+def test_fire_month_occurrence_before_target_no_fire(tmp_path, monkeypatch):
+    # Oct 6, 2026 is the 1st Tuesday - before the 2nd Monday (Oct 12) -> no fire.
+    root = str(tmp_path / "data")
+    pid = _seed_monthly_program(root, last_cycle="2026-10")
+
+    monkeypatch.setattr(reconcile, "_dispatch_agent_task", lambda tid: None)
+
+    program = pl.read_program(pid, root=root)
+    result = reconcile.reconcile_program(
+        program, _monthly_registry(fire_weekday=1, fire_month_occurrence=2),
+        now=date(2026, 10, 6)
+    )
+    assert result["emitted"] == []
+
+
+def test_weekday_fire_gate_monthly_5th_occurrence_absent_never_due():
+    # February 2026 has only four Mondays -> a 5th-Monday emitter is never due.
+    em = {"fire_weekday": 1, "fire_month_occurrence": 5}
+    assert reconcile._weekday_fire_gate(em, "monthly", date(2026, 2, 28)) == (False, "1:5")
 
 
 def test_fire_month_occurrence_mid_cycle_fires_on_target_day(tmp_path, monkeypatch):
@@ -3074,7 +3172,9 @@ def test_proposals_only_skips_cycle_programs(tmp_path):
     root = str(tmp_path)
     pid, _ = pl.create_program(
         type="weekly-priorities", title="Weekly", owner_role="pm",
-        frontmatter_extra={"last_cycle": PERIOD},
+        # Monday's digest already fired this period (else NOW, a Tuesday, would
+        # legitimately catch up the missed Monday fire).
+        frontmatter_extra={"last_cycle": PERIOD, "weekday_fired": {PERIOD: [1]}},
         root=root,
     )
     result = reconcile.reconcile_program(

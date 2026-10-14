@@ -1587,3 +1587,29 @@ def test_apply_archive_defaults_reason_when_missing(tmp_path):
     assert result["applied"] == "archive"
     prog = pl.read_program(pid, root=root)
     assert prog["frontmatter"]["status"] == "archived"
+
+
+def test_parse_write_round_trip_does_not_grow_file(tmp_path):
+    """Regression: the parser kept the newline after the closing --- as part of
+    the body and the writer prepended another, adding a blank line per write."""
+    root = str(tmp_path)
+    _, path = pl.create_program(type="weekly-priorities", title="Bloat",
+                                owner_role="product", root=root, intent="X.")
+    original = open(path, encoding="utf-8").read()
+    for _ in range(5):
+        fm, body = pl._parse_program_file(path)
+        pl._write_program_file(path, fm, body)
+    assert open(path, encoding="utf-8").read() == original
+
+
+def test_write_heals_accumulated_leading_blank_lines(tmp_path):
+    root = str(tmp_path)
+    _, path = pl.create_program(type="weekly-priorities", title="Bloat",
+                                owner_role="product", root=root, intent="X.")
+    original = open(path, encoding="utf-8").read()
+    head, sep, rest = original.partition("---\n## Intent")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(head + "---\n" + "\n" * 40 + "## Intent" + rest)
+    fm, body = pl._parse_program_file(path)
+    pl._write_program_file(path, fm, body)
+    assert open(path, encoding="utf-8").read() == original

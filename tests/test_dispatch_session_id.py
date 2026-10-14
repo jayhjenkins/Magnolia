@@ -67,3 +67,37 @@ def test_build_claude_cmd_accepts_explicit_session_id():
     cmd, sid = td.build_claude_cmd(prompt="x", model="m", tools_str="Read(*)", max_turns="30", session_id="FIXED-SID")
     assert sid == "FIXED-SID"
     assert cmd[cmd.index("--session-id") + 1] == "FIXED-SID"
+
+
+def test_dispatch_marks_running_after_launch(monkeypatch):
+    """Regression: a worker that never ran agent:start left agent_status empty,
+    so the dispatch-sweep re-dispatched it every 60s (four duplicate workers).
+    dispatch_task must stamp agent_status=running once the launch succeeds."""
+    monkeypatch.setattr("profile_lib.cost_posture", lambda root=None: "balanced")
+    monkeypatch.setattr(td.subprocess, "Popen", _FakeProc)
+    monkeypatch.setattr(td.task_lib, "read_task",
+                        lambda task_id: {"frontmatter": {"agent_status": None}})
+    updates = []
+    monkeypatch.setattr(td.task_lib, "update_task",
+                        lambda task_id, changes, **k: updates.append(changes))
+
+    td.dispatch_task({"id": "TASK-1", "title": "t", "priority": "medium"})
+
+    assert any(u.get("agent_status") == "running" for u in updates)
+
+
+def test_mark_running_leaves_existing_status(monkeypatch):
+    monkeypatch.setattr(td.task_lib, "read_task",
+                        lambda task_id: {"frontmatter": {"agent_status": "queued"}})
+    updates = []
+    monkeypatch.setattr(td.task_lib, "update_task",
+                        lambda task_id, changes, **k: updates.append(changes))
+    td._mark_running("TASK-1")
+    assert updates == []
+
+
+def test_mark_running_swallows_failure(monkeypatch):
+    def _boom(*a, **k):
+        raise FileNotFoundError("boom")
+    monkeypatch.setattr(td.task_lib, "read_task", _boom)
+    assert td._mark_running("TASK-1") is None
