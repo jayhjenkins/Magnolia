@@ -72,4 +72,4 @@ Most commands say "MANDATORY: use the X skill" and reference the path. Auto-disc
 
 ## Tools & Permissions
 
-Default-allow: file read/write, dir listing, diffs, local shell in safe paths. Ask before: MCP tools that modify external systems (Asana, HubSpot, Jira publish), deleting files. Prefer create/append; minimal idempotent diffs.
+Default-allow: file read/write, dir listing, diffs, local shell in safe paths. Ask before: MCP tools that modify external systems (Asana, HubSpot, Jira publish), deleting files. Edit artifacts in place when iterating (no `-v2` copies); minimal idempotent diffs.

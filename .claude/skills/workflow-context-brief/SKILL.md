@@ -26,7 +26,7 @@ Phase 1 of the product package. Turn a topic, transcript, or hunch into `{packag
 
 ## Output
 
-`{package}/context-brief.md`, following `datasets/product/templates/context-brief.md`. If a brief already exists, write `context-brief-v2.md` (next free suffix) and leave the original untouched.
+`{package}/context-brief.md`, following `datasets/product/templates/context-brief.md`. If a brief already exists, revise it in place.
 
 ## Workflow
 
@@ -89,7 +89,7 @@ PASS requires **at least one clearly stated customer problem backed by data**: t
 | Uncited claims stated as fact | Add `[E#]` or label *(PM assertion)* / *(assumption)* |
 | Blocking because analytics is not connected | Note it under Sources not available; continue |
 | Passing Gate 1 on PM assertion alone | Gate 1 needs at least one real data source |
-| Overwriting an existing brief | Write `context-brief-v2.md` |
+| Writing `context-brief-v2.md` | Revise the existing `context-brief.md` in place |
 | Hardcoding a person, team, or company name | Read it from the profile |
 
 ## Success Criteria

@@ -26,7 +26,7 @@ When extending the system — a new worker, card-type, or adapter — use the ma
 
 ## 6. Output conventions
 
-Never delete generated artifacts — append a version suffix (`v1`, `v2`); that's invariant #6 in [`invariants.md`](./invariants.md). Default to markdown with clear headings, and use a `*-draft.md` suffix when you're unsure the artifact is final. Maintain `status.json` for processing state and `progress.md` for human notes.
+Iterating on an artifact edits it in place — revise the file the card points at, and make a new copy only when the operator asks; that's invariant #6 in [`invariants.md`](./invariants.md). Default to markdown with clear headings, and use a `*-draft.md` suffix when you're unsure the artifact is final. Maintain `status.json` for processing state and `progress.md` for human notes.
 
 ## 7. Dev vs prod safety
 

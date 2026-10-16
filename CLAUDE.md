@@ -9,7 +9,7 @@ This is the team-portable **PM-OS engine**: a calm chief-of-staff system built f
 3. Card definitions reference theme tokens ONLY — never a hardcoded color, radius, or transition.
 4. Capture team/person nuance to the PROFILE, never into a generated artifact.
 5. Anything that writes to the outside world is Tier-2: exactly one plain-language confirm before its first external action.
-6. Never delete generated artifacts — append a version suffix (`v1`, `v2`).
+6. Iterating on an artifact edits it in place — revise the file the card points at; make a new copy only when the operator asks. Never delete a generated artifact unless asked.
 7. `~/pm-os` (port `8742`) is retired and no longer in use — this repo, on `localhost:8744`, is the only install.
 
 Full laws + enforcing commands: [`docs/reference/invariants.md`](docs/reference/invariants.md) — read before acting on the engine.
@@ -93,7 +93,7 @@ otter_id: "…"                 # source meeting id (Otter or Granola)
 
 ## Output Conventions
 
-- Never delete generated artifacts — append version suffixes (`v1`, `v2`) (invariant #6).
+- Iterating on an artifact edits it in place; a new copy only when asked; never delete one unless asked (invariant #6).
 - Maintain `status.json` for processing state, `progress.md` for human notes.
 - Historical snapshots for roadmaps and decisions.
 - Default to markdown with clear headings; `*-draft.md` if unsure.
@@ -102,12 +102,12 @@ otter_id: "…"                 # source meeting id (Otter or Granola)
 
 - Allowed: file read/write, dir listing, diffs, local shell ops in safe paths.
 - Ask first: file deletion, and anything that writes to the outside world — that's Tier-2 (invariant #5).
-- Prefer create/append over overwrite.
+- Edit artifacts in place when iterating; don't create copies.
 
 ## Safety Rails
 
 - Operate within the engine repo unless explicitly instructed otherwise (invariant #7 — `~/pm-os` is retired and no longer in use, so there's no separate install to avoid).
-- Never overwrite large files without confirmation.
+- Never overwrite large files you didn't produce without confirmation (iterating on an artifact is an in-place edit, not an overwrite).
 - When unsure of a path, list directories first.
 - For batch operations, show a plan and await approval.
 - **Magnolia runs natively on macOS and Windows** — never recommend WSL, Ubuntu, or a Linux VM to make it work. A script that errors on Windows is a portability bug to fix natively (the OS seam is `scripts/platform_lib.py`), not a reason to install a Unix layer.

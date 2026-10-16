@@ -22,7 +22,7 @@ Run the PM discovery conversation and gather cited evidence (meetings, plus prod
 
 ## Output
 
-`datasets/product/packages/{YYYY}/{slug}/context-brief.md` (template: `datasets/product/templates/context-brief.md`). An existing brief is never overwritten; a new version gets a `-v2` suffix.
+`datasets/product/packages/{YYYY}/{slug}/context-brief.md` (template: `datasets/product/templates/context-brief.md`). An existing brief is revised in place.
 
 ## Gate
 
