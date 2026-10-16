@@ -301,7 +301,7 @@ context_session: "[Path to Session Folder]"
 After memo generation:
 1. **Session Archive**: Move session folder to `/datasets/strategy/archive/{YYYY}/`
 2. **Link Preservation**: Memo includes link back to archived session
-3. **Version Control**: If memo needs updates, create `{slug}_v2.md`
+3. **Updates**: If the memo needs updates, edit it in place
 
 ### Integration Points
 - **Future Sessions**: Memo becomes context for related decisions

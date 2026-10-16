@@ -581,6 +581,9 @@ def build_prompt_for_worker(task_id, worker, rerun=False):
      they conflict — the human is telling you what to fix.
    - Read any previous agent output file if referenced — understand what was
      produced before so you can improve on it rather than starting blind.
+   - EDIT IN PLACE: revise the existing output file and complete with the same
+     --output path. Do NOT create a -v2 or re-dated copy - the card only opens
+     the file it already points at.
    - Do NOT repeat the same approach that failed. Address the feedback explicitly.
 
 """ if rerun else ""
@@ -655,6 +658,9 @@ def build_prompt(task_id, rerun=False):
      they conflict — the human is telling you what to fix.
    - Read any previous agent output file if referenced — understand what was
      produced before so you can improve on it rather than starting blind.
+   - EDIT IN PLACE: revise the existing output file and complete with the same
+     --output path. Do NOT create a -v2 or re-dated copy - the card only opens
+     the file it already points at.
    - Do NOT repeat the same approach that failed. Address the feedback explicitly.
 
 """ if rerun else ""
